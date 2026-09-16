@@ -13,6 +13,8 @@ flowchart LR
   Bridge --> Picker[QuickPickerController]
   Picker --> Win[Windows runner\n托盘/热键/窗口]
   Clipboard --> Win
+  Picker --> Mac[macOS runner\n菜单栏/热键/窗口]
+  Clipboard --> Mac
   Bridge --> Android[Android MainActivity\n分享/剪贴板]
   Android --> Overlay[FloatingPanelService]
 ```
@@ -38,7 +40,7 @@ Flutter 业务层不直接依赖具体平台 API。`StickerRepository` 和 `Impo
 
 ## 3. 持久化层
 
-`StickerDatabase` 使用 `sqflite_common_ffi`（Windows）或 SQLite（Android），当前 schema 版本为 3，缩略图生成器版本为 2。
+`StickerDatabase` 使用 `sqflite_common_ffi`（Windows、macOS）或 SQLite（Android），当前 schema 版本为 3，缩略图生成器版本为 2。
 
 ```text
 stickers
@@ -124,3 +126,9 @@ thumbnails/<hash>_thumb.png   # 可选
 - 新导入来源实现 `ImportSource`，保留“来源标记、预览确认、哈希去重”的流程。
 - 新平台在 `PlatformBridge` 后增加剪贴板、分享和窗口适配，不把 Win32/Android 类型泄漏到领域模型。
 - 迁移格式升版时保留旧版本读取器，并在 `DECISIONS.md` 和 `CHANGELOG.md` 记录兼容策略。
+
+## macOS 平台实现
+
+`macos/Runner/MainFlutterWindow.swift` 注册共享方法通道并写入 `NSPasteboard`。原生解码不支持的静态格式由 Flutter 解码后转换为 PNG。`AppDelegate` 保持关闭窗口后的进程，并在 Dock 重开时通知 Dart 恢复主管理模式。
+
+`isDesktopPlatform` 只控制 Windows/macOS 共享的桌面界面与窗口行为。Windows 导入探测、HWND 操作、发送和兼容性记录保留独立条件。macOS 使用系统文件选择器。菜单栏直接读取 Windows ICO 资源，并显示原始颜色。macOS 应用图标由 Xcode scheme 在构建前调用 `tool/generate_macos_icons.sh`，使用系统 `sips` 从同一 ICO 生成 PNG；生成文件不纳入 Git。Windows/Android 构建和 Flutter 测试无需生成图标。

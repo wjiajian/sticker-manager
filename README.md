@@ -1,9 +1,8 @@
 # Sticker Manager
 
-Sticker Manager is a local-first image and GIF library for Windows and Android.
-The first release provides a Windows tray quick picker, an Android floating
-panel and share import, groups, notes, usage ranking, and an encrypted portable
-backup format.
+Sticker Manager is a local-first image and GIF library for Windows, macOS and Android.
+The app provides a desktop tray quick picker, an Android floating panel and
+share import, groups, notes, usage ranking, and an encrypted portable backup format.
 
 ## Current implementation
 
@@ -12,7 +11,13 @@ backup format.
   boundaries, so SQLite and Windows directory discovery can be replaced by
   another local or synced implementation later.
 - SQLite persistence with content-hash deduplication.
-- Windows and Android platform bridges are defined behind `PlatformBridge`.
+- Windows, macOS and Android platform bridges are defined behind `PlatformBridge`.
+- macOS provides a menu bar icon, a configurable `Cmd+Shift+E` global hotkey,
+  a compact picker, right-click management and keyboard/mouse multi-selection.
+  Closing the window keeps the app available from the menu bar or Dock.
+  Static images are copied as PNG; GIFs retain their original data and file URL.
+  Switch to the destination app and press `Cmd+V` to paste. A successful copy
+  counts as usage on macOS; automatic paste and Enter are Windows-only.
 - Windows import only scans identified emotion folders and falls back to a file
   picker when no known folder is found. QQNT paths include
   `Tencent Files\<QQ号>\nt_qq\nt_data\Emoji\personal_emoji\Ori`,
@@ -60,6 +65,49 @@ backup format.
   by source from `设置 -> 清理导入记录`; only app-managed copies are deleted.
 
 ## Run
+
+On macOS, install the full Xcode application, its command line tools and CocoaPods,
+then use Flutter 3.47.3 on `PATH`:
+
+```sh
+flutter pub get
+flutter run -d macos
+```
+
+Windows, macOS and the macOS menu bar currently share the Flutter default artwork
+from `windows/runner/resources/app_icon.ico`. The macOS menu bar reads this ICO
+directly. The Xcode scheme runs `tool/generate_macos_icons.sh` before macOS builds,
+using the built-in `sips` tool to generate the sizes declared in
+`AppIcon.appiconset/Contents.json`. This applies to Flutter CLI, Xcode and Actions
+builds. Generated PNGs are ignored by Git. Windows/Android builds and Flutter
+tests do not require icon generation. The source currently contains a 256-pixel
+PNG; larger app icon sizes are upscaled from it.
+
+The macOS deployment target is 12.0. Import files through the system file picker;
+automatic QQ/WeChat directory discovery is available only on Windows. The macOS
+sandbox allows user-selected files for import and encrypted backup export.
+
+To create a macOS release app and ZIP:
+
+```sh
+flutter pub get
+bash tool/build_macos.sh
+```
+
+The ZIP in `dist/` preserves the `.app` bundle, executable permissions and framework
+symlinks. CI artifacts are test builds without Developer ID signing or notarization.
+Public macOS distribution requires an Apple Developer identity and notarization.
+
+## GitHub Actions
+
+`.github/workflows/ci.yml` runs on pushes, pull requests and manual dispatch.
+Each macOS, Windows and Android job restores dependencies, verifies project files,
+runs analysis and tests, and builds a release artifact. macOS also executes the
+native clipboard tests. Download the ZIP or APK from the workflow's artifacts.
+The Android APK uses the existing debug-signing fallback and is for testing.
+The workflow does not publish a GitHub Release or require signing secrets.
+
+## Windows and Android development
 
 Flutter 3.47.3 or a compatible Flutter SDK is required. Set `FLUTTER_ROOT`
 to the SDK directory, or make `flutter.bat` available on `PATH`. From this

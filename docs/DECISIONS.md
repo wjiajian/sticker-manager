@@ -147,3 +147,13 @@ Windows 使用单实例互斥体。后续启动只激活已有窗口，并通过
 **日期：** 2026-09-16  **状态：** 已采纳
 
 Windows ZIP 采用便携分发，不强制安装程序或管理员权限。为让首次使用者能在解压目录中快速找到入口，ZIP 根目录必须包含 `README_FIRST.txt` 和 `Start-StickerManager.cmd`；启动脚本只调用同目录的 `sticker_manager.exe`，不执行安装、联网或修改系统设置。直接双击可执行文件仍然受支持。
+
+## ADR-022：macOS 采用原生剪贴板与共享桌面交互
+
+**日期：** 2026-09-16  **状态：** 已采纳
+
+macOS 工程使用 Flutter 3.47.3 官方模板，最低系统版本为 12。`QuickPickerController` 复用窗口管理、菜单栏图标和全局快捷键，默认组合为 `Cmd+Shift+E`。Windows 的目标窗口捕获和按键注入仍限定在 Windows，macOS 成功复制计为一次使用，由用户切换目标应用并粘贴，因此不需要辅助功能授权。
+
+`MainFlutterWindow` 通过 `sticker_manager/platform` 实现 `copySticker`。静态图片转换为 PNG；GIF 同时写入原始数据和文件 URL，以保留动画。文件选择后立即复制到应用管理目录；Debug 和 Release 均允许沙箱内访问用户选择的文件。数据库 schema 和迁移包格式不变。
+
+Actions 分别验证并构建 Windows、macOS 和 Android。macOS 使用 `ditto` 创建保留应用包结构的 ZIP，CI 产物用于测试。公开分发所需的 Developer ID 签名、公证和 Android 正式签名由发布环境另行配置。

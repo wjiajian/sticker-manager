@@ -7,6 +7,7 @@ import '../models.dart';
 import '../services/async_mutex.dart';
 import '../services/quick_picker_controller.dart';
 import 'clipboard_bridge.dart';
+import 'desktop_platform.dart';
 
 enum StickerUseStatus { copied, sent, failed }
 
@@ -54,7 +55,7 @@ class PlatformBridge {
   }
 
   Future<void> initialize() async {
-    if (Platform.isWindows) {
+    if (isDesktopPlatform) {
       await windowManager.ensureInitialized();
       return;
     }
@@ -68,6 +69,12 @@ class PlatformBridge {
 
   Future<StickerUseResult> useSticker(Sticker sticker) async {
     if (Platform.isWindows) return _useWindows(sticker);
+    if (Platform.isMacOS) {
+      final copied = await ClipboardBridge.instance.writeSticker(sticker);
+      return copied
+          ? const StickerUseResult.copied(message: '已复制，请切换到目标应用按 ⌘V 粘贴')
+          : const StickerUseResult.failed('无法写入 macOS 剪贴板');
+    }
     if (!Platform.isAndroid) {
       return const StickerUseResult.failed('当前平台不支持系统剪贴板');
     }
@@ -88,7 +95,7 @@ class PlatformBridge {
   }
 
   Future<void> showQuickPicker() async {
-    if (!Platform.isWindows) return;
+    if (!isDesktopPlatform) return;
     final picker = QuickPickerController.instance;
     await picker.captureExternalWindow();
     await picker.enterQuickPickerMode();

@@ -14,6 +14,13 @@ const required = [
   'lib/platform/platform_bridge.dart',
   'android/app/src/main/AndroidManifest.xml',
   'android/app/src/main/kotlin/com/example/sticker_manager/MainActivity.kt',
+  'macos/Runner/MainFlutterWindow.swift',
+  'macos/Runner/AppDelegate.swift',
+  'macos/Runner.xcodeproj/project.pbxproj',
+  'macos/Runner/Release.entitlements',
+  'tool/generate_macos_icons.sh',
+  '.github/workflows/ci.yml',
+  'tool/build_macos.sh',
   'tool/install_windows.ps1',
   'tool/uninstall_windows.ps1',
 ];

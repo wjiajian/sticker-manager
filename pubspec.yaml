@@ -1,5 +1,5 @@
 name: sticker_manager
-description: A local-first cross-platform sticker manager for Windows and Android.
+description: A local-first cross-platform sticker manager for Windows, macOS and Android.
 publish_to: "none"
 version: 0.1.0+1
 

@@ -79,3 +79,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Icons derived from windows/runner/resources/app_icon.ico
+/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_*.png

@@ -12,6 +12,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:uni_platform/uni_platform.dart';
 import 'package:win32/win32.dart';
 import 'package:window_manager/window_manager.dart';
+import '../platform/desktop_platform.dart';
 import 'preferences.dart';
 import 'async_mutex.dart';
 
@@ -30,7 +31,10 @@ class QuickPickerController with TrayListener, WindowListener {
   static const _windowMaximizedKey = 'managementWindowMaximized';
   static final _defaultHotKey = HotKey(
     key: PhysicalKeyboardKey.keyE,
-    modifiers: [HotKeyModifier.control, HotKeyModifier.shift],
+    modifiers: [
+      Platform.isMacOS ? HotKeyModifier.meta : HotKeyModifier.control,
+      HotKeyModifier.shift,
+    ],
     scope: HotKeyScope.system,
   );
   HWND? _previousWindow;
@@ -59,13 +63,14 @@ class QuickPickerController with TrayListener, WindowListener {
   bool get isQuickPickerMode => _mode == QuickPickerMode.quick;
 
   Future<void> initialize() async {
-    if (!Platform.isWindows || _initialized) return;
+    if (!isDesktopPlatform || _initialized) return;
     _initialized = true;
     try {
       _hotKey = await _preferences.hotKeyConfig() ?? _defaultHotKey;
       await windowManager.ensureInitialized();
       windowManager.addListener(this);
       await _restoreManagementWindowState();
+      if (Platform.isMacOS) await windowManager.setPreventClose(true);
       try {
         _applicationWindow =
             await _channel.invokeMethod<int>('getWindowHandle');
@@ -81,12 +86,17 @@ class QuickPickerController with TrayListener, WindowListener {
         }
         return null;
       });
-      final iconData =
-          await rootBundle.load('windows/runner/resources/app_icon.ico');
-      final temporary = await getTemporaryDirectory();
-      final icon = File(path.join(temporary.path, 'sticker-manager-tray.ico'));
-      await icon.writeAsBytes(iconData.buffer.asUint8List(), flush: true);
-      await trayManager.setIcon(icon.path);
+      if (Platform.isMacOS) {
+        // AppKit decodes the same ICO asset used by Windows.
+        await trayManager.setIcon('windows/runner/resources/app_icon.ico');
+      } else {
+        final iconData =
+            await rootBundle.load('windows/runner/resources/app_icon.ico');
+        final temporary = await getTemporaryDirectory();
+        final icon = File(path.join(temporary.path, 'sticker-manager-tray.ico'));
+        await icon.writeAsBytes(iconData.buffer.asUint8List(), flush: true);
+        await trayManager.setIcon(icon.path);
+      }
       await trayManager.setToolTip('表情管家');
       await trayManager.setContextMenu(Menu(items: [
         MenuItem(key: 'show_window', label: '打开表情管家'),
@@ -162,7 +172,7 @@ class QuickPickerController with TrayListener, WindowListener {
   }
 
   Future<void> _enterQuickPickerMode() async {
-    if (!Platform.isWindows) {
+    if (!isDesktopPlatform) {
       // Notify the UI even when the shared window is already in quick mode.
       // The window can be hidden while its mode remains quick; in that case
       // the next invocation still needs to clear any transient management
@@ -195,7 +205,7 @@ class QuickPickerController with TrayListener, WindowListener {
   }
 
   Future<void> _enterManagementMode({required bool force}) async {
-    if (!Platform.isWindows) {
+    if (!isDesktopPlatform) {
       _setMode(QuickPickerMode.management);
       return;
     }
@@ -311,7 +321,7 @@ class QuickPickerController with TrayListener, WindowListener {
       _captureExternalWindow(fromHotKey: false, allowRecentManual: true);
 
   Future<bool> updateHotKey(HotKey next) async {
-    if (!Platform.isWindows || !_isUsableHotKey(next)) return false;
+    if (!isDesktopPlatform || !_isUsableHotKey(next)) return false;
     final previous = _hotKey;
     final previousRegistered = _hotKeyRegistered;
     if (previous?.debugName == next.debugName) return true;
@@ -354,7 +364,7 @@ class QuickPickerController with TrayListener, WindowListener {
   bool get hotKeyRegistrationUnavailable => _hotKeyRegistrationUnavailable;
 
   Future<bool> _isHotKeyAvailable(HotKey value) async {
-    if (!Platform.isWindows) return true;
+    if (!isDesktopPlatform) return true;
     try {
       return await _channel.invokeMethod<bool>('isHotKeyAvailable', {
             'keyCode': value.physicalKey.keyCode,
@@ -515,7 +525,7 @@ class QuickPickerController with TrayListener, WindowListener {
   }
 
   Future<void> dispose() async {
-    if (!Platform.isWindows || !_initialized) return;
+    if (!isDesktopPlatform || !_initialized) return;
     ++_targetCaptureGeneration;
     await _rememberManagementWindowState();
     _initialized = false;
@@ -605,6 +615,7 @@ class QuickPickerController with TrayListener, WindowListener {
     // Closing/hiding the full window ends the one-shot send context. A later
     // tray open will capture a fresh foreground target.
     discardPreviousWindow();
+    if (Platform.isMacOS) unawaited(windowManager.hide());
   }
 
   Future<void> _showTrayContextMenu() async {
@@ -631,6 +642,7 @@ class QuickPickerController with TrayListener, WindowListener {
   }
 
   Future<void> _setNativeQuickPickerActive(bool active) async {
+    if (!Platform.isWindows) return;
     try {
       await _channel
           .invokeMethod<void>('setQuickPickerActive', {'active': active});
@@ -649,7 +661,7 @@ class QuickPickerController with TrayListener, WindowListener {
   }
 
   Future<void> _restoreManagementWindowState() async {
-    if (!Platform.isWindows) return;
+    if (!isDesktopPlatform) return;
     try {
       final preferences = await SharedPreferences.getInstance();
       final width = _validWindowDimension(
@@ -672,7 +684,7 @@ class QuickPickerController with TrayListener, WindowListener {
   }
 
   Future<void> _rememberManagementWindowState() async {
-    if (!Platform.isWindows || _mode != QuickPickerMode.management) return;
+    if (!isDesktopPlatform || _mode != QuickPickerMode.management) return;
     try {
       final maximized = await windowManager.isMaximized();
       final preferences = await SharedPreferences.getInstance();
@@ -697,7 +709,7 @@ class QuickPickerController with TrayListener, WindowListener {
   }
 
   void _scheduleManagementWindowStateSave() {
-    if (!Platform.isWindows || _mode != QuickPickerMode.management) return;
+    if (!isDesktopPlatform || _mode != QuickPickerMode.management) return;
     _windowStateSaveTimer?.cancel();
     _windowStateSaveTimer = Timer(const Duration(milliseconds: 350), () {
       unawaited(_rememberManagementWindowState());
@@ -716,7 +728,7 @@ class QuickPickerController with TrayListener, WindowListener {
 
   @override
   void onWindowMaximize() {
-    if (!Platform.isWindows || _mode != QuickPickerMode.management) return;
+    if (!isDesktopPlatform || _mode != QuickPickerMode.management) return;
     unawaited(SharedPreferences.getInstance().then(
       (preferences) => preferences.setBool(_windowMaximizedKey, true),
     ));

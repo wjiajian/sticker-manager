@@ -11,6 +11,7 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:path/path.dart' as path;
 
 import 'models.dart';
+import 'platform/desktop_platform.dart';
 import 'platform/platform_bridge.dart';
 import 'services/database.dart';
 import 'services/export_service.dart';
@@ -95,7 +96,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     QuickPickerController.instance.onPickerShown = _focusQuickPicker;
-    _quickPickerMode = Platform.isWindows &&
+    _quickPickerMode = isDesktopPlatform &&
         QuickPickerController.instance.mode == QuickPickerMode.quick;
     QuickPickerController.instance.onModeChanged = _handlePickerModeChanged;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -131,7 +132,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   void _handlePickerModeChanged(QuickPickerMode mode) {
     if (!mounted) return;
     setState(() {
-      _quickPickerMode = Platform.isWindows && mode == QuickPickerMode.quick;
+      _quickPickerMode = isDesktopPlatform && mode == QuickPickerMode.quick;
       _focusedStickerIndex = _visibleStickers.isEmpty ? -1 : 0;
       // Quick mode is a send-only surface. A selection left over from the
       // management window must not turn its first click into another toggle.
@@ -1237,7 +1238,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
 
   Future<void> _showStickerContextMenu(
       RankedSticker entry, Offset globalPosition) async {
-    if (!Platform.isWindows || !mounted) return;
+    if (!isDesktopPlatform || !mounted) return;
     final overlay = Overlay.of(context).context.findRenderObject();
     if (overlay is! RenderBox) return;
     final localPosition = overlay.globalToLocal(globalPosition);
@@ -1444,7 +1445,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   }
 
   void _handleGridPointerDown(PointerDownEvent event) {
-    if (!_selectionMode || !Platform.isWindows) return;
+    if (!_selectionMode || !isDesktopPlatform) return;
     final isSecondary = (event.buttons & kSecondaryMouseButton) != 0;
     final isPrimary = (event.buttons & kPrimaryMouseButton) != 0;
     if (isSecondary) {
@@ -1461,7 +1462,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
 
   void _handleGridPointerMove(PointerMoveEvent event) {
     if (!_selectionMode ||
-        !Platform.isWindows ||
+        !isDesktopPlatform ||
         _selectionPointerSecondary ||
         (event.buttons & kPrimaryMouseButton) == 0) {
       return;
@@ -1471,7 +1472,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   }
 
   void _handleGridPointerUp(PointerUpEvent event) {
-    if (!_selectionMode || !Platform.isWindows) return;
+    if (!_selectionMode || !isDesktopPlatform) return;
     if (_selectionPointerSecondary) {
       _selectionPointerSecondary = false;
       return;
@@ -1480,13 +1481,13 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   }
 
   void _handleGridPointerCancel(PointerCancelEvent event) {
-    if (!_selectionMode || !Platform.isWindows) return;
+    if (!_selectionMode || !isDesktopPlatform) return;
     _selectionPointerSecondary = false;
     _finishSelectionDrag();
   }
 
   void _handleGridPointerSignal(PointerSignalEvent event) {
-    if (!_selectionMode || !Platform.isWindows) return;
+    if (!_selectionMode || !isDesktopPlatform) return;
     if (event is! PointerScrollEvent || !_gridScrollController.hasClients) {
       return;
     }
@@ -1784,7 +1785,8 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     await _recordCompatibility(entry.sticker, result);
     final countsAsUsage = result.succeeded &&
         (result.didPaste ||
-            (Platform.isAndroid && result.status == StickerUseStatus.copied));
+            ((Platform.isAndroid || Platform.isMacOS) &&
+                result.status == StickerUseStatus.copied));
     if (countsAsUsage) {
       await _database.recordUsage(entry.sticker.id, DateTime.now());
       await _load();
@@ -1793,7 +1795,9 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
             (result.status == StickerUseStatus.copied
                 ? Platform.isWindows
                     ? '已复制 ${path.basename(entry.sticker.filePath)}，当前没有发送目标窗口'
-                    : '已复制到系统剪贴板'
+                    : Platform.isMacOS
+                        ? '已复制，请切换到目标应用按 ⌘V 粘贴'
+                        : '已复制到系统剪贴板'
                 : result.status == StickerUseStatus.sent
                     ? '已粘贴并发送到 ${result.targetApplication ?? '目标窗口'}'
                     : null);
@@ -1803,7 +1807,9 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
       if (mounted) {
         _showMessage(Platform.isWindows
             ? '已复制 ${path.basename(entry.sticker.filePath)}，当前没有发送目标窗口'
-            : '已复制到系统剪贴板');
+            : Platform.isMacOS
+                ? '已复制，请切换到目标应用按 ⌘V 粘贴'
+                : '已复制到系统剪贴板');
       }
     } else if (mounted) {
       _showMessage(result.message ?? '复制或发送失败');
@@ -1970,7 +1976,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                                         : null,
                                     child: GridView.builder(
                                       controller: _gridScrollController,
-                                      physics: Platform.isWindows &&
+                                      physics: isDesktopPlatform &&
                                               _selectionMode
                                           ? const NeverScrollableScrollPhysics()
                                           : null,
@@ -2108,7 +2114,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                 }
               },
               itemBuilder: (context) => [
-                if (Platform.isWindows)
+                if (isDesktopPlatform)
                   const PopupMenuItem(value: 'hotkey', child: Text('设置快速唤出热键')),
                 if (Platform.isWindows)
                   const PopupMenuItem(
@@ -2233,7 +2239,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   }
 
   Future<void> _configureHotKey() async {
-    if (!Platform.isWindows) return;
+    if (!isDesktopPlatform) return;
     HotKey? recorded;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -2439,7 +2445,7 @@ class _StickerCardState extends State<_StickerCard> {
           onTap: _handleTap,
           onDoubleTap: _handleDoubleTap,
           onLongPress: widget.onLongPress,
-          onSecondaryTapDown: Platform.isWindows
+          onSecondaryTapDown: isDesktopPlatform
               ? (details) => widget.onContextMenu(details.globalPosition)
               : null,
           child: Column(
@@ -2464,7 +2470,7 @@ class _StickerCardState extends State<_StickerCard> {
                             )
                           : const SizedBox.shrink(),
                     ),
-                    if (!Platform.isWindows)
+                    if (!isDesktopPlatform)
                       Positioned(
                         right: 4,
                         top: 4,
@@ -2475,7 +2481,7 @@ class _StickerCardState extends State<_StickerCard> {
                                 : Icons.push_pin_outlined),
                             tooltip: sticker.isPinned ? '取消置顶' : '置顶'),
                       ),
-                    if (Platform.isWindows && sticker.isPinned)
+                    if (isDesktopPlatform && sticker.isPinned)
                       const Positioned(
                         right: 8,
                         top: 8,
@@ -2487,11 +2493,11 @@ class _StickerCardState extends State<_StickerCard> {
                   ],
                 ),
               ),
-              if (!(widget.compact && Platform.isWindows))
+              if (!(widget.compact && isDesktopPlatform))
                 Padding(
                   padding:
-                      EdgeInsets.fromLTRB(10, Platform.isWindows ? 6 : 8, 6, 8),
-                  child: Platform.isWindows
+                      EdgeInsets.fromLTRB(10, isDesktopPlatform ? 6 : 8, 6, 8),
+                  child: isDesktopPlatform
                       ? Text(sticker.note.isEmpty ? '未备注' : sticker.note,
                           maxLines: 1, overflow: TextOverflow.ellipsis)
                       : Row(

@@ -2,6 +2,28 @@
 
 本项目按用户可见行为和兼容性记录变更。日期采用 `YYYY-MM-DD`；测试条目只记录已经执行或明确标注为待执行的内容。
 
+## 2026-09-16 macOS 工程与持续集成
+
+### 新增
+
+- macOS 应用图标与菜单栏图标复用现有 Windows ICO 中的 Flutter 默认图案。菜单栏直接读取 ICO；仅 macOS 构建通过 Xcode scheme 调用系统 `sips` 生成应用图标 PNG，生成文件不纳入 Git。Windows/Android 构建恢复原有流程，Flutter 测试无需准备图标，图标生成不再依赖 Node.js。
+- 使用 Flutter 3.47.3 官方模板创建 macOS 工程，最低系统版本为 macOS 12，包含沙箱文件选择权限与原生剪贴板方法通道。
+- macOS 提供菜单栏图标、可配置的 `Cmd+Shift+E` 快捷键、快速选择窗口、关闭隐藏及 Dock 恢复、右键管理和鼠标框选。
+- 静态图片复制为 PNG，GIF 保留原始数据和文件 URL。成功复制计入使用次数，用户切换目标应用后按 `Cmd+V` 粘贴；macOS 不模拟粘贴或回车。
+- Actions 在推送、PR 和手动触发时分析、测试并构建 Windows、macOS、Android，上传桌面 ZIP 和测试 APK。macOS ZIP 使用 `ditto` 保留应用包结构，工作流包含原生剪贴板 XCTest。
+- 数据库 schema 和迁移包格式保持不变，Windows 专属目录探测与自动发送保持原有行为。
+
+### 已执行验证
+
+- Flutter 3.47.3：`flutter analyze --no-pub` 通过，`flutter test --no-pub` 31 项通过。
+- 自定义 Swift 桥接使用 Flutter SDK 头文件完成类型检查；工程 plist、entitlements、Podfile、构建脚本和工作流 YAML 语法检查通过。
+- `node tool/verify_project.mjs` 和 `git diff --check` 通过。
+
+### 待验证
+
+- 本机仅有 Command Line Tools，`flutter build macos --release --no-pub` 因缺少完整 Xcode 未执行编译。原生 XCTest、完整应用构建和菜单栏、快捷键、QQ/微信静态图与 GIF 粘贴仍需在完整 macOS 开发环境验证。
+- Actions 配置尚未在 GitHub 执行；CI 产物未配置 Developer ID 签名、公证或 Android 正式签名，用于测试。
+
 ## 2026-09-15 发布前修复与验证
 
 ### 修复
