@@ -18,11 +18,13 @@
 - Flutter 3.47.3：`flutter analyze --no-pub` 通过，`flutter test --no-pub` 31 项通过。
 - 自定义 Swift 桥接使用 Flutter SDK 头文件完成类型检查；工程 plist、entitlements、Podfile、构建脚本和工作流 YAML 语法检查通过。
 - `node tool/verify_project.mjs` 和 `git diff --check` 通过。
+- GitHub Actions 已完成 macOS Release 构建、3 项原生剪贴板 XCTest 和 ZIP 上传；Windows 构建及 ZIP 上传也已通过。
+- Android 初始化明确安装 `platform-tools`，避免初始化 Action 默认请求已移除的 `tools` 包。
 
 ### 待验证
 
-- 本机仅有 Command Line Tools，`flutter build macos --release --no-pub` 因缺少完整 Xcode 未执行编译。原生 XCTest、完整应用构建和菜单栏、快捷键、QQ/微信静态图与 GIF 粘贴仍需在完整 macOS 开发环境验证。
-- Actions 配置尚未在 GitHub 执行；CI 产物未配置 Developer ID 签名、公证或 Android 正式签名，用于测试。
+- macOS 菜单栏、快捷键及 QQ/微信静态图与 GIF 粘贴仍需交互验收。
+- CI 产物未配置 Developer ID 签名、公证或 Android 正式签名，用于测试。
 
 ## 2026-09-15 发布前修复与验证
 
