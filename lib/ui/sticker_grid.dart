@@ -23,6 +23,7 @@ class StickerGrid extends StatefulWidget {
     required this.selectionMode,
     required this.selectedIds,
     required this.focusedIndex,
+    this.showKeyboardFocus = true,
     required this.scrollController,
     required this.onMetricsChanged,
     required this.onUse,
@@ -44,6 +45,7 @@ class StickerGrid extends StatefulWidget {
   final bool selectionMode;
   final Set<String> selectedIds;
   final int focusedIndex;
+  final bool showKeyboardFocus;
   final ScrollController scrollController;
   final ValueChanged<GridMetrics> onMetricsChanged;
   final ValueChanged<RankedSticker> onUse;
@@ -289,7 +291,8 @@ class _StickerGridState extends State<StickerGrid> {
                     entry: entry,
                     selectionMode: widget.selectionMode,
                     selected: widget.selectedIds.contains(entry.sticker.id),
-                    keyboardFocused: index == widget.focusedIndex,
+                    keyboardFocused: widget.showKeyboardFocus &&
+                        index == widget.focusedIndex,
                     onUse: () => widget.onUse(entry),
                     onSelect: () => _handleCardSelect(entry),
                     onCopy: () => widget.onCopy(entry),

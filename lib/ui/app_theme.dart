@@ -6,18 +6,22 @@ import 'package:flutter/material.dart';
 class AppTheme {
   const AppTheme._();
 
-  static const Color background = Color(0xFFF7F8FA);
-  static const Color sidebarBackground = Color(0xFFECEFF2);
+  static const Color background = Color(0xFFF6F8FA);
+  static const Color sidebarBackground = Color(0xFFEAF0F4);
   static const Color cardBackground = Color(0xFFFFFFFF);
-  static const Color accent = Color(0xFF087F78);
-  static const Color border = Color(0xFFE1E5E9);
-  static const Color primaryText = Color(0xFF20242C);
-  static const Color secondaryText = Color(0xFF737B87);
+  static const Color searchBackground = Color(0xFFEEF2F6);
+  static const Color selectionBackground = Color(0xFFD6ECEE);
+  static const Color accent = Color(0xFF008B8B);
+  static const Color hoverBorder = Color(0xFFB5DDE0);
+  static const Color border = Color(0xFFDFE6ED);
+  static const Color primaryText = Color(0xFF101828);
+  static const Color secondaryText = Color(0xFF788698);
 
-  static const double sidebarWidth = 216;
-  static const double controlHeight = 38;
-  static const double buttonRadius = 8;
-  static const double cardRadius = 12;
+  static const double sidebarWidth = 266;
+  static const double controlHeight = 54;
+  static const double secondaryControlHeight = 46;
+  static const double buttonRadius = 12;
+  static const double cardRadius = 14;
   static const double contentPadding = 24;
   static const double gridSpacing = 16;
 
@@ -27,7 +31,15 @@ class AppTheme {
       primary: accent,
       surface: cardBackground,
     );
-    final base = ThemeData(useMaterial3: true, colorScheme: colorScheme);
+    final base = ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      fontFamilyFallback: const [
+        'PingFang SC',
+        'Microsoft YaHei',
+        'Noto Sans CJK SC',
+      ],
+    );
     return base.copyWith(
       scaffoldBackgroundColor: background,
       textTheme: base.textTheme.apply(
@@ -59,6 +71,9 @@ class AppTheme {
           backgroundColor: accent,
           foregroundColor: Colors.white,
           minimumSize: const Size(0, controlHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          textStyle: base.textTheme.labelLarge!
+              .copyWith(fontSize: 18, fontWeight: FontWeight.w500),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(buttonRadius),
           ),
@@ -67,7 +82,11 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: primaryText,
+          backgroundColor: cardBackground,
           minimumSize: const Size(0, controlHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          textStyle: base.textTheme.labelLarge!
+              .copyWith(fontSize: 18, fontWeight: FontWeight.w400),
           side: const BorderSide(color: border),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(buttonRadius),

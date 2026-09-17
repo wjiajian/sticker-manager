@@ -1923,47 +1923,60 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
         : '搜索到 ${visible.length} 个表情';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.contentPadding, 16, AppTheme.contentPadding, 12),
-      child: Row(
-        children: [
-          Flexible(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Flexible(
-                  child: Text(
-                    _currentGroupName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  countLabel,
-                  style: const TextStyle(
-                      fontSize: 12, color: AppTheme.secondaryText),
-                ),
-              ],
+          AppTheme.contentPadding, 24, AppTheme.contentPadding, 0),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 550;
+        final title = Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Flexible(
+              child: Text(
+                _currentGroupName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    const TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
+            const SizedBox(width: 24),
+            Text(
+              countLabel,
+              style:
+                  const TextStyle(fontSize: 16, color: AppTheme.secondaryText),
+            ),
+          ],
+        );
+        final controls = Row(mainAxisSize: MainAxisSize.min, children: [
           _buildSortControl(),
-          const SizedBox(width: 8),
+          const SizedBox(width: 16),
           _buildDensityControl(),
-        ],
-      ),
+        ]);
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              title,
+              const SizedBox(height: 16),
+              Align(alignment: Alignment.centerRight, child: controls),
+            ],
+          );
+        }
+        return Row(children: [
+          Expanded(child: title),
+          const SizedBox(width: 24),
+          controls,
+        ]);
+      }),
     );
   }
 
   Widget _buildSortControl() {
     final defaultLabel = _selectedGroup == 'qq_favorites' ? '来源顺序' : '常用优先';
     return Container(
-      height: AppTheme.controlHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      width: 164,
+      height: AppTheme.secondaryControlHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 18),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground,
         border: Border.all(color: AppTheme.border),
@@ -1973,9 +1986,14 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
         child: DropdownButton<StickerSortOrder>(
           value: _sortOrder,
           isDense: true,
-          icon: const Icon(Icons.arrow_drop_down,
-              size: 20, color: AppTheme.secondaryText),
-          style: const TextStyle(fontSize: 13, color: AppTheme.primaryText),
+          isExpanded: true,
+          borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded,
+              size: 22, color: AppTheme.primaryText),
+          style: Theme.of(context).textTheme.bodyLarge!.copyWith(
+                fontSize: 18,
+                color: AppTheme.primaryText,
+              ),
           items: [
             DropdownMenuItem(
               value: StickerSortOrder.defaultRule,
@@ -2017,15 +2035,15 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
         ),
       ],
       child: Container(
-        width: AppTheme.controlHeight,
-        height: AppTheme.controlHeight,
+        width: AppTheme.secondaryControlHeight,
+        height: AppTheme.secondaryControlHeight,
         decoration: BoxDecoration(
           color: AppTheme.cardBackground,
           border: Border.all(color: AppTheme.border),
           borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
         ),
         child: const Icon(Icons.grid_view_outlined,
-            size: 20, color: AppTheme.secondaryText),
+            size: 24, color: AppTheme.primaryText),
       ),
     );
   }
@@ -2046,15 +2064,15 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
         const PopupMenuItem(value: 'cleanup', child: Text('清理导入记录')),
       ],
       child: Container(
-        width: AppTheme.controlHeight,
-        height: AppTheme.controlHeight,
+        width: quickPicker ? 38 : AppTheme.controlHeight,
+        height: quickPicker ? 38 : AppTheme.controlHeight,
         decoration: BoxDecoration(
           color: AppTheme.cardBackground,
           border: Border.all(color: AppTheme.border),
           borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
         ),
-        child: const Icon(Icons.more_horiz,
-            size: 20, color: AppTheme.secondaryText),
+        child:
+            const Icon(Icons.more_horiz, size: 26, color: AppTheme.primaryText),
       ),
     );
   }
@@ -2065,34 +2083,38 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
       child: KeyboardListener(
         focusNode: _gridFocusNode,
         onKeyEvent: _handleGridKey,
-        child: StickerGrid(
-          stickers: visible,
-          density: _density,
-          quickPicker: _quickPickerMode,
-          selectionMode: _selectionMode,
-          selectedIds: _selectedStickerIds,
-          focusedIndex: _focusedStickerIndex,
-          scrollController: _gridScrollController,
-          onMetricsChanged: _handleGridMetricsChanged,
-          onUse: (entry) => unawaited(_useSticker(entry)),
-          onSelect: _toggleSelected,
-          onDragSelection: (ids) => setState(() {
-            _selectedStickerIds
-              ..clear()
-              ..addAll(ids);
-          }),
-          onExitSelection: _exitSelectionMode,
-          onCopy: (entry) => unawaited(_copySticker(entry)),
-          onLongPress: Platform.isAndroid
-              ? (entry) => unawaited(_previewSticker(entry.sticker))
-              : _quickPickerMode
-                  ? null
-                  : _enterSelectionMode,
-          onPin: (entry) => unawaited(_togglePin(entry)),
-          onGroups: (entry) => unawaited(_manageGroups(entry)),
-          onEdit: (entry) => unawaited(_editNote(entry)),
-          onDelete: (entry) => unawaited(_deleteSticker(entry)),
-          onContextMenu: _showStickerContextMenu,
+        child: ListenableBuilder(
+          listenable: _gridFocusNode,
+          builder: (context, child) => StickerGrid(
+            stickers: visible,
+            density: _density,
+            quickPicker: _quickPickerMode,
+            selectionMode: _selectionMode,
+            selectedIds: _selectedStickerIds,
+            focusedIndex: _focusedStickerIndex,
+            showKeyboardFocus: _gridFocusNode.hasPrimaryFocus,
+            scrollController: _gridScrollController,
+            onMetricsChanged: _handleGridMetricsChanged,
+            onUse: (entry) => unawaited(_useSticker(entry)),
+            onSelect: _toggleSelected,
+            onDragSelection: (ids) => setState(() {
+              _selectedStickerIds
+                ..clear()
+                ..addAll(ids);
+            }),
+            onExitSelection: _exitSelectionMode,
+            onCopy: (entry) => unawaited(_copySticker(entry)),
+            onLongPress: Platform.isAndroid
+                ? (entry) => unawaited(_previewSticker(entry.sticker))
+                : _quickPickerMode
+                    ? null
+                    : _enterSelectionMode,
+            onPin: (entry) => unawaited(_togglePin(entry)),
+            onGroups: (entry) => unawaited(_manageGroups(entry)),
+            onEdit: (entry) => unawaited(_editNote(entry)),
+            onDelete: (entry) => unawaited(_deleteSticker(entry)),
+            onContextMenu: _showStickerContextMenu,
+          ),
         ),
       ),
     );

@@ -277,6 +277,11 @@ void main() {
       (tester) async {
     viewport(tester, const Size(1100, 760));
     await loadPage(tester);
+    Finder outline() => find.descendant(
+        of: find.byType(StickerCard),
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Container && widget.foregroundDecoration != null));
+    expect(outline(), findsNothing);
     await tester.tap(find.text('多选'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('全选当前列表'));
@@ -285,18 +290,19 @@ void main() {
         tester.widget<KeyboardListener>(find.byType(KeyboardListener));
     listener.focusNode.requestFocus();
     await tester.pump();
-    Finder outline() => find.descendant(
-        of: find.byType(StickerCard),
-        matching: find.byWidgetPredicate((widget) =>
-            widget is Container && widget.foregroundDecoration != null));
     expect(outline(), findsOneWidget);
     final before = tester.getTopLeft(outline());
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(outline(), findsOneWidget);
     expect(tester.getTopLeft(outline()), isNot(before));
+    await tester.tap(find.byTooltip('退出多选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    expect(outline(), findsNothing);
   });
-  for (final width in [360.0, 720.0, 1100.0, 1440.0]) {
+  for (final width in [360.0, 720.0, 1100.0, 1440.0, 1536.0]) {
     testWidgets('management layout fits width $width', (tester) async {
       viewport(tester, Size(width, 900));
       await loadPage(tester);

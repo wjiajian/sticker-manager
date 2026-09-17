@@ -40,21 +40,20 @@ class LibrarySidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 20),
+            padding: EdgeInsets.fromLTRB(28, 24, 24, 32),
             child: Row(
               children: [
-                Icon(Icons.collections_bookmark_outlined,
-                    size: 26, color: AppTheme.accent),
-                SizedBox(width: 10),
+                _LibraryMark(),
+                SizedBox(width: 16),
                 Text(
                   '表情管家',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
             child: _SidebarItem(
               icon: Icons.grid_view_outlined,
               label: allGroupLabel,
@@ -64,26 +63,31 @@ class LibrarySidebar extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 8, 4),
+            padding: const EdgeInsets.fromLTRB(28, 26, 22, 10),
             child: Row(
               children: [
                 const Expanded(
                   child: Text(
                     '我的分组',
                     style:
-                        TextStyle(fontSize: 12, color: AppTheme.secondaryText),
+                        TextStyle(fontSize: 18, color: AppTheme.secondaryText),
                   ),
                 ),
-                SizedBox(
-                  width: 28,
-                  height: 28,
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardBackground,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.border),
+                  ),
                   child: IconButton(
                     onPressed: onCreateGroup,
                     tooltip: '新建分组',
-                    icon: const Icon(Icons.add, size: 18),
+                    icon: const Icon(Icons.add, size: 22),
                     padding: EdgeInsets.zero,
                     visualDensity: VisualDensity.compact,
-                    color: AppTheme.secondaryText,
+                    color: AppTheme.primaryText,
                   ),
                 ),
               ],
@@ -91,7 +95,7 @@ class LibrarySidebar extends StatelessWidget {
           ),
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
               itemCount: selectable.length,
               itemBuilder: (context, index) {
                 final group = selectable[index];
@@ -105,9 +109,8 @@ class LibrarySidebar extends StatelessWidget {
               },
             ),
           ),
-          const Divider(height: 1, color: AppTheme.border),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 28),
             child: _SidebarItem(
               icon: Icons.settings_outlined,
               label: '设置',
@@ -141,28 +144,28 @@ class _SidebarItem extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
-        color: selected ? AppTheme.cardBackground : Colors.transparent,
+        color: selected ? AppTheme.selectionBackground : Colors.transparent,
         borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
         child: InkWell(
           borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             child: Row(
               children: [
                 Icon(icon,
-                    size: 20,
-                    color: selected ? AppTheme.accent : AppTheme.secondaryText),
-                const SizedBox(width: 10),
+                    size: 26,
+                    color: selected ? AppTheme.accent : AppTheme.primaryText),
+                const SizedBox(width: 16),
                 Expanded(
                   child: Text(
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 20,
                       fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.normal,
+                          selected ? FontWeight.w500 : FontWeight.normal,
                       color: selected ? AppTheme.accent : AppTheme.primaryText,
                     ),
                   ),
@@ -170,8 +173,11 @@ class _SidebarItem extends StatelessWidget {
                 if (count != null)
                   Text(
                     '$count',
-                    style: const TextStyle(
-                        fontSize: 12, color: AppTheme.secondaryText),
+                    style: TextStyle(
+                        fontSize: 17,
+                        color: selected
+                            ? AppTheme.accent
+                            : AppTheme.secondaryText),
                   ),
               ],
             ),
@@ -180,4 +186,61 @@ class _SidebarItem extends StatelessWidget {
       ),
     );
   }
+}
+
+class _LibraryMark extends StatelessWidget {
+  const _LibraryMark();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 40,
+      height: 44,
+      child: CustomPaint(painter: _CatMarkPainter()),
+    );
+  }
+}
+
+class _CatMarkPainter extends CustomPainter {
+  const _CatMarkPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 40, size.height / 44);
+    final outline = Paint()
+      ..color = AppTheme.accent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final head = Path()
+      ..moveTo(6, 14)
+      ..cubicTo(6, 8, 6, 3, 9, 3)
+      ..lineTo(15, 8)
+      ..quadraticBezierTo(20, 6, 25, 8)
+      ..lineTo(31, 3)
+      ..cubicTo(34, 3, 34, 8, 34, 14)
+      ..cubicTo(42, 33, 33, 40, 20, 40)
+      ..cubicTo(7, 40, -2, 33, 6, 14)
+      ..close();
+    canvas.drawPath(head, outline);
+    final fill = Paint()..color = AppTheme.accent;
+    canvas.drawCircle(const Offset(12.5, 22), 1.9, fill);
+    canvas.drawCircle(const Offset(27.5, 22), 1.9, fill);
+    canvas.drawOval(const Rect.fromLTWH(17.5, 25, 5, 3.5), fill);
+    canvas.drawPath(
+      Path()
+        ..moveTo(20, 28)
+        ..lineTo(20, 30)
+        ..moveTo(15.5, 30)
+        ..quadraticBezierTo(18, 33, 20, 30)
+        ..quadraticBezierTo(22, 33, 24.5, 30),
+      outline..strokeWidth = 2,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _CatMarkPainter oldDelegate) => false;
 }

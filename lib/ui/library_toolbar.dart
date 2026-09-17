@@ -36,49 +36,74 @@ class LibraryToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final search = SizedBox(
-      height: fixedControlHeight ? AppTheme.controlHeight : 48,
-      child: TextField(
-        controller: searchController,
-        onChanged: onSearchChanged,
-        decoration: InputDecoration(
-          hintText: '搜索备注或表情 ID',
-          prefixIcon:
-              const Icon(Icons.search, size: 20, color: AppTheme.secondaryText),
-          prefixIconConstraints:
-              const BoxConstraints(minWidth: 40, minHeight: 38),
-          suffixIcon: searchController.text.isEmpty
-              ? null
-              : IconButton(
-                  onPressed: onClearSearch,
-                  tooltip: '清除搜索',
-                  icon: const Icon(Icons.clear, size: 18),
-                ),
-        ),
-      ),
-    );
-    final actions = [
-      OutlinedButton.icon(
-        onPressed: onEnterSelection,
-        icon: const Icon(Icons.checklist_outlined, size: 18),
-        label: const Text('多选'),
-      ),
-      moreMenu,
-      FilledButton.icon(
-        onPressed: onImport,
-        icon: const Icon(Icons.add, size: 18),
-        label: const Text('导入表情'),
-      ),
-    ];
     return LayoutBuilder(builder: (context, constraints) {
       final narrow = constraints.maxWidth < 600;
+      final controlHeight = narrow ? 48.0 : AppTheme.controlHeight;
+      final actionStyle = ButtonStyle(
+        minimumSize: WidgetStatePropertyAll(Size(0, controlHeight)),
+        padding: WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: narrow ? 14 : 20),
+        ),
+        textStyle: WidgetStatePropertyAll(
+          Theme.of(context).textTheme.labelLarge!.copyWith(
+                fontSize: narrow ? 16 : 18,
+                fontWeight: FontWeight.w400,
+              ),
+        ),
+      );
+      final search = SizedBox(
+        height: fixedControlHeight ? controlHeight : null,
+        child: TextField(
+          controller: searchController,
+          onChanged: onSearchChanged,
+          style: TextStyle(fontSize: narrow ? 16 : 18),
+          textAlignVertical: TextAlignVertical.center,
+          decoration: InputDecoration(
+            hintText: '搜索备注或表情 ID',
+            hintStyle: TextStyle(
+              fontSize: narrow ? 16 : 18,
+              color: AppTheme.secondaryText,
+            ),
+            fillColor: AppTheme.searchBackground,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            prefixIcon:
+                const Icon(Icons.search, size: 26, color: AppTheme.primaryText),
+            prefixIconConstraints: BoxConstraints(
+                minWidth: narrow ? 48 : 60, minHeight: controlHeight),
+            suffixIcon: searchController.text.isEmpty
+                ? null
+                : IconButton(
+                    onPressed: onClearSearch,
+                    tooltip: '清除搜索',
+                    icon: const Icon(Icons.clear, size: 20),
+                  ),
+          ),
+        ),
+      );
+      final actions = [
+        OutlinedButton.icon(
+          onPressed: onEnterSelection,
+          style: actionStyle,
+          icon: const Icon(Icons.check_box_outline_blank_rounded,
+              size: 22, color: AppTheme.secondaryText),
+          label: const Text('多选'),
+        ),
+        moreMenu,
+        FilledButton.icon(
+          onPressed: onImport,
+          style: actionStyle,
+          icon: const Icon(Icons.add, size: 26),
+          label: const Text('导入表情'),
+        ),
+      ];
       return Container(
         decoration: const BoxDecoration(
-          color: AppTheme.cardBackground,
+          color: AppTheme.background,
           border: Border(bottom: BorderSide(color: AppTheme.border)),
         ),
         padding: EdgeInsets.symmetric(
-            horizontal: narrow ? 16 : AppTheme.contentPadding, vertical: 12),
+            horizontal: narrow ? 16 : AppTheme.contentPadding, vertical: 16),
         child: narrow
             ? Column(
                 mainAxisSize: MainAxisSize.min,
@@ -104,11 +129,11 @@ class LibraryToolbar extends StatelessWidget {
             : Row(children: [
                 if (leading != null) ...[leading!, const SizedBox(width: 12)],
                 Expanded(child: search),
-                const SizedBox(width: 12),
+                const SizedBox(width: 24),
                 actions[0],
-                const SizedBox(width: 8),
+                const SizedBox(width: 14),
                 actions[1],
-                const SizedBox(width: 8),
+                const SizedBox(width: 16),
                 actions[2],
               ]),
       );
@@ -170,8 +195,9 @@ class SelectionToolbar extends StatelessWidget {
                       foregroundColor: Colors.red.shade700)),
             ];
       return Container(
+        constraints: const BoxConstraints(minHeight: 86),
         decoration: const BoxDecoration(
-          color: AppTheme.cardBackground,
+          color: AppTheme.background,
           border: Border(bottom: BorderSide(color: AppTheme.border)),
         ),
         padding: EdgeInsets.symmetric(

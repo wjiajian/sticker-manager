@@ -25,9 +25,9 @@ class LibraryFeedback extends StatelessWidget {
     final showProgress = progressActive || progressText.isNotEmpty;
     if (message == null && !showProgress) return const SizedBox.shrink();
     return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 24,
+      left: 16,
+      right: 16,
+      bottom: 40,
       child: IgnorePointer(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -38,14 +38,14 @@ class LibraryFeedback extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(Icons.check_circle,
-                        size: 18, color: AppTheme.accent),
-                    const SizedBox(width: 8),
+                        size: 28, color: AppTheme.accent),
+                    const SizedBox(width: 12),
                     Flexible(
                       child: Text(
                         message!,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13),
+                        style: const TextStyle(fontSize: 18),
                       ),
                     ),
                   ],
@@ -93,16 +93,16 @@ class _Pill extends StatelessWidget {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 520),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         decoration: BoxDecoration(
           color: AppTheme.cardBackground,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppTheme.border),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x1F000000),
-              blurRadius: 10,
-              offset: Offset(0, 2),
+              color: Color(0x140F2438),
+              blurRadius: 24,
+              offset: Offset(0, 6),
             ),
           ],
         ),

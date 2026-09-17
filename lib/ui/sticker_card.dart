@@ -107,8 +107,8 @@ class _StickerCardState extends State<StickerCard> {
   }
 
   Color get _borderColor {
-    if (widget.selected || widget.keyboardFocused) return AppTheme.accent;
-    if (_hovering) return AppTheme.accent.withValues(alpha: 0.55);
+    if (widget.selected) return AppTheme.accent;
+    if (_hovering || widget.keyboardFocused) return AppTheme.hoverBorder;
     return AppTheme.border;
   }
 
@@ -132,13 +132,26 @@ class _StickerCardState extends State<StickerCard> {
           borderRadius: BorderRadius.circular(AppTheme.cardRadius),
           border: Border.all(
             color: _borderColor,
-            width: widget.selected || widget.keyboardFocused ? 2 : 1,
+            width: widget.selected ? 1.5 : 1,
           ),
+          boxShadow: _hovering
+              ? const [
+                  BoxShadow(
+                    color: Color(0x10008B8B),
+                    blurRadius: 5,
+                    offset: Offset(0, 1),
+                  ),
+                ]
+              : null,
         ),
         foregroundDecoration: widget.keyboardFocused
             ? BoxDecoration(
                 borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                border: Border.all(color: AppTheme.primaryText, width: 3),
+                border: Border.all(
+                  color:
+                      widget.selected ? AppTheme.primaryText : AppTheme.accent,
+                  width: 2,
+                ),
               )
             : null,
         child: ClipRRect(
@@ -158,7 +171,7 @@ class _StickerCardState extends State<StickerCard> {
                     children: [
                       Positioned.fill(
                         child: Padding(
-                          padding: const EdgeInsets.all(8),
+                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                           child: _StickerImage(
                             sticker: sticker,
                             animateGif: _hovering,
@@ -176,8 +189,8 @@ class _StickerCardState extends State<StickerCard> {
                         ),
                       if (showCopyButton)
                         Positioned(
-                          right: 6,
-                          top: 6,
+                          right: 8,
+                          top: 8,
                           child: _CopyButton(onPressed: widget.onCopy),
                         )
                       else if (isDesktopPlatform && sticker.isPinned)
@@ -207,7 +220,7 @@ class _StickerCardState extends State<StickerCard> {
                 if (!(widget.compact && isDesktopPlatform))
                   Padding(
                     padding: EdgeInsets.fromLTRB(
-                        12, 0, isDesktopPlatform ? 12 : 6, 10),
+                        16, 6, isDesktopPlatform ? 12 : 6, 12),
                     child: isDesktopPlatform
                         ? _NoteLabel(note: note)
                         : Row(
@@ -256,7 +269,8 @@ class _NoteLabel extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        fontSize: 13,
+        fontSize: 17,
+        height: 1.2,
         color: note.isEmpty ? AppTheme.secondaryText : AppTheme.primaryText,
       ),
     );
@@ -307,7 +321,7 @@ class _CopyButton extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.cardBackground,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(9),
         border: Border.all(color: AppTheme.border),
         boxShadow: const [
           BoxShadow(
@@ -321,10 +335,10 @@ class _CopyButton extends StatelessWidget {
         onPressed: onPressed,
         tooltip: '复制',
         icon: const Icon(Icons.copy_outlined,
-            size: 16, color: AppTheme.primaryText),
-        iconSize: 16,
+            size: 21, color: AppTheme.primaryText),
+        iconSize: 21,
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+        constraints: const BoxConstraints.tightFor(width: 36, height: 36),
         visualDensity: VisualDensity.compact,
       ),
     );
