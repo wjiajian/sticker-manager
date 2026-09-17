@@ -220,7 +220,7 @@ class _StickerCardState extends State<StickerCard> {
                 if (!(widget.compact && isDesktopPlatform))
                   Padding(
                     padding: EdgeInsets.fromLTRB(
-                        16, 6, isDesktopPlatform ? 12 : 6, 12),
+                        14, 4, isDesktopPlatform ? 12 : 6, 10),
                     child: isDesktopPlatform
                         ? _NoteLabel(note: note)
                         : Row(
@@ -269,7 +269,7 @@ class _NoteLabel extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        fontSize: 17,
+        fontSize: 15,
         height: 1.2,
         color: note.isEmpty ? AppTheme.secondaryText : AppTheme.primaryText,
       ),

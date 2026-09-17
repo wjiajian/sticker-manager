@@ -40,14 +40,14 @@ class LibrarySidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Padding(
-            padding: EdgeInsets.fromLTRB(28, 24, 24, 32),
+            padding: EdgeInsets.fromLTRB(24, 20, 20, 24),
             child: Row(
               children: [
                 _LibraryMark(),
-                SizedBox(width: 16),
+                SizedBox(width: 14),
                 Text(
                   '表情管家',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -63,14 +63,14 @@ class LibrarySidebar extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(28, 26, 22, 10),
+            padding: const EdgeInsets.fromLTRB(24, 20, 20, 8),
             child: Row(
               children: [
                 const Expanded(
                   child: Text(
                     '我的分组',
                     style:
-                        TextStyle(fontSize: 18, color: AppTheme.secondaryText),
+                        TextStyle(fontSize: 16, color: AppTheme.secondaryText),
                   ),
                 ),
                 Container(
@@ -150,20 +150,20 @@ class _SidebarItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
                 Icon(icon,
-                    size: 26,
+                    size: 24,
                     color: selected ? AppTheme.accent : AppTheme.primaryText),
-                const SizedBox(width: 16),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Text(
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 20,
+                      fontSize: 18,
                       fontWeight:
                           selected ? FontWeight.w500 : FontWeight.normal,
                       color: selected ? AppTheme.accent : AppTheme.primaryText,
@@ -174,7 +174,7 @@ class _SidebarItem extends StatelessWidget {
                   Text(
                     '$count',
                     style: TextStyle(
-                        fontSize: 17,
+                        fontSize: 15,
                         color: selected
                             ? AppTheme.accent
                             : AppTheme.secondaryText),
@@ -194,8 +194,8 @@ class _LibraryMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const SizedBox(
-      width: 40,
-      height: 44,
+      width: 36,
+      height: 40,
       child: CustomPaint(painter: _CatMarkPainter()),
     );
   }

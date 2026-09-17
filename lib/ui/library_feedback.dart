@@ -38,14 +38,14 @@ class LibraryFeedback extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(Icons.check_circle,
-                        size: 28, color: AppTheme.accent),
+                        size: 24, color: AppTheme.accent),
                     const SizedBox(width: 12),
                     Flexible(
                       child: Text(
                         message!,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 18),
+                        style: const TextStyle(fontSize: 16),
                       ),
                     ),
                   ],
@@ -93,7 +93,7 @@ class _Pill extends StatelessWidget {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 520),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         decoration: BoxDecoration(
           color: AppTheme.cardBackground,
           borderRadius: BorderRadius.circular(16),

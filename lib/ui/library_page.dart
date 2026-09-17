@@ -1923,7 +1923,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
         : '搜索到 ${visible.length} 个表情';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.contentPadding, 24, AppTheme.contentPadding, 0),
+          AppTheme.contentPadding, 20, AppTheme.contentPadding, 0),
       child: LayoutBuilder(builder: (context, constraints) {
         final narrow = constraints.maxWidth < 550;
         final title = Row(
@@ -1936,14 +1936,14 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style:
-                    const TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
+                    const TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
               ),
             ),
             const SizedBox(width: 24),
             Text(
               countLabel,
               style:
-                  const TextStyle(fontSize: 16, color: AppTheme.secondaryText),
+                  const TextStyle(fontSize: 14, color: AppTheme.secondaryText),
             ),
           ],
         );
@@ -1974,7 +1974,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   Widget _buildSortControl() {
     final defaultLabel = _selectedGroup == 'qq_favorites' ? '来源顺序' : '常用优先';
     return Container(
-      width: 164,
+      width: 148,
       height: AppTheme.secondaryControlHeight,
       padding: const EdgeInsets.symmetric(horizontal: 18),
       decoration: BoxDecoration(
@@ -1991,7 +1991,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
           icon: const Icon(Icons.keyboard_arrow_down_rounded,
               size: 22, color: AppTheme.primaryText),
           style: Theme.of(context).textTheme.bodyLarge!.copyWith(
-                fontSize: 18,
+                fontSize: 16,
                 color: AppTheme.primaryText,
               ),
           items: [

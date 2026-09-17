@@ -38,15 +38,15 @@ class LibraryToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final narrow = constraints.maxWidth < 600;
-      final controlHeight = narrow ? 48.0 : AppTheme.controlHeight;
+      const controlHeight = AppTheme.controlHeight;
       final actionStyle = ButtonStyle(
-        minimumSize: WidgetStatePropertyAll(Size(0, controlHeight)),
+        minimumSize: const WidgetStatePropertyAll(Size(0, controlHeight)),
         padding: WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: narrow ? 14 : 20),
+          EdgeInsets.symmetric(horizontal: narrow ? 14 : 18),
         ),
         textStyle: WidgetStatePropertyAll(
           Theme.of(context).textTheme.labelLarge!.copyWith(
-                fontSize: narrow ? 16 : 18,
+                fontSize: narrow ? 15 : 16,
                 fontWeight: FontWeight.w400,
               ),
         ),
@@ -56,21 +56,21 @@ class LibraryToolbar extends StatelessWidget {
         child: TextField(
           controller: searchController,
           onChanged: onSearchChanged,
-          style: TextStyle(fontSize: narrow ? 16 : 18),
+          style: TextStyle(fontSize: narrow ? 15 : 16),
           textAlignVertical: TextAlignVertical.center,
           decoration: InputDecoration(
             hintText: '搜索备注或表情 ID',
             hintStyle: TextStyle(
-              fontSize: narrow ? 16 : 18,
+              fontSize: narrow ? 15 : 16,
               color: AppTheme.secondaryText,
             ),
             fillColor: AppTheme.searchBackground,
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             prefixIcon:
-                const Icon(Icons.search, size: 26, color: AppTheme.primaryText),
-            prefixIconConstraints: BoxConstraints(
-                minWidth: narrow ? 48 : 60, minHeight: controlHeight),
+                const Icon(Icons.search, size: 22, color: AppTheme.primaryText),
+            prefixIconConstraints:
+                const BoxConstraints(minWidth: 48, minHeight: controlHeight),
             suffixIcon: searchController.text.isEmpty
                 ? null
                 : IconButton(
@@ -86,14 +86,14 @@ class LibraryToolbar extends StatelessWidget {
           onPressed: onEnterSelection,
           style: actionStyle,
           icon: const Icon(Icons.check_box_outline_blank_rounded,
-              size: 22, color: AppTheme.secondaryText),
+              size: 20, color: AppTheme.secondaryText),
           label: const Text('多选'),
         ),
         moreMenu,
         FilledButton.icon(
           onPressed: onImport,
           style: actionStyle,
-          icon: const Icon(Icons.add, size: 26),
+          icon: const Icon(Icons.add, size: 22),
           label: const Text('导入表情'),
         ),
       ];
@@ -103,7 +103,7 @@ class LibraryToolbar extends StatelessWidget {
           border: Border(bottom: BorderSide(color: AppTheme.border)),
         ),
         padding: EdgeInsets.symmetric(
-            horizontal: narrow ? 16 : AppTheme.contentPadding, vertical: 16),
+            horizontal: narrow ? 16 : AppTheme.contentPadding, vertical: 12),
         child: narrow
             ? Column(
                 mainAxisSize: MainAxisSize.min,
@@ -195,7 +195,7 @@ class SelectionToolbar extends StatelessWidget {
                       foregroundColor: Colors.red.shade700)),
             ];
       return Container(
-        constraints: const BoxConstraints(minHeight: 86),
+        constraints: const BoxConstraints(minHeight: 72),
         decoration: const BoxDecoration(
           color: AppTheme.background,
           border: Border(bottom: BorderSide(color: AppTheme.border)),

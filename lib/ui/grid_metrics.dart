@@ -24,18 +24,18 @@ class GridMetrics {
     final padding = quickPicker
         ? 10.0
         : density == GridDensity.compact
-            ? 20.0
-            : 24.0;
+            ? 18.0
+            : 20.0;
     final spacing = quickPicker
         ? 8.0
         : density == GridDensity.compact
-            ? 12.0
-            : 16.0;
+            ? 10.0
+            : 14.0;
     final targetTileWidth = quickPicker
         ? 112.0
         : density == GridDensity.compact
-            ? 148.0
-            : 180.0;
+            ? 132.0
+            : 152.0;
     final innerWidth = math.max(0.0, availableWidth - padding * 2);
     // Largest column count whose tiles still reach the target width, so
     // tiles grow to fill the row instead of leaving a ragged right edge.
@@ -46,7 +46,7 @@ class GridMetrics {
     final tileWidth = (innerWidth - spacing * (columnCount - 1)) / columnCount;
     // A nearly square image area keeps the reference proportions as the
     // window changes width; the remaining height is reserved for the note.
-    final tileHeight = quickPicker ? 132.0 : tileWidth + 36;
+    final tileHeight = quickPicker ? 132.0 : tileWidth + 32;
     return GridMetrics._(
       columnCount: columnCount,
       padding: padding,

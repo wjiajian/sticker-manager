@@ -17,13 +17,13 @@ class AppTheme {
   static const Color primaryText = Color(0xFF101828);
   static const Color secondaryText = Color(0xFF788698);
 
-  static const double sidebarWidth = 266;
-  static const double controlHeight = 54;
-  static const double secondaryControlHeight = 46;
-  static const double buttonRadius = 12;
-  static const double cardRadius = 14;
-  static const double contentPadding = 24;
-  static const double gridSpacing = 16;
+  static const double sidebarWidth = 240;
+  static const double controlHeight = 48;
+  static const double secondaryControlHeight = 40;
+  static const double buttonRadius = 10;
+  static const double cardRadius = 12;
+  static const double contentPadding = 20;
+  static const double gridSpacing = 14;
 
   static ThemeData themeData() {
     final colorScheme = ColorScheme.fromSeed(
@@ -73,7 +73,7 @@ class AppTheme {
           minimumSize: const Size(0, controlHeight),
           padding: const EdgeInsets.symmetric(horizontal: 22),
           textStyle: base.textTheme.labelLarge!
-              .copyWith(fontSize: 18, fontWeight: FontWeight.w500),
+              .copyWith(fontSize: 16, fontWeight: FontWeight.w500),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(buttonRadius),
           ),
@@ -86,7 +86,7 @@ class AppTheme {
           minimumSize: const Size(0, controlHeight),
           padding: const EdgeInsets.symmetric(horizontal: 18),
           textStyle: base.textTheme.labelLarge!
-              .copyWith(fontSize: 18, fontWeight: FontWeight.w400),
+              .copyWith(fontSize: 16, fontWeight: FontWeight.w400),
           side: const BorderSide(color: border),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(buttonRadius),
