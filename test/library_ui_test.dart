@@ -85,8 +85,10 @@ void main() {
     ]);
   });
 
-  Widget shell(Widget child) => MaterialApp(
-        theme: AppTheme.themeData().copyWith(platform: TargetPlatform.android),
+  Widget shell(Widget child,
+          {TargetPlatform platform = TargetPlatform.android}) =>
+      MaterialApp(
+        theme: AppTheme.themeData().copyWith(platform: platform),
         home: Scaffold(body: Column(children: [child])),
       );
 
@@ -100,7 +102,8 @@ void main() {
   Future<void> loadPage(WidgetTester tester,
       {double topInset = 0, bool expectLoaded = true}) async {
     await tester.pumpWidget(MaterialApp(
-      theme: AppTheme.themeData(),
+      // Exercise the touch card layout on every host, including macOS CI.
+      theme: AppTheme.themeData().copyWith(platform: TargetPlatform.android),
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context)
             .copyWith(padding: EdgeInsets.only(top: topInset)),
@@ -243,25 +246,27 @@ void main() {
     var copies = 0;
     var uses = 0;
     final entry = repository.entries.first;
-    await tester.pumpWidget(shell(SizedBox(
-      width: 200,
-      height: 204,
-      child: StickerCard(
-          entry: entry,
-          selectionMode: false,
-          selected: false,
-          keyboardFocused: false,
-          onUse: () => uses++,
-          onSelect: () {},
-          onCopy: () => copies++,
-          onLongPress: null,
-          onPin: () {},
-          onGroups: () {},
-          onEdit: () {},
-          onDelete: () {},
-          onContextMenu: (_) async {},
-          compact: false),
-    )));
+    await tester.pumpWidget(shell(
+        SizedBox(
+          width: 200,
+          height: 204,
+          child: StickerCard(
+              entry: entry,
+              selectionMode: false,
+              selected: false,
+              keyboardFocused: false,
+              onUse: () => uses++,
+              onSelect: () {},
+              onCopy: () => copies++,
+              onLongPress: null,
+              onPin: () {},
+              onGroups: () {},
+              onEdit: () {},
+              onDelete: () {},
+              onContextMenu: (_) async {},
+              compact: false),
+        ),
+        platform: TargetPlatform.macOS));
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     addTearDown(mouse.removePointer);
@@ -271,7 +276,61 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
     expect(copies, 1);
     expect(uses, 0);
-  }, skip: !(Platform.isMacOS || Platform.isWindows));
+  });
+
+  testWidgets('Android narrow cards keep all actions without triggering use',
+      (tester) async {
+    viewport(tester, const Size(360, 800));
+    final actions = <String>[];
+    var uses = 0;
+    final entry = repository.entries.first;
+    final longNote = RankedSticker(
+      entry.sticker.copyWith(note: '这是一条用于检查窄卡片布局的较长备注'),
+      entry.groupIds,
+    );
+    for (final width in [132.0, 152.6]) {
+      await tester.pumpWidget(shell(SizedBox(
+        width: width,
+        height: width + 32,
+        child: StickerCard(
+          entry: longNote,
+          selectionMode: false,
+          selected: false,
+          keyboardFocused: false,
+          compact: false,
+          onUse: () => uses++,
+          onSelect: () {},
+          onCopy: () {},
+          onLongPress: null,
+          onPin: () => actions.add('置顶'),
+          onGroups: () => actions.add('管理分组'),
+          onEdit: () => actions.add('编辑备注'),
+          onDelete: () => actions.add('删除表情'),
+          onContextMenu: (_) async {},
+        ),
+      )));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byTooltip('表情操作'), findsOneWidget);
+      for (final label in ['管理分组', '编辑备注', '删除表情']) {
+        await tester.tap(find.byTooltip('表情操作'));
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text(label));
+        await tester.pump(const Duration(milliseconds: 700));
+        await tester.pumpAndSettle();
+        expect(actions.removeLast(), label);
+        expect(actions, isEmpty);
+        expect(uses, 0);
+      }
+      await tester.tap(find.byTooltip('置顶'));
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+      expect(actions.removeLast(), '置顶');
+      expect(uses, 0);
+    }
+  });
 
   testWidgets('selected cards retain an independent keyboard focus indicator',
       (tester) async {

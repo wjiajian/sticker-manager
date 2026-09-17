@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../models.dart';
-import '../platform/desktop_platform.dart';
 import '../services/database.dart';
 import 'app_theme.dart';
 
@@ -51,6 +50,8 @@ class StickerCard extends StatefulWidget {
   @override
   State<StickerCard> createState() => _StickerCardState();
 }
+
+enum _StickerAction { groups, edit, delete }
 
 class _StickerCardState extends State<StickerCard> {
   Timer? _tapTimer;
@@ -117,8 +118,11 @@ class _StickerCardState extends State<StickerCard> {
     final entry = widget.entry;
     final sticker = entry.sticker;
     final note = sticker.note;
-    final showCopyButton =
-        isDesktopPlatform && !widget.selectionMode && _hovering;
+    final desktop = switch (Theme.of(context).platform) {
+      TargetPlatform.windows || TargetPlatform.macOS => true,
+      _ => false,
+    };
+    final showCopyButton = desktop && !widget.selectionMode && _hovering;
     return MouseRegion(
       onEnter: (_) {
         if (mounted) setState(() => _hovering = true);
@@ -160,7 +164,7 @@ class _StickerCardState extends State<StickerCard> {
             onTap: _handleTap,
             onDoubleTap: _handleDoubleTap,
             onLongPress: widget.onLongPress,
-            onSecondaryTapDown: isDesktopPlatform
+            onSecondaryTapDown: desktop
                 ? (details) => widget.onContextMenu(details.globalPosition)
                 : null,
             child: Column(
@@ -193,7 +197,7 @@ class _StickerCardState extends State<StickerCard> {
                           top: 8,
                           child: _CopyButton(onPressed: widget.onCopy),
                         )
-                      else if (isDesktopPlatform && sticker.isPinned)
+                      else if (desktop && sticker.isPinned)
                         const Positioned(
                           right: 8,
                           top: 8,
@@ -203,7 +207,7 @@ class _StickerCardState extends State<StickerCard> {
                                 size: 18, color: AppTheme.secondaryText),
                           ),
                         ),
-                      if (!isDesktopPlatform)
+                      if (!desktop)
                         Positioned(
                           right: 4,
                           top: 4,
@@ -217,11 +221,10 @@ class _StickerCardState extends State<StickerCard> {
                     ],
                   ),
                 ),
-                if (!(widget.compact && isDesktopPlatform))
+                if (!(widget.compact && desktop))
                   Padding(
-                    padding: EdgeInsets.fromLTRB(
-                        14, 4, isDesktopPlatform ? 12 : 6, 10),
-                    child: isDesktopPlatform
+                    padding: EdgeInsets.fromLTRB(14, 4, desktop ? 12 : 6, 10),
+                    child: desktop
                         ? _NoteLabel(note: note)
                         : Row(
                             children: [
@@ -229,21 +232,39 @@ class _StickerCardState extends State<StickerCard> {
                                   child: Text(note.isEmpty ? '未备注' : note,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis)),
-                              IconButton(
-                                  onPressed: widget.onGroups,
-                                  icon: const Icon(Icons.folder_copy_outlined,
-                                      size: 18),
-                                  tooltip: '管理分组'),
-                              IconButton(
-                                  onPressed: widget.onEdit,
-                                  icon:
-                                      const Icon(Icons.edit_outlined, size: 18),
-                                  tooltip: '编辑备注'),
-                              IconButton(
-                                  onPressed: widget.onDelete,
-                                  icon: const Icon(Icons.delete_outline,
-                                      size: 18),
-                                  tooltip: '删除表情'),
+                              PopupMenuButton<_StickerAction>(
+                                tooltip: '表情操作',
+                                icon: const Icon(Icons.more_horiz, size: 22),
+                                color: AppTheme.cardBackground,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                      AppTheme.buttonRadius),
+                                ),
+                                onSelected: (action) {
+                                  switch (action) {
+                                    case _StickerAction.groups:
+                                      widget.onGroups();
+                                    case _StickerAction.edit:
+                                      widget.onEdit();
+                                    case _StickerAction.delete:
+                                      widget.onDelete();
+                                  }
+                                },
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: _StickerAction.groups,
+                                    child: Text('管理分组'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: _StickerAction.edit,
+                                    child: Text('编辑备注'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: _StickerAction.delete,
+                                    child: Text('删除表情'),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                   ),

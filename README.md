@@ -100,7 +100,10 @@ Public macOS distribution requires an Apple Developer identity and notarization.
 
 ## GitHub Actions
 
-`.github/workflows/ci.yml` runs on pushes, pull requests and manual dispatch.
+`.github/workflows/ci.yml` runs only on manual dispatch. Pushes and pull requests
+do not start builds. To build, open **Actions → Build and test → Run workflow**,
+select the branch, and confirm **Run workflow**. The workflow must exist on the
+repository's default branch for the manual dispatch button to be available.
 Each macOS, Windows and Android job restores dependencies, verifies project files,
 runs analysis and tests, and builds a release artifact. macOS also executes the
 native clipboard tests. Download the ZIP or APK from the workflow's artifacts.
