@@ -4,6 +4,35 @@ import 'package:sticker_manager/models.dart';
 import 'package:sticker_manager/services/ranking_service.dart';
 
 void main() {
+  test('recent imports sort descending after group and query filtering', () {
+    final old = Sticker(
+      id: 'old',
+      hash: 'old',
+      mediaType: StickerMediaType.image,
+      filePath: '',
+      thumbnailPath: '',
+      source: StickerSource.manual,
+      note: '猫',
+      createdAt: DateTime(2026),
+      updatedAt: DateTime(2026),
+      usageCount: 100,
+      isPinned: true,
+      sourceOrder: 0,
+    );
+    final recent = old.copyWith(createdAt: DateTime(2026, 9), sourceOrder: 1);
+    final ranked = UsageRankingService().rank([
+      RankedSticker(old, {'qq_favorites'}),
+      RankedSticker(recent, {'qq_favorites'}),
+      RankedSticker(recent.copyWith(note: '狗'), {'qq_favorites'}),
+      RankedSticker(recent, {'other'}),
+    ],
+        groupId: 'qq_favorites',
+        query: '猫',
+        order: StickerSortOrder.recentImport);
+    expect(ranked.map((item) => item.sticker.createdAt),
+        [DateTime(2026, 9), DateTime(2026)]);
+  });
+
   final now = DateTime(2026, 1, 1);
 
   Sticker sticker(String id,

@@ -25,16 +25,22 @@ Flutter 业务层不直接依赖具体平台 API。`StickerRepository` 和 `Impo
 
 ### UI 与状态
 
-- `lib/main.dart` 的 `LibraryPage` 负责加载分组和排序结果、搜索、导入预览、批量操作、备注/分组对话框、框选状态和空状态。
-- `_StickerCard` 负责缩略图回退、置顶状态和 Windows 右键管理菜单；单击回调交给平台发送流程。
-- 网格只消费 `UsageRankingService` 的结果，不在组件内重新实现排序。
+- `lib/main.dart` 负责平台初始化和应用启动；`lib/ui/app_theme.dart` 定义共享视觉参数。
+- `lib/ui/library_page.dart` 的 `LibraryPage` 协调分组、搜索、排序、导入和管理动作。页面通过 `StickerRepository` 读取数据，默认使用 `StickerDatabase`；测试可提供内存仓库，因此无需访问用户数据库。
+- `LibrarySidebar` 展示分组及全量计数；`LibraryToolbar` 在窄窗口中将搜索和操作分行，多选操作改用带说明的图标。主管理正文使用系统安全边距。
+- `StickerGrid` 负责网格、滚动和框选，`GridMetrics` 为渲染、命中判断及键盘定位提供同一组尺寸。排序和数据刷新后，页面按表情 ID 恢复焦点；表情离开当前结果时选择有效位置。
+- `StickerCard` 负责缩略图回退、GIF 悬停播放、置顶标记和桌面右键菜单。选择状态使用青绿色边框与勾选，键盘焦点使用独立深色轮廓。快捷键监听仅位于网格范围，并要求网格自身拥有输入焦点。
+- 网格使用 `UsageRankingService` 的结果；默认规则保留普通分组的使用排序和 QQ 收藏的来源顺序，显式选择最近导入时按创建时间降序排列。
+- `LibraryFeedback` 展示短暂操作结果与独立进度提示。主管理和快速选择窗口共用加载失败说明与重试界面。
+
+卡片单击使用 `PlatformBridge.useSticker`；悬停复制按钮使用 `PlatformBridge.copySticker`，仅写入剪贴板。Windows 两个入口共用互斥锁，因此独立复制不会覆盖正在发送的图片。仅复制不增加 Windows 使用次数；macOS 和 Android 成功复制计入使用次数。
 
 ### 领域服务
 
 - `MediaStore`：读取文件、文件签名识别、SHA-256 去重、复制托管媒体、批量提交记录、删除应用副本、后台生成和升级缩略图。
 - `UsageRankingService`：先按分组和查询过滤，再应用普通分组或 QQ 收藏排序规则。
 - `ExportPackageService`：把数据库元数据与媒体写入版本化归档，调用 `EncryptedPackageCodec` 加密；导入时校验 manifest 和媒体哈希后恢复。
-- `AppPreferences`：热键配置、剪贴板兼容性记录等小型设置使用本地偏好存储。
+- `AppPreferences`：热键配置、剪贴板兼容性记录和网格密度使用本地偏好存储；密度支持标准与紧凑，缺失或未知字符串恢复为标准。
 
 导入的并发边界是准备阶段最多 4 个 worker，缩略图阶段最多 2 个 worker；每个文件最多 64 MiB、每批最多 512 MiB，数据库提交使用单个事务。`onRecordsCommitted` 用于让 UI 在缩略图完成前刷新卡片。
 

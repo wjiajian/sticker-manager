@@ -9,6 +9,7 @@ class AppPreferences {
   static const _hotkeyKey = 'hotkey';
   static const _qqImportDirectoriesKey = 'qqImportDirectories';
   static const _compatibilityRecordsKey = 'clipboardCompatibilityRecords';
+  static const _gridDensityKey = 'gridDensity';
 
   Future<String> hotkey() async {
     return (await SharedPreferences.getInstance()).getString(_hotkeyKey) ??
@@ -60,6 +61,17 @@ class AppPreferences {
       if (values.length >= 12) break;
     }
     await preferences.setStringList(_qqImportDirectoriesKey, values);
+  }
+
+  Future<GridDensity> gridDensity() async {
+    final raw =
+        (await SharedPreferences.getInstance()).getString(_gridDensityKey);
+    return raw == 'compact' ? GridDensity.compact : GridDensity.standard;
+  }
+
+  Future<void> setGridDensity(GridDensity density) async {
+    await (await SharedPreferences.getInstance())
+        .setString(_gridDensityKey, enumValue(density));
   }
 
   Future<List<ClipboardCompatibilityRecord>> compatibilityRecords() async {

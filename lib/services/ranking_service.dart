@@ -1,10 +1,17 @@
 import '../models.dart';
 
+/// Sort rule applied after group and query filtering.
+///
+/// [defaultRule] keeps the per-group defaults (QQ 收藏按来源顺序，其余按置顶
+/// 与使用频率)；[recentImport] orders by import time.
+enum StickerSortOrder { defaultRule, recentImport }
+
 class UsageRankingService {
   List<RankedSticker> rank(
     Iterable<RankedSticker> stickers, {
     String? groupId,
     String query = '',
+    StickerSortOrder order = StickerSortOrder.defaultRule,
   }) {
     final normalizedQuery = query.trim().toLowerCase();
     final filtered = stickers.where((entry) {
@@ -14,6 +21,12 @@ class UsageRankingService {
           entry.sticker.id.toLowerCase().contains(normalizedQuery);
       return inGroup && matchesQuery;
     }).toList();
+
+    if (order == StickerSortOrder.recentImport) {
+      filtered
+          .sort((a, b) => b.sticker.createdAt.compareTo(a.sticker.createdAt));
+      return filtered;
+    }
 
     filtered.sort((a, b) {
       if (groupId == 'qq_favorites') {

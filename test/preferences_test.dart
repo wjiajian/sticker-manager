@@ -5,6 +5,17 @@ import 'package:sticker_manager/models.dart';
 import 'package:sticker_manager/services/preferences.dart';
 
 void main() {
+  test('grid density persists and unknown values default to standard',
+      () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({'gridDensity': 'unknown'});
+    expect(await AppPreferences().gridDensity(), GridDensity.standard);
+    await AppPreferences().setGridDensity(GridDensity.compact);
+    expect(await AppPreferences().gridDensity(), GridDensity.compact);
+    await AppPreferences().setGridDensity(GridDensity.standard);
+    expect(await AppPreferences().gridDensity(), GridDensity.standard);
+  });
+
   test('compatibility records persist newest first and cap at 100', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues(<String, Object>{});

@@ -1,5 +1,8 @@
 enum StickerMediaType { image, gif }
 
+/// Thumbnail grid density, persisted as a user preference.
+enum GridDensity { standard, compact }
+
 enum StickerSource { manual, qq, wechat, androidShare }
 
 class Sticker {

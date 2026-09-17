@@ -69,6 +69,10 @@ class PlatformBridge {
 
   Future<StickerUseResult> useSticker(Sticker sticker) async {
     if (Platform.isWindows) return _useWindows(sticker);
+    return _copyOnly(sticker);
+  }
+
+  Future<StickerUseResult> _copyOnly(Sticker sticker) async {
     if (Platform.isMacOS) {
       final copied = await ClipboardBridge.instance.writeSticker(sticker);
       return copied
@@ -92,6 +96,21 @@ class PlatformBridge {
     } on PlatformException catch (error) {
       return StickerUseResult.failed(error.message ?? '无法写入 Android 剪贴板');
     }
+  }
+
+  /// Copies a sticker to the system clipboard without activating a target
+  /// window, pasting or sending Enter. Windows shares the use-lock so an
+  /// independent copy cannot interleave with an in-flight send.
+  Future<StickerUseResult> copySticker(Sticker sticker) async {
+    if (Platform.isWindows) {
+      return _windowsUseLock.protect(() async {
+        final copied = await ClipboardBridge.instance.writeSticker(sticker);
+        return copied
+            ? const StickerUseResult.copied()
+            : const StickerUseResult.failed('无法写入 Windows 剪贴板');
+      });
+    }
+    return _copyOnly(sticker);
   }
 
   Future<void> showQuickPicker() async {
