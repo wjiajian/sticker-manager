@@ -1,199 +1,143 @@
-# Sticker Manager
+<div align="center">
 
-Sticker Manager is a local-first image and GIF library for Windows, macOS and Android.
-The app provides a desktop tray quick picker, an Android floating panel and
-share import, groups, notes, usage ranking, and an encrypted portable backup format.
+<h1>表情管家</h1>
+<p><strong>Sticker Manager</strong> · 本地表情管理工具</p>
 
-## Current implementation
+<p>
+  <img src="https://img.shields.io/badge/Flutter-02569B?style=flat-square&amp;logo=flutter&amp;logoColor=white" alt="使用 Flutter 构建" />
+  <img src="https://img.shields.io/badge/Dart-0175C2?style=flat-square&amp;logo=dart&amp;logoColor=white" alt="使用 Dart 编写" />
+  <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="使用 SQLite 存储数据" />
 
-- Flutter UI and shared domain code in `lib/`.
-- Media and migration services depend on `StickerRepository` and `ImportSource`
-  boundaries, so SQLite and Windows directory discovery can be replaced by
-  another local or synced implementation later.
-- SQLite persistence with content-hash deduplication.
-- Windows, macOS and Android platform bridges are defined behind `PlatformBridge`.
-- macOS provides a menu bar icon, a configurable `Cmd+Shift+E` global hotkey,
-  a compact picker, right-click management and keyboard/mouse multi-selection.
-  Closing the window keeps the app available from the menu bar or Dock.
-  Static images are copied as PNG; GIFs retain their original data and file URL.
-  Switch to the destination app and press `Cmd+V` to paste. A successful copy
-  counts as usage on macOS; automatic paste and Enter are Windows-only.
-- Windows import only scans identified emotion folders and falls back to a file
-  picker when no known folder is found. QQNT paths include
-  `Tencent Files\<QQ号>\nt_qq\nt_data\Emoji\personal_emoji\Ori`,
-  `marketface`, and `emoji-recv`; older QQ paths include `CustomFace` and
-  `CustomFaceRecv`. QQNT custom installs such as
-  `<盘符>:\QQ_NT\dialogue\Tencent Files\<QQ号>` are also checked. WeChat paths include
-  `WeChat Files\<账号>\FileStorage\CustomEmotion` and the corresponding
-  `xwechat_files` path.
-- Automatic and folder imports show a source-and-count preview before writing;
-  selecting a QQ account parent is restricted to known emotion subfolders so
-  chat images are not imported accidentally. Directory scanning validates image
-  signatures, so extensionless and unusually named image files are accepted.
-- Android receives `ACTION_SEND` and `ACTION_SEND_MULTIPLE` image shares.
-- Android share intents are persisted until an import is acknowledged, so a
-  failed import or process restart can retry pending items; the `接收分享`
-  button remains available for that retry. A stable fingerprint of the action,
-  MIME type, data URI, and shared URI set prevents the same share from being
-  copied into the cache twice across Activity recreation.
-- Android can keep a compact floating panel above other apps. The first enable
-  action opens the system overlay permission page; the panel shows the current
-  top 100 ranked stickers and copies the selected file to the system clipboard.
-  Successful selections are queued with their sticker IDs and merged into
-  usage counts when the main UI starts or returns to the foreground.
-  Starting it repeatedly is idempotent: only one foreground service owns the
-  overlay, and a failed start releases its pending request.
-- Any sticker can be assigned to multiple user-created groups from its folder
-  action. The `全部` group is kept as the virtual catch-all group.
-- Windows uses `Ctrl+Shift+E` as the default global quick-picker hotkey; it can
-  be changed from the settings menu and is persisted locally. If Windows
-  reports that the combination is already occupied, the app keeps running and
-  prompts the user to choose another combination.
-- Windows runs as a single instance. Closing the window hides it to the tray;
-  launching the executable again waits for the first window to be ready,
-  activates that existing instance, and exits without creating another window.
-- Windows records the target executable, media type, and paste/send outcome for
-  each hotkey-driven send; the latest 100 records are available in the settings
-  menu for QQ/WeChat compatibility checks.
-- Export files use a versioned manifest and authenticated encryption.
-- Package import recalculates every media SHA-256 hash before creating a record.
-  Media records and thumbnails are restored in batches to keep large packages
-  responsive.
-- Thumbnail generation is versioned; upgrading the generator rebuilds older
-  thumbnails in the background while the original media remains available.
-- Existing records can be removed individually from a sticker card or in bulk
-  by source from `设置 -> 清理导入记录`; only app-managed copies are deleted.
+</p>
 
-## Run
+<p>Windows · macOS · Android</p>
 
-On macOS, install the full Xcode application, its command line tools and CocoaPods,
-then use Flutter 3.47.3 on `PATH`:
+<p>
+  <a href="#使用方法">使用方法</a> ·
+  <a href="#备份与迁移">备份与迁移</a> ·
+  <a href="#本地开发">本地开发</a> ·
+  <a href="#构建与下载">构建与下载</a> ·
+  <a href="#数据与隐私">数据与隐私</a> ·
+  <a href="#项目结构与文档">项目结构与文档</a> ·
+  <a href="CHANGELOG.md">变更日志</a>
+</p>
 
-```sh
-flutter pub get
-flutter run -d macos
-```
+</div>
 
-Windows, macOS and the macOS menu bar currently share the Flutter default artwork
-from `windows/runner/resources/app_icon.ico`. The macOS menu bar reads this ICO
-directly. The Xcode scheme runs `tool/generate_macos_icons.sh` before macOS builds,
-using the built-in `sips` tool to generate the sizes declared in
-`AppIcon.appiconset/Contents.json`. This applies to Flutter CLI, Xcode and Actions
-builds. Generated PNGs are ignored by Git. Windows/Android builds and Flutter
-tests do not require icon generation. The source currently contains a 256-pixel
-PNG; larger app icon sizes are upscaled from it.
+---
 
-The macOS deployment target is 12.0. Import files through the system file picker;
-automatic QQ/WeChat directory discovery is available only on Windows. The macOS
-sandbox allows user-selected files for import and encrypted backup export.
+表情管家用于在本地管理表情，支持 Windows、macOS 和 Android。可以导入图片和 GIF、建立分组、编辑备注、按使用频率排序，并通过加密迁移包在设备之间转移表情库。
 
-To create a macOS release app and ZIP:
+## 主要功能
+
+- **导入与去重**：选择图片或 GIF，按文件内容去重；Windows 支持扫描 QQ、微信的已知表情目录，Android 支持从系统分享菜单导入。
+- **分组与搜索**：表情可以属于多个分组，支持按备注搜索。
+- **排序与置顶**：支持常用优先和最近导入两种排序，并可将表情置顶；QQ 收藏分组支持按来源顺序展示。
+- **批量管理**：多选表情后，可以移动到分组或批量删除。
+- **快速使用**：桌面端提供托盘或菜单栏入口及全局快捷键，Android 提供悬浮面板。
+- **备份迁移**：通过加密迁移包（`.smp` 文件）导出和恢复表情、分组及使用记录。
+
+## 使用方法
+
+### 导入表情
+
+点击 **导入表情**，然后选择图片或 GIF，在预览中确认文件后点击 **开始导入**。
+
+Windows 还可以使用 **自动扫描 QQ/微信目录** 或 **选择表情文件夹**。如果自动扫描未发现可导入的目录，那么需要手动选择表情文件夹。可能包含市场表情或群聊表情的目录默认不勾选，可以在预览中调整。
+
+Android 可以通过其他应用的系统分享菜单将图片分享给表情管家。如果导入失败，可以通过 **接收分享** 重试。
+
+### 整理与查找
+
+在当前分组中输入备注，即可筛选表情。通过 **管理分组** 为表情选择多个分组，通过 **编辑备注** 添加可搜索的说明。桌面端使用卡片右键菜单；Android 使用卡片上的 **表情操作** 菜单。
+
+默认的 **常用优先** 会先显示置顶表情，再按使用次数和最近使用时间排序。也可以切换为 **最近导入**，或调整 **标准／紧凑** 缩略图密度。**QQ 收藏** 默认使用 **来源顺序**，依据文件时间和路径排序，因此不保证与 QQ 内部收藏顺序完全一致。
+
+选择 **多选** 后，可以批量删除或 **移动到分组**。**全选当前列表** 仅针对当前筛选结果。移动会替换所选表情原有的分组，**全部** 分组始终保留。网格获得焦点后，方向键切换当前表情，Enter 使用或选择表情，Escape 退出多选。
+
+### 快速使用
+
+| 平台 | 入口 | 使用方式 |
+| --- | --- | --- |
+| Windows | 托盘图标或 `Ctrl+Shift+E` | 快捷键唤出的面板可以向切换前的窗口粘贴并发送回车；卡片悬停时的复制按钮只写入剪贴板。 |
+| macOS 12.0 及以上 | 菜单栏图标或 `Cmd+Shift+E` | 复制后切换到目标应用，按 `Cmd+V` 粘贴。 |
+| Android 9 及以上 | **设置 → 开启悬浮面板** | 复制后，在支持图片剪贴板的应用中粘贴。首次开启需要授予悬浮窗权限。 |
+
+桌面快捷键可以在 **设置 → 设置快速唤出热键** 中修改。快速选择面板用于搜索和使用表情，多选等管理操作在主窗口中进行。
+
+## 备份与迁移
+
+1. 选择 **更多操作 → 导出加密迁移包**。
+2. 输入至少 8 个字符的密码，保存 `.smp` 文件。
+3. 在目标设备选择 **更多操作 → 导入加密迁移包**，然后选择文件并输入相同密码。
+
+迁移包包含整个表情库的媒体、缩略图、分组、备注、置顶状态及使用记录，不受当前筛选条件影响。快捷键和显示偏好不包含在迁移包中。
+
+导入合并到现有表情库，并按 SHA-256 去重。内容相同的表情，本地记录会被迁移包中的备注、置顶状态、使用次数和最近使用时间覆盖，分组关系合并。
+
+## 本地开发
+
+项目使用 Flutter，当前 CI 指定版本为 **3.47.3**。请将 Flutter 加入 `PATH`，并配置目标平台所需的开发工具。项目结构检查需要 Node.js。
+
+在项目根目录安装依赖并启动应用：
 
 ```sh
 flutter pub get
-bash tool/build_macos.sh
+flutter run
 ```
 
-The ZIP in `dist/` preserves the `.app` bundle, executable permissions and framework
-symlinks. CI artifacts are test builds without Developer ID signing or notarization.
-Public macOS distribution requires an Apple Developer identity and notarization.
+分析代码、执行测试及检查项目结构：
 
-## GitHub Actions
-
-`.github/workflows/ci.yml` runs only on manual dispatch. Pushes and pull requests
-do not start builds. To build, open **Actions → Build and test → Run workflow**,
-select the branch, and confirm **Run workflow**. The workflow must exist on the
-repository's default branch for the manual dispatch button to be available.
-Each macOS, Windows and Android job restores dependencies, verifies project files,
-runs analysis and tests, and builds a release artifact. macOS also executes the
-native clipboard tests. Download the ZIP or APK from the workflow's artifacts.
-The Android APK uses the existing debug-signing fallback and is for testing.
-The workflow does not publish a GitHub Release or require signing secrets.
-
-## Windows and Android development
-
-Flutter 3.47.3 or a compatible Flutter SDK is required. Set `FLUTTER_ROOT`
-to the SDK directory, or make `flutter.bat` available on `PATH`. From this
-directory run:
-
-```powershell
-$env:FLUTTER_ROOT='/path/to/flutter'
-& "$env:FLUTTER_ROOT/bin/flutter.bat" pub get
-& "$env:FLUTTER_ROOT/bin/flutter.bat" run -d windows
-& "$env:FLUTTER_ROOT/bin/flutter.bat" run -d <android-device>
+```sh
+flutter analyze --no-pub
+flutter test --no-pub
+node tool/verify_project.mjs
 ```
 
-For Android arm64 Debug builds, use:
+托盘、剪贴板、全局快捷键和悬浮面板需要在对应平台验证。
 
-```powershell
-$env:JAVA_HOME='/path/to/jdk17-or-newer'
-$env:ANDROID_SDK_ROOT='/path/to/android-sdk'
-& "$env:FLUTTER_ROOT/bin/flutter.bat" build apk --debug --target-platform android-arm64
-```
+## 构建与下载
 
-Android builds require a Gradle runtime JDK version supported by the wrapper:
-Java 17 or newer. Java 21 is also a valid Gradle runtime when it is installed.
-Java 11 is too old for the current Gradle/Android Gradle Plugin combination and
-must not be selected through `JAVA_HOME` or the system `PATH`. Android Java and
-Kotlin bytecode targets remain Java 17 for compatibility with the API 28
-minimum; that target is independent from the JDK used to run Gradle.
+GitHub Actions 仅支持手动触发，推送代码和创建或更新 PR 不会自动构建。
 
-To build both release artifacts and create a Windows zip package, run:
+1. 进入仓库的 **Actions → Build and test → Run workflow**。
+2. 选择分支，确认 **Run workflow**。
+3. 构建完成后，在该次任务的产物中下载桌面 ZIP 或 Android APK。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tool\build_release.ps1
-```
+工作流会执行依赖安装、项目结构检查、静态分析和测试，然后构建各平台产物。该入口只在默认分支包含工作流文件时显示。构建流程不自动发布 GitHub Release。
 
-The Windows zip includes `README_FIRST.txt` and `Start-StickerManager.cmd` at
-the package root. After extracting it, double-click the command file or
-`sticker_manager.exe`; no installer or administrator permission is required.
+CI 产物用于测试：Android APK 使用调试签名，macOS 应用未经过 Developer ID 签名和公证。仓库中的构建、安装及验证脚本位于 [`tool/`](tool/)，具体步骤见 [CI 配置](.github/workflows/ci.yml)。
 
-To install the Windows Release directory for the current user without
-administrator access, run:
+Android 正式签名通过以下环境变量配置，四项必须同时提供：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tool\install_windows.ps1 -Launch
-```
+- `STICKER_RELEASE_STORE_FILE`
+- `STICKER_RELEASE_STORE_PASSWORD`
+- `STICKER_RELEASE_KEY_ALIAS`
+- `STICKER_RELEASE_KEY_PASSWORD`
 
-The installer creates a Start menu shortcut and refuses to overwrite a running
-instance. Uninstall with the copied `uninstall_windows.ps1` in the install
-directory; it also refuses to remove files while the installed process is
-running.
+全部未配置时使用调试签名；仅配置部分变量时，构建会失败。密钥库和密码不应提交到仓库。
 
-The script refuses to build while a project-local `sticker_manager.exe` is
-running and never terminates it. Before packaging, verify the single-instance
-guard with:
+## 数据与隐私
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tool\verify_single_instance.ps1
-```
+表情库使用 SQLite 保存记录，数据库文件为 `stickers.db`，媒体副本位于 `media/`，均保存在系统的应用支持目录中。
 
-Launching the executable repeatedly activates the first tray instance and
-exits the duplicate process. If the first process exits during startup, the
-named mutex is released and exactly one subsequent launch takes ownership.
-When no signing variables are configured, the Android `release` variant uses
-the debug signing key from `android/app/build.gradle.kts`; configure a private
-release keystore before distributing the APK outside local testing. The Gradle file accepts these four
-environment variables without storing credentials in the project:
-`STICKER_RELEASE_STORE_FILE`, `STICKER_RELEASE_STORE_PASSWORD`,
-`STICKER_RELEASE_KEY_ALIAS`, and `STICKER_RELEASE_KEY_PASSWORD`. They must be
-provided together; otherwise the build fails rather than silently using a
-partially configured keystore.
+应用不会修改 QQ、微信的源文件，也不会解析其私有数据库。删除单个表情，或通过 **更多操作 → 清理导入记录** 批量删除时，只删除表情记录和应用管理的副本。批量删除的对话框标题为 **按来源清理**，可以按 QQ 导入、微信导入、手动导入和 Android 分享分别选择。
 
-The Windows debug executable is written to
-`build/windows/x64/runner/Debug/sticker_manager.exe`; the Android APK is written
-to `build/app/outputs/flutter-apk/app-debug.apk`. Android builds require SDK
-Platform 36 and NDK 28.2.13676358 with their licenses accepted. On Windows,
-Flutter plugin discovery also requires Developer Mode (or equivalent symlink
-support) to be enabled before running `pub get`.
+Windows 自动导入仅扫描已知表情目录。文件夹扫描按文件头识别图片类型，每个目录最多扫描 1,000 个匹配文件。手动选择文件导入时，单个文件不超过 64 MiB，每批所选源文件合计不超过 512 MiB，均按去重前的原始文件大小计算；超限文件会跳过并提示。
 
-## Privacy and import behavior
+## 项目结构与文档
 
-The app never edits QQ or WeChat source files and does not parse private
-databases. Windows import scans only the named emotion folders above, validates
-image signatures, treats a selected `Tencent Files` parent as an emotion root,
-and caps automatic discovery at 1,000 files per folder (the
-normal QQ limit is about 500 and SVIP about 1,000). Android uses the system
-share sheet because another app's private storage is sandboxed. The optional
-floating panel requires Android's `显示在其他应用上层` permission and can be
-disabled from the settings menu at any time.
+| 路径 | 内容 |
+| --- | --- |
+| `lib/main.dart` | 应用入口 |
+| `lib/ui/` | 界面与交互 |
+| `lib/models.dart` | 领域模型 |
+| `lib/services/` | 数据存储、导入、排序、偏好及加密迁移 |
+| `lib/platform/` | 平台桥接 |
+| `test/` | 自动化测试 |
+| `tool/` | 构建、安装与验证脚本 |
+
+- [产品规格](docs/PROJECT_SPEC.md)
+- [架构说明](docs/ARCHITECTURE.md)
+- [设计决策](docs/DECISIONS.md)
+- [变更日志](CHANGELOG.md)
