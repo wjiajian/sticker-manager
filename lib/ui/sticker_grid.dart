@@ -249,6 +249,8 @@ class _StickerGridState extends State<StickerGrid> {
           availableWidth: constraints.maxWidth,
           density: widget.density,
           quickPicker: widget.quickPicker,
+          desktop: Theme.of(context).platform == TargetPlatform.macOS ||
+              Theme.of(context).platform == TargetPlatform.windows,
         );
         if (_metrics != metrics) {
           _metrics = metrics;

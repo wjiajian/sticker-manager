@@ -41,6 +41,31 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(pasteboard.data(forType: .png))
   }
 
+  func testReadPrefersGIFAndLeavesClipboardUnchanged() throws {
+    let gif = Data(base64Encoded: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")!
+    let item = NSPasteboardItem()
+    item.setData(gif, forType: NSPasteboard.PasteboardType("com.compuserve.gif"))
+    item.setData(Data([1, 2, 3]), forType: .png)
+    pasteboard.writeObjects([item])
+    let count = pasteboard.changeCount
+    XCTAssertEqual(try MainFlutterWindow.readClipboardImageData(from: pasteboard), gif)
+    XCTAssertEqual(pasteboard.changeCount, count)
+  }
+
+  func testReadTextHasNoImageAndTIFFConvertsToPNG() throws {
+    pasteboard.setString("keep this text", forType: .string)
+    XCTAssertNil(try MainFlutterWindow.readClipboardImageData(from: pasteboard))
+    XCTAssertEqual(pasteboard.string(forType: .string), "keep this text")
+    let bitmap = NSBitmapImageRep(
+      bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8,
+      samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+      colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    pasteboard.clearContents()
+    pasteboard.setData(try XCTUnwrap(bitmap.tiffRepresentation), forType: .tiff)
+    let png = try XCTUnwrap(MainFlutterWindow.readClipboardImageData(from: pasteboard))
+    XCTAssertEqual(Array(png.prefix(4)), [0x89, 0x50, 0x4e, 0x47])
+  }
+
   func testMissingAndInvalidFilesPreserveClipboard() throws {
     pasteboard.setString("existing content", forType: .string)
     let url = directory.appendingPathComponent("invalid.image")

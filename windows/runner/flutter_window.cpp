@@ -9,6 +9,7 @@
 #include <iterator>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include <optional>
 
@@ -1070,6 +1071,31 @@ bool FlutterWindow::OnCreate() {
           }
           result->Success(flutter::EncodableValue(ActivateWindow(
               reinterpret_cast<HWND>(raw_handle))));
+          return;
+        }
+        if (call.method_name() == "readClipboardImageData") {
+          if (!OpenClipboardWithRetry()) {
+            result->Error("clipboard_busy", "无法读取剪贴板，请稍后重试");
+            return;
+          }
+          std::vector<uint8_t> bytes;
+          bool too_large = false;
+          for (const wchar_t* name : {L"GIF", L"image/gif", L"GIF89a", L"PNG", L"image/png"}) {
+            const UINT format = RegisterClipboardFormatW(name);
+            if (!IsClipboardFormatAvailable(format)) continue;
+            HANDLE handle = GetClipboardData(format);
+            if (!handle) continue;
+            const SIZE_T size = GlobalSize(handle);
+            if (size > 64 * 1024 * 1024) { too_large = true; break; }
+            const auto* data = static_cast<const uint8_t*>(GlobalLock(handle));
+            if (data && size > 0) bytes.assign(data, data + size);
+            if (data) GlobalUnlock(handle);
+            if (!bytes.empty()) break;
+          }
+          CloseClipboard();
+          if (too_large) result->Error("too_large", "剪贴板图片超过 64 MiB");
+          else if (bytes.empty()) result->Success();
+          else result->Success(flutter::EncodableValue(bytes));
           return;
         }
         if (call.method_name() == "copySticker") {

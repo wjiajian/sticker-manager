@@ -3,14 +3,51 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
+import 'package:path/path.dart' as path;
 
 import '../models.dart';
+import '../services/media_store.dart';
 
 class ClipboardBridge {
   ClipboardBridge._();
 
   static final instance = ClipboardBridge._();
   static const _channel = MethodChannel('sticker_manager/platform');
+
+  Future<ClipboardImport> readForImport() async {
+    final paths = await Pasteboard.files();
+    if (paths.isNotEmpty) {
+      return ClipboardImport(paths.map((value) {
+        final uri = Uri.tryParse(value);
+        return File(uri?.scheme == 'file' ? uri!.toFilePath() : value);
+      }).toList());
+    }
+    Uint8List? bytes;
+    try {
+      bytes = await _channel.invokeMethod<Uint8List>('readClipboardImageData');
+    } on MissingPluginException {
+      // Preview runners can still import a static bitmap via the plugin.
+    }
+    bytes ??= await Pasteboard.image;
+    if (bytes == null || bytes.isEmpty) return const ClipboardImport([]);
+    if (bytes.length > MediaStore.maxImportFileBytes) {
+      throw const FormatException('剪贴板图片超过 64 MiB');
+    }
+    final directory =
+        await Directory.systemTemp.createTemp('sticker-clipboard-');
+    try {
+      final gif =
+          bytes.length >= 6 && String.fromCharCodes(bytes.take(3)) == 'GIF';
+      final stamp = DateTime.now().toIso8601String().replaceAll(':', '-');
+      final file = File(
+          path.join(directory.path, '剪贴板图片 $stamp.${gif ? 'gif' : 'png'}'));
+      await file.writeAsBytes(bytes);
+      return ClipboardImport([file], temporaryDirectory: directory);
+    } on Object {
+      await directory.delete(recursive: true);
+      rethrow;
+    }
+  }
 
   Future<bool> writeSticker(Sticker sticker) async {
     final file = File(sticker.filePath);
@@ -81,6 +118,18 @@ class ClipboardBridge {
       return false;
     } on PlatformException {
       return false;
+    }
+  }
+}
+
+class ClipboardImport {
+  const ClipboardImport(this.files, {this.temporaryDirectory});
+  final List<File> files;
+  final Directory? temporaryDirectory;
+  Future<void> dispose() async {
+    final directory = temporaryDirectory;
+    if (directory != null && await directory.exists()) {
+      await directory.delete(recursive: true);
     }
   }
 }

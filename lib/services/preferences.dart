@@ -6,6 +6,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 
 class AppPreferences {
+  Future<bool> showRecent() async =>
+      (await SharedPreferences.getInstance()).getBool('showRecent') ?? true;
+
+  Future<void> setShowRecent(bool value) async {
+    await (await SharedPreferences.getInstance()).setBool('showRecent', value);
+  }
+
   static const _hotkeyKey = 'hotkey';
   static const _qqImportDirectoriesKey = 'qqImportDirectories';
   static const _compatibilityRecordsKey = 'clipboardCompatibilityRecords';

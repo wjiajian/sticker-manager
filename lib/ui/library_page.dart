@@ -1,16 +1,20 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:path/path.dart' as path;
 
 import '../models.dart';
 import '../platform/desktop_platform.dart';
 import '../platform/platform_bridge.dart';
+import '../platform/clipboard_bridge.dart';
+import '../platform/desktop_drop_bridge.dart';
+import '../services/import_preview.dart';
+import 'import_preview_dialog.dart';
 import '../services/database.dart';
 import '../services/export_service.dart';
 import '../services/import_source.dart';
@@ -19,7 +23,13 @@ import '../services/preferences.dart';
 import '../services/quick_picker_controller.dart';
 import '../services/ranking_service.dart';
 import '../services/repository.dart';
+import '../services/recent_usage.dart';
+import 'recent_stickers.dart';
+import 'add_to_groups_dialog.dart';
+import '../services/sticker_filter.dart';
 import 'app_theme.dart';
+import 'filter_panel.dart';
+import 'hotkey_setting.dart';
 import 'grid_metrics.dart';
 import 'library_feedback.dart';
 import 'library_sidebar.dart';
@@ -47,6 +57,12 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
       ExportPackageService(_repository);
   final _ranking = UsageRankingService();
   final _preferences = AppPreferences();
+  final _recentUsage = RecentUsage();
+  List<String> _recentIds = [];
+  bool _showRecent = true;
+  bool _stickerActionBusy = false;
+  DateTime? _lastStickerAction;
+  String? _lastStickerActionId;
   final _searchController = TextEditingController();
   final _gridFocusNode = FocusNode(debugLabel: 'sticker-grid');
   final _gridScrollController = ScrollController();
@@ -54,8 +70,11 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   List<RankedSticker> _stickers = [];
   List<StickerGroup> _groups = [];
   String? _selectedGroup;
+  bool _searchAll = false;
+  StickerFilter _filter = const StickerFilter();
   bool _loading = true;
   bool _importing = false;
+  bool _dragging = false;
   String _importStatus = '';
   bool _selectionMode = false;
   final Set<String> _selectedStickerIds = <String>{};
@@ -264,7 +283,12 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
       ]);
       if (!mounted) return;
       final loadedStickers = values[0] as List<RankedSticker>;
+      await _recentUsage
+          .retain(loadedStickers.map((e) => e.sticker.id).toSet());
+      final recentIds = await _recentUsage.ids();
+      if (!mounted) return;
       setState(() {
+        _recentIds = recentIds;
         _stickers = loadedStickers;
         _groups = values[1] as List<StickerGroup>;
         _loading = false;
@@ -287,6 +311,7 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
 
   Future<void> _initializeLibrary() async {
     _density = await _preferences.gridDensity();
+    _showRecent = await _preferences.showRecent();
     if (!mounted) return;
     await _load();
     if (!mounted || _error != null || _thumbnailMigrationStarted) return;
@@ -328,9 +353,10 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
 
   List<RankedSticker> get _visibleStickers => _ranking.rank(
         _stickers,
-        groupId: _selectedGroup == 'all' ? null : _selectedGroup,
+        groupId: _searchAll || _selectedGroup == 'all' ? null : _selectedGroup,
         query: _searchController.text,
         order: _sortOrder,
+        filter: _filter,
       );
 
   /// Sticker count per group id, including `all`. Membership is many-to-many,
@@ -357,534 +383,245 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
 
   Set<String> get _importGroupIds {
     final selectedGroup = _selectedGroup;
-    if (selectedGroup == null || selectedGroup == 'all') {
+    if (_searchAll || selectedGroup == null || selectedGroup == 'all') {
       return {'all'};
     }
     return {'all', selectedGroup};
   }
 
-  Future<void> _importFiles() async {
-    if (_importing) return;
-    final groupIds = _importGroupIds;
-    if (Platform.isWindows) {
-      final mode = await _showWindowsImportOptions();
-      if (!mounted || mode == null) return;
-      if (mode == 'auto') {
-        await _importAutoDetected(groupIds);
-      } else if (mode == 'directory') {
-        await _importDirectory(groupIds);
-      } else {
-        await _importSelectedFiles(groupIds);
-      }
+  bool get _desktopImport => Platform.isWindows || Platform.isMacOS;
+
+  Future<void> _importFiles() => _runImport(() async {
+        final result = await FilePicker.pickFiles(
+            dialogTitle: '选择图片或 GIF 文件',
+            type: FileType.custom,
+            allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif']);
+        return [
+          _ImportBatch(
+              label: '已选择的文件',
+              source: StickerSource.manual,
+              files: result
+                  .where((f) => f.path != null)
+                  .map((f) => File(f.path!))
+                  .toList())
+        ];
+      });
+
+  Future<void> _importDirectory() => _runImport(() async {
+        final directory =
+            await FilePicker.getDirectoryPath(dialogTitle: '选择表情文件夹');
+        if (directory == null) return [];
+        final source = WindowsImportSource();
+        return [
+          _ImportBatch(
+              label: directory,
+              source: source.sourceFor(Directory(directory)),
+              files: await source.scan(Directory(directory),
+                  maxFiles: WindowsImportSource.defaultMaxFiles))
+        ];
+      });
+
+  Future<void> _importAutoDetected() => _runImport(() async {
+        final source = WindowsImportSource();
+        final directories = await source.discoverCandidates(
+            rememberedDirectories: await _preferences.qqImportDirectories());
+        final batches = <_ImportBatch>[];
+        for (final directory in directories) {
+          final files = await source.scan(directory,
+              maxFiles: WindowsImportSource.defaultMaxFiles);
+          if (files.isNotEmpty) {
+            batches.add(_ImportBatch(
+                label: directory.path,
+                source: source.sourceFor(directory),
+                files: files));
+          }
+        }
+        return batches;
+      });
+
+  Future<void> _runImport(Future<List<_ImportBatch>> Function() discover,
+      {Future<void> Function()? cleanup}) async {
+    if (_importing) {
+      _showMessage('导入进行中，请稍后重试');
+      await cleanup?.call();
       return;
     }
-    await _importSelectedFiles(groupIds);
-  }
-
-  Future<String?> _showWindowsImportOptions() async {
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('导入表情'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.manage_search_outlined),
-              title: const Text('自动扫描 QQ/微信目录'),
-              subtitle: const Text('查找已知的个人表情目录'),
-              onTap: () => Navigator.pop(context, 'auto'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_open_outlined),
-              title: const Text('选择表情文件夹'),
-              subtitle: const Text('直接选择 QQ 的 Ori 文件夹或其他表情目录'),
-              onTap: () => Navigator.pop(context, 'directory'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('选择图片或 GIF 文件'),
-              subtitle: const Text('可一次选择多个文件'),
-              onTap: () => Navigator.pop(context, 'files'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _importAutoDetected(Iterable<String> groupIds) async {
-    if (_importing) return;
+    final groups = _importGroupIds;
     setState(() {
       _importing = true;
-      _importStatus = '正在检查 QQ/微信目录…';
+      _importStatus = '正在准备导入预览…';
     });
     try {
-      final source = WindowsImportSource();
-      final candidates = await source.discoverCandidates(
-          rememberedDirectories: await _preferences.qqImportDirectories());
-      final batches = <_ImportBatch>[];
-      var discovered = 0;
-      for (final directory in candidates) {
-        if (mounted) {
-          setState(() => _importStatus = '正在扫描 ${directory.path}…');
-        }
-        final files = await source.scan(directory,
-            maxFiles: WindowsImportSource.defaultMaxFiles);
-        if (files.isEmpty) continue;
-        discovered += files.length;
-        batches.add(_ImportBatch(
-          label: directory.path,
-          source: source.sourceFor(directory),
-          files: files,
-        ));
-      }
-      if (discovered == 0) {
-        if (mounted) {
-          _showMessage('未找到可导入的 QQ/微信表情目录，请改用“选择表情文件夹”。');
-        }
+      final batches = await discover();
+      if (!mounted) return;
+      if (batches.isEmpty || batches.every((b) => b.files.isEmpty)) {
+        _showMessage('没有找到可导入的图片文件');
         return;
       }
-      final selections =
-          await _confirmImportPreview(title: '确认导入 QQ/微信表情', batches: batches);
-      if (selections == null || selections.isEmpty) {
-        return;
-      }
-      var added = 0;
-      var duplicates = 0;
-      var skipped = 0;
-      var skippedTooLarge = 0;
-      var skippedByTotalLimit = 0;
-      for (final selection in selections) {
-        final batch = selection.batch;
-        if (mounted) {
-          setState(() => _importStatus = '正在导入 ${selection.files.length} 个文件…');
-        }
-        final outcome = await _mediaStore.importFiles(
-          selection.files,
-          source: batch.source,
-          groupIds: groupIds,
-          onProgress: _reportImportProgress,
-          onRecordsCommitted: _refreshAfterCommit,
-        );
-        added += outcome.added;
-        duplicates += outcome.duplicates;
-        skipped += outcome.skipped;
-        skippedTooLarge += outcome.skippedTooLarge;
-        skippedByTotalLimit += outcome.skippedByTotalLimit;
-      }
-      await _load();
-      if (mounted) {
-        _showMessage(
-            '已扫描 ${batches.length} 个明确目录：导入 $added 个，重复 $duplicates 个，跳过 $skipped 个${_sizeLimitSuffix(skippedTooLarge, skippedByTotalLimit)}（每个目录最多扫描 ${WindowsImportSource.defaultMaxFiles} 个）');
-      }
+      await _reviewAndImport(batches, groups);
     } on Object catch (error) {
       if (mounted) _showMessage('导入失败：$error');
     } finally {
+      try {
+        await cleanup?.call();
+      } on Object {
+        if (mounted) _showMessage('临时图片清理失败，请检查缓存目录权限');
+      }
       if (mounted) {
         setState(() {
           _importing = false;
           _importStatus = '';
         });
-        _drainQueuedSharedImport();
       }
+      _drainQueuedSharedImport();
     }
   }
 
-  Future<void> _importDirectory(Iterable<String> groupIds) async {
-    String? directoryPath;
-    try {
-      directoryPath = await FilePicker.getDirectoryPath(
-        dialogTitle: '选择 QQ/微信个人表情文件夹',
-      );
-    } on Object catch (error) {
-      if (mounted) _showMessage('打开文件夹选择器失败：$error');
+  Future<bool> _reviewAndImport(
+      List<_ImportBatch> batches, Set<String> groupIds) async {
+    final sources = <String, StickerSource>{};
+    final files = <File>[];
+    for (final batch in batches) {
+      for (final file in batch.files) {
+        if (sources.containsKey(file.path)) continue;
+        files.add(file);
+        sources[file.path] = batch.source;
+      }
+    }
+    final candidates = await _mediaStore.inspectFiles(files,
+        sourceForFile: (file) => sources[file.path]!);
+    if (!mounted) return false;
+    setState(() => _importStatus = '请确认导入内容和目标分组');
+    final target =
+        groupIds.firstWhere((id) => id != 'all', orElse: () => 'all');
+    final decision = await showDialog<ImportDecision>(
+        context: context,
+        builder: (_) => ImportPreviewDialog(
+            title: '确认导入表情',
+            candidates: candidates,
+            groups: _groups,
+            initialGroup: target));
+    if (decision == null || !mounted) return false;
+    final selected = decision.candidates;
+    final outcome = await _mediaStore.importFiles(selected.map((c) => c.file),
+        sourceForFile: (file) => sources[file.path]!,
+        expectedHashes: {for (final c in selected) c.file.path: c.hash!},
+        groupIds: {'all', decision.groupId},
+        onProgress: _reportImportProgress,
+        onRecordsCommitted: _refreshAfterCommit);
+    for (final batch in batches) {
+      if (batch.source == StickerSource.qq &&
+          await Directory(batch.label).exists()) {
+        await _preferences.rememberQqImportDirectory(batch.label);
+      }
+    }
+    await _load();
+    if (mounted) {
+      _showMessage(
+          '新增图片 ${outcome.added} · 已有图片加入分组 ${outcome.existingGrouped} · 已存在 ${outcome.alreadyExists} · 失败 ${outcome.skipped} · 预览跳过 ${candidates.where((c) => !c.valid).length}');
+    }
+    return true;
+  }
+
+  Future<void> _importClipboard() async {
+    ClipboardImport? input;
+    await _runImport(() async {
+      input = await ClipboardBridge.instance.readForImport();
+      if (input!.files.isEmpty) throw const FormatException('剪贴板中没有可导入的图片');
+      return [
+        _ImportBatch(
+            label: '剪贴板', source: StickerSource.manual, files: input!.files)
+      ];
+    }, cleanup: () async {
+      await input?.dispose();
+    });
+  }
+
+  Future<void> _importDrop(DropDoneDetails details) async {
+    final input = DropImport(details.files);
+    if (ModalRoute.of(context)?.isCurrent != true) {
+      if (_importing) _showMessage('导入进行中，请稍后重试');
+      await input.dispose();
       return;
     }
-    if (!mounted || directoryPath == null || directoryPath.isEmpty) return;
-
-    final directory = Directory(directoryPath);
-    final source = WindowsImportSource();
-    setState(() {
-      _importing = true;
-      _importStatus = '正在扫描 ${directory.path}…';
-    });
-    try {
-      final files = await source.scan(directory,
-          maxFiles: WindowsImportSource.defaultMaxFiles);
-      if (files.isEmpty) {
-        if (mounted) _showMessage('所选文件夹中没有可识别的图片或 GIF。');
-        return;
-      }
-      final batch = _ImportBatch(
-        label: directory.path,
-        source: source.sourceFor(directory),
-        files: files,
-      );
-      final selections =
-          await _confirmImportPreview(title: '确认导入文件夹', batches: [batch]);
-      if (selections == null || selections.isEmpty) {
-        return;
-      }
-      final selectedFiles = selections.single.files;
-      if (mounted) {
-        setState(() => _importStatus = '正在导入 ${selectedFiles.length} 个文件…');
-      }
-      final outcome = await _mediaStore.importFiles(
-        selectedFiles,
-        source: source.sourceFor(directory),
-        groupIds: groupIds,
-        onProgress: _reportImportProgress,
-        onRecordsCommitted: _refreshAfterCommit,
-      );
-      if (source.sourceFor(directory) == StickerSource.qq) {
-        await _preferences.rememberQqImportDirectory(directory.path);
-      }
-      await _load();
-      if (mounted) {
-        _showMessage(
-            '从文件夹导入 ${outcome.added} 个，重复 ${outcome.duplicates} 个，跳过 ${outcome.skipped} 个${_sizeLimitSuffix(outcome.skippedTooLarge, outcome.skippedByTotalLimit)}');
-      }
-    } on Object catch (error) {
-      if (mounted) _showMessage('导入失败：$error');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _importing = false;
-          _importStatus = '';
-        });
-        _drainQueuedSharedImport();
-      }
-    }
+    await _runImport(() async {
+      await input.read(directorySource: WindowsImportSource());
+      return [
+        _ImportBatch(
+            label: '拖放文件', source: StickerSource.manual, files: input.files)
+      ];
+    }, cleanup: input.dispose);
   }
 
-  Future<void> _importSelectedFiles(Iterable<String> groupIds) async {
-    if (_importing) return;
-    setState(() {
-      _importing = true;
-      _importStatus = '正在打开文件选择器…';
-    });
-    try {
-      final result = await FilePicker.pickFiles(
-        dialogTitle: '选择图片或 GIF 文件',
-        // file_picker 12.x defaults pickFiles to multi-select. The single-file
-        // API is pickFile; using pickFiles keeps this workflow multi-select.
-        type: FileType.custom,
-        allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'],
-      );
-      final files = result
-          .where((file) => file.path != null)
-          .map((file) => File(file.path!))
-          .toList(growable: false);
-      if (files.isEmpty) return;
-      final batch = _ImportBatch(
-        label: '已选择的文件',
-        source: StickerSource.manual,
-        files: files,
-      );
-      final selections =
-          await _confirmImportPreview(title: '确认导入表情文件', batches: [batch]);
-      if (selections == null || selections.isEmpty) {
-        return;
-      }
-      final selectedFiles = selections.single.files;
-      if (mounted) {
-        setState(() => _importStatus = '正在导入 ${selectedFiles.length} 个文件…');
-      }
-      final outcome = await _mediaStore.importFiles(
-        selectedFiles,
-        groupIds: groupIds,
-        onProgress: _reportImportProgress,
-        onRecordsCommitted: _refreshAfterCommit,
-      );
-      if (mounted) {
-        _showMessage(
-            '导入 ${outcome.added} 个，重复 ${outcome.duplicates} 个，跳过 ${outcome.skipped} 个${_sizeLimitSuffix(outcome.skippedTooLarge, outcome.skippedByTotalLimit)}');
-      }
-    } on Object catch (error) {
-      if (mounted) _showMessage('导入失败：$error');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _importing = false;
-          _importStatus = '';
-        });
-        _drainQueuedSharedImport();
-      }
+  KeyEventResult _handleImportShortcut(FocusNode node, KeyEvent event) {
+    if (!_desktopImport ||
+        _quickPickerMode ||
+        event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.keyV ||
+        !(Platform.isMacOS
+            ? HardwareKeyboard.instance.isMetaPressed
+            : HardwareKeyboard.instance.isControlPressed) ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return KeyEventResult.ignored;
     }
+    final focus = FocusManager.instance.primaryFocus?.context;
+    if (focus?.widget is EditableText ||
+        focus?.findAncestorStateOfType<EditableTextState>() != null) {
+      return KeyEventResult.ignored;
+    }
+    unawaited(_importClipboard());
+    return KeyEventResult.handled;
   }
 
-  Future<List<_ImportSelection>?> _confirmImportPreview({
-    required String title,
-    required List<_ImportBatch> batches,
-  }) async {
-    if (!mounted || batches.isEmpty) return null;
-    final selectedFiles = <int, Set<int>>{
-      for (var batchIndex = 0; batchIndex < batches.length; batchIndex++)
-        batchIndex: <int>{
-          for (var fileIndex = 0;
-              fileIndex < batches[batchIndex].files.length;
-              fileIndex++)
-            if (batches[batchIndex].defaultSelected &&
-                defaultSelectImportFile(batches[batchIndex].files[fileIndex]))
-              fileIndex,
+  Widget _buildDropArea(Widget child) {
+    if (!_desktopImport) return child;
+    return DropTarget(
+        onDragEntered: (_) {
+          if (ModalRoute.of(context)?.isCurrent == true) {
+            setState(() => _dragging = true);
+          }
         },
-    };
-    final confirmed = await showDialog<List<_ImportSelection>>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: Text(title),
-          content: SizedBox(
-            width: 520,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('选择要导入的目录和文件。导入时会按内容哈希自动跳过重复项，不会修改源文件。'),
-                const SizedBox(height: 12),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 280),
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: batches.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final batch = batches[index];
-                      final selected = selectedFiles[index]!;
-                      final allSelected = selected.length == batch.files.length;
-                      return ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: Checkbox(
-                          value: allSelected
-                              ? true
-                              : selected.isEmpty
-                                  ? false
-                                  : null,
-                          tristate: true,
-                          onChanged: (value) {
-                            setDialogState(() {
-                              selectedFiles[index] = value == true
-                                  ? <int>{
-                                      ...List<int>.generate(
-                                          batch.files.length, (i) => i)
-                                    }
-                                  : <int>{};
-                            });
-                          },
-                        ),
-                        title: Text(_sourceLabel(batch.source)),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(batch.label,
-                                maxLines: 2, overflow: TextOverflow.ellipsis),
-                            if (batch.isReceivedOrMarketPath) ...[
-                              const SizedBox(height: 2),
-                              const Text('可能包含群聊或市场表情，默认不导入',
-                                  style: TextStyle(fontSize: 12)),
-                            ],
-                            const SizedBox(height: 6),
-                            SizedBox(
-                              height: 64,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: math.min(batch.files.length, 8),
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(width: 6),
-                                itemBuilder: (context, fileIndex) {
-                                  final file = batch.files[fileIndex];
-                                  return ClipRRect(
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: Image.file(
-                                      file,
-                                      width: 64,
-                                      height: 64,
-                                      fit: BoxFit.cover,
-                                      cacheWidth: 128,
-                                      cacheHeight: 128,
-                                      filterQuality: FilterQuality.low,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        width: 64,
-                                        height: 64,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .surfaceContainerHighest,
-                                        alignment: Alignment.center,
-                                        child: const Icon(
-                                            Icons.broken_image_outlined,
-                                            size: 20),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                                '${selected.length}/${batch.files.length} 个已选择'),
-                          ],
-                        ),
-                        trailing: IconButton(
-                          tooltip: '选择文件',
-                          icon: const Icon(Icons.checklist_outlined),
-                          onPressed: batch.files.isEmpty
-                              ? null
-                              : () async {
-                                  final result = await _selectImportFiles(
-                                    batch,
-                                    selected,
-                                  );
-                                  if (result == null) return;
-                                  setDialogState(
-                                      () => selectedFiles[index] = result);
-                                },
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: selectedFiles.values.every((files) => files.isEmpty)
-                  ? null
-                  : () {
-                      final selections = <_ImportSelection>[];
-                      for (var index = 0; index < batches.length; index++) {
-                        final indexes = selectedFiles[index]!;
-                        if (indexes.isEmpty) continue;
-                        selections.add(_ImportSelection(
-                          batch: batches[index],
-                          files:
-                              selectImportFiles(batches[index].files, indexes),
-                        ));
-                      }
-                      Navigator.pop(dialogContext, selections);
-                    },
-              child: const Text('开始导入'),
-            ),
-          ],
-        ),
-      ),
-    );
-    return confirmed;
+        onDragExited: (_) => setState(() => _dragging = false),
+        onDragDone: (details) {
+          setState(() => _dragging = false);
+          unawaited(_importDrop(details));
+        },
+        child: Stack(children: [
+          Positioned.fill(child: child),
+          if (_dragging)
+            Positioned.fill(
+                child: IgnorePointer(
+                    child: Container(
+                        color:
+                            AppTheme.selectionBackground.withValues(alpha: .95),
+                        alignment: Alignment.center,
+                        child: Text(_importing
+                            ? '导入进行中，请稍后重试'
+                            : '松开以导入到「${_searchAll ? '全部表情' : _currentGroupName}」')))),
+        ]));
   }
 
-  Future<Set<int>?> _selectImportFiles(
-      _ImportBatch batch, Set<int> initialSelection) {
-    final selected = Set<int>.of(initialSelection);
-    return showDialog<Set<int>>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text('选择 ${_sourceLabel(batch.source)} 文件'),
-          content: SizedBox(
-            width: 640,
-            height: 520,
-            child: GridView.builder(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 120,
-                mainAxisExtent: 132,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-              ),
-              itemCount: batch.files.length,
-              itemBuilder: (context, index) {
-                final file = batch.files[index];
-                final isSelected = selected.contains(index);
-                return InkWell(
-                  onTap: () => setState(() {
-                    if (isSelected) {
-                      selected.remove(index);
-                    } else {
-                      selected.add(index);
-                    }
-                  }),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: isSelected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.outlineVariant,
-                        width: isSelected ? 2 : 1,
-                      ),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: Padding(
-                            padding: const EdgeInsets.all(4),
-                            child: Image.file(
-                              file,
-                              fit: BoxFit.contain,
-                              cacheWidth: 160,
-                              cacheHeight: 160,
-                              errorBuilder: (_, __, ___) => const Center(
-                                  child: Icon(Icons.broken_image_outlined)),
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          child: Checkbox(
-                            value: isSelected,
-                            onChanged: (value) => setState(() {
-                              if (value == true) {
-                                selected.add(index);
-                              } else {
-                                selected.remove(index);
-                              }
-                            }),
-                          ),
-                        ),
-                        Positioned(
-                          left: 4,
-                          right: 4,
-                          bottom: 2,
-                          child: Text(
-                            path.basename(file.path),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, Set.of(selected)),
-              child: Text('确定（${selected.length}）'),
-            ),
+  Widget _buildImportMenu() => PopupMenuButton<String>(
+      tooltip: '导入方式',
+      onSelected: (value) {
+        switch (value) {
+          case 'clipboard':
+            unawaited(_importClipboard());
+          case 'directory':
+            unawaited(_importDirectory());
+          case 'auto':
+            unawaited(_importAutoDetected());
+        }
+      },
+      itemBuilder: (_) => [
+            if (_desktopImport)
+              const PopupMenuItem(value: 'clipboard', child: Text('从剪贴板导入')),
+            if (_desktopImport)
+              const PopupMenuItem(value: 'directory', child: Text('选择表情文件夹')),
+            if (Platform.isWindows)
+              const PopupMenuItem(value: 'auto', child: Text('自动扫描 QQ/微信目录')),
           ],
-        ),
-      ),
-    );
-  }
+      icon: const Icon(Icons.arrow_drop_down));
 
   Future<void> _importSharedFiles({bool showEmptyMessage = false}) async {
     if (_importing) return;
@@ -906,19 +643,17 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
         }
         return;
       }
-      final outcome = await _mediaStore.importFiles(
-        sharedPaths.map(File.new),
-        source: StickerSource.androidShare,
-        groupIds: groupIds,
-        onProgress: _reportImportProgress,
-        onRecordsCommitted: _refreshAfterCommit,
-      );
+      final confirmed = await _reviewAndImport([
+        _ImportBatch(
+            label: 'Android 分享',
+            source: StickerSource.androidShare,
+            files: sharedPaths.map(File.new).toList())
+      ], groupIds);
+      if (!confirmed) return;
       await PlatformBridge.instance.acknowledgeSharedFiles(sharedPaths);
       importCompleted = true;
-      if (mounted) {
-        final suffix =
-            shareErrors.isEmpty ? '' : '；${_shareErrorMessage(shareErrors)}';
-        _showMessage('已从分享导入 ${outcome.added} 个表情$suffix');
+      if (mounted && shareErrors.isNotEmpty) {
+        _showMessage(_shareErrorMessage(shareErrors));
       }
     } on Object catch (error) {
       if (mounted) _showMessage('分享导入失败：$error');
@@ -942,18 +677,18 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     }
   }
 
-  String _shareErrorMessage(List<String> errors) {
-    if (errors.isEmpty) return '';
-    final first = errors.first.trim();
-    final detail = first.isEmpty ? '' : '：$first';
-    return '有 ${errors.length} 个分享文件未接收$detail';
-  }
-
   String _sizeLimitSuffix(int tooLarge, int totalLimit) {
     final parts = <String>[];
     if (tooLarge > 0) parts.add('单文件过大 $tooLarge 个');
     if (totalLimit > 0) parts.add('批次大小超限 $totalLimit 个');
     return parts.isEmpty ? '' : '（${parts.join('，')}）';
+  }
+
+  String _shareErrorMessage(List<String> errors) {
+    if (errors.isEmpty) return '';
+    final first = errors.first.trim();
+    final detail = first.isEmpty ? '' : '：$first';
+    return '有 ${errors.length} 个分享文件未接收$detail';
   }
 
   Future<void> _onSharedFilesAvailable() async {
@@ -973,7 +708,10 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
 
   void _selectGroup(String groupId) {
     _closeDrawerIfOpen();
-    setState(() => _selectedGroup = groupId);
+    setState(() {
+      _selectedGroup = groupId;
+      _searchAll = false;
+    });
     _resetKeyboardFocus();
   }
 
@@ -1009,7 +747,10 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     final groupId = DateTime.now().microsecondsSinceEpoch.toString();
     await _repository.createGroup(groupId, name);
     if (mounted) {
-      setState(() => _selectedGroup = groupId);
+      setState(() {
+        _selectedGroup = groupId;
+        _searchAll = false;
+      });
     }
     await _load();
   }
@@ -1097,45 +838,64 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   }
 
   Future<void> _importPackage() async {
-    final picked = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: ['smp'],
-    );
-    final sourcePath = picked?.path;
-    if (sourcePath == null) return;
-    if (!mounted) return;
-    final controller = TextEditingController();
-    final password = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('导入加密迁移包'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: true,
-          decoration: const InputDecoration(labelText: '迁移包密码'),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context), child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('导入')),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (password == null) return;
+    if (_importing) {
+      _showMessage('导入进行中，请稍后重试');
+      return;
+    }
+    setState(() {
+      _importing = true;
+      _importStatus = '正在导入迁移包…';
+    });
     try {
-      final outcome = await _exportService.importFrom(
-          File(sourcePath), password, _mediaStore);
-      await _load();
-      if (mounted) {
-        _showMessage(
-            '恢复 ${outcome.added} 个，重复 ${outcome.duplicates} 个，跳过 ${outcome.skipped} 个${_sizeLimitSuffix(outcome.skippedTooLarge, outcome.skippedByTotalLimit)}');
+      final picked = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['smp'],
+      );
+      final sourcePath = picked?.path;
+      if (sourcePath == null) return;
+      if (!mounted) return;
+      final controller = TextEditingController();
+      final password = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('导入加密迁移包'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: '迁移包密码'),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, controller.text),
+                child: const Text('导入')),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (password == null) return;
+      try {
+        final outcome = await _exportService.importFrom(
+            File(sourcePath), password, _mediaStore);
+        await _load();
+        if (mounted) {
+          _showMessage(
+              '恢复 ${outcome.added} 个，重复 ${outcome.duplicates} 个，跳过 ${outcome.skipped} 个${_sizeLimitSuffix(outcome.skippedTooLarge, outcome.skippedByTotalLimit)}');
+        }
+      } on Object catch (error) {
+        if (mounted) _showMessage('导入失败：密码错误或文件损坏（$error）');
       }
-    } on Object catch (error) {
-      if (mounted) _showMessage('导入失败：密码错误或文件损坏（$error）');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _importing = false;
+          _importStatus = '';
+        });
+      }
+      _drainQueuedSharedImport();
     }
   }
 
@@ -1425,6 +1185,37 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _addSelectedGroups() async {
+    if (_importing) return;
+    final targets = _stickers
+        .where((e) => _selectedStickerIds.contains(e.sticker.id))
+        .toList();
+    if (targets.isEmpty) return;
+    final groups = await showDialog<Set<String>>(
+        context: context,
+        builder: (_) => AddToGroupsDialog(
+            repository: _repository, entries: targets, groups: _groups));
+    if (!mounted) return;
+    if (groups == null) {
+      await _load();
+      return;
+    }
+    setState(() => _importing = true);
+    try {
+      await _repository.attachGroupsMany(
+          targets.map((e) => e.sticker.id), groups);
+      await _load();
+      if (mounted) {
+        _showMessage('已将 ${targets.length} 张表情添加到 ${groups.length} 个分组');
+      }
+    } on Object catch (error) {
+      if (mounted) _showMessage('添加分组失败：$error');
+    } finally {
+      if (mounted) setState(() => _importing = false);
+      _drainQueuedSharedImport();
+    }
+  }
+
   Future<void> _manageSelectedGroups() async {
     if (_importing) return;
     final targets = _stickers
@@ -1608,38 +1399,53 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   }
 
   Future<void> _useSticker(RankedSticker entry) async {
-    final result = await PlatformBridge.instance.useSticker(entry.sticker);
-    await _recordCompatibility(entry.sticker, result);
-    final countsAsUsage = result.succeeded &&
-        (result.didPaste ||
-            ((Platform.isAndroid || Platform.isMacOS) &&
-                result.status == StickerUseStatus.copied));
-    if (countsAsUsage) {
-      await _repository.recordUsage(entry.sticker.id, DateTime.now());
-      await _load();
-      if (mounted) {
-        final message = result.message ??
-            (result.status == StickerUseStatus.copied
-                ? Platform.isWindows
-                    ? '已复制 ${path.basename(entry.sticker.filePath)}，当前没有发送目标窗口'
-                    : Platform.isMacOS
-                        ? '已复制，请切换到目标应用按 ⌘V 粘贴'
-                        : '已复制到系统剪贴板'
-                : result.status == StickerUseStatus.sent
-                    ? '已发送到 ${result.targetApplication ?? '目标窗口'}'
-                    : null);
-        if (message != null) _showMessage(message);
+    if (_stickerActionBusy ||
+        (_lastStickerActionId == entry.sticker.id &&
+            _lastStickerAction != null &&
+            DateTime.now().difference(_lastStickerAction!) <
+                const Duration(milliseconds: 350))) {
+      return;
+    }
+    _stickerActionBusy = true;
+    try {
+      final result = await PlatformBridge.instance.useSticker(entry.sticker);
+      if (result.succeeded) await _recordRecent(entry.sticker.id);
+      await _recordCompatibility(entry.sticker, result);
+      final countsAsUsage = result.succeeded &&
+          (result.didPaste ||
+              ((Platform.isAndroid || Platform.isMacOS) &&
+                  result.status == StickerUseStatus.copied));
+      if (countsAsUsage) {
+        await _repository.recordUsage(entry.sticker.id, DateTime.now());
+        await _load();
+        if (mounted) {
+          final message = result.message ??
+              (result.status == StickerUseStatus.copied
+                  ? Platform.isWindows
+                      ? '已复制 ${path.basename(entry.sticker.filePath)}，当前没有发送目标窗口'
+                      : Platform.isMacOS
+                          ? '已复制，请切换到目标应用按 ⌘V 粘贴'
+                          : '已复制到系统剪贴板'
+                  : result.status == StickerUseStatus.sent
+                      ? '已发送到 ${result.targetApplication ?? '目标窗口'}'
+                      : null);
+          if (message != null) _showMessage(message);
+        }
+      } else if (result.succeeded) {
+        if (mounted) {
+          _showMessage(Platform.isWindows
+              ? '已复制 ${path.basename(entry.sticker.filePath)}，当前没有发送目标窗口'
+              : Platform.isMacOS
+                  ? '已复制，请切换到目标应用按 ⌘V 粘贴'
+                  : '已复制到系统剪贴板');
+        }
+      } else if (mounted) {
+        _showMessage(result.message ?? '复制或发送失败');
       }
-    } else if (result.succeeded) {
-      if (mounted) {
-        _showMessage(Platform.isWindows
-            ? '已复制 ${path.basename(entry.sticker.filePath)}，当前没有发送目标窗口'
-            : Platform.isMacOS
-                ? '已复制，请切换到目标应用按 ⌘V 粘贴'
-                : '已复制到系统剪贴板');
-      }
-    } else if (mounted) {
-      _showMessage(result.message ?? '复制或发送失败');
+    } finally {
+      _stickerActionBusy = false;
+      _lastStickerAction = DateTime.now();
+      _lastStickerActionId = entry.sticker.id;
     }
   }
 
@@ -1647,13 +1453,53 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   /// Usage counting follows the platform rule: a Windows copy never counts,
   /// while on macOS and Android copying is itself a successful use.
   Future<void> _copySticker(RankedSticker entry) async {
-    final result = await PlatformBridge.instance.copySticker(entry.sticker);
-    if (result.succeeded && (Platform.isMacOS || Platform.isAndroid)) {
-      await _repository.recordUsage(entry.sticker.id, DateTime.now());
-      await _load();
+    if (_stickerActionBusy ||
+        (_lastStickerActionId == entry.sticker.id &&
+            _lastStickerAction != null &&
+            DateTime.now().difference(_lastStickerAction!) <
+                const Duration(milliseconds: 350))) {
+      return;
     }
-    if (!mounted) return;
-    _showMessage(result.succeeded ? '已复制' : (result.message ?? '复制失败'));
+    _stickerActionBusy = true;
+    try {
+      final result = await PlatformBridge.instance.copySticker(entry.sticker);
+      if (result.succeeded) await _recordRecent(entry.sticker.id);
+      if (result.succeeded && (Platform.isMacOS || Platform.isAndroid)) {
+        await _repository.recordUsage(entry.sticker.id, DateTime.now());
+        await _load();
+      }
+      if (!mounted) return;
+      _showMessage(result.succeeded ? '已复制' : (result.message ?? '复制失败'));
+    } finally {
+      _stickerActionBusy = false;
+      _lastStickerAction = DateTime.now();
+      _lastStickerActionId = entry.sticker.id;
+    }
+  }
+
+  Future<void> _recordRecent(String id) async {
+    await _recentUsage.record(id);
+    final ids = await _recentUsage.ids();
+    if (mounted) setState(() => _recentIds = ids);
+  }
+
+  Widget _buildRecent() {
+    if (!_showRecent ||
+        _selectionMode ||
+        _filter.activeCount > 0 ||
+        _searchController.text.trim().isNotEmpty) {
+      return const SizedBox.shrink();
+    }
+    final byId = {for (final entry in _stickers) entry.sticker.id: entry};
+    final entries = [
+      for (final id in _recentIds)
+        if (byId[id] != null) byId[id]!
+    ];
+    if (entries.isEmpty) return const SizedBox.shrink();
+    return RecentStickers(
+        entries: entries,
+        onUse: (e) => unawaited(_useSticker(e)),
+        onCopy: (e) => unawaited(_copySticker(e)));
   }
 
   Future<void> _recordCompatibility(
@@ -1675,6 +1521,9 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
       final ids = await PlatformBridge.instance.peekFloatingUsage();
       if (ids.isEmpty) return;
       await _repository.recordUsageMany(ids, DateTime.now());
+      for (final id in ids) {
+        await _recentUsage.record(id);
+      }
       await PlatformBridge.instance.acknowledgeFloatingUsage(ids);
       await _load();
     } finally {
@@ -1742,42 +1591,85 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
 
   Future<void> _showSettings() async {
     _closeDrawerIfOpen();
-    final action = await showDialog<String>(
+    final records = Platform.isWindows
+        ? await _preferences.compatibilityRecords()
+        : <ClipboardCompatibilityRecord>[];
+    if (!mounted) return;
+    await showDialog<void>(
       context: context,
-      builder: (dialogContext) => SimpleDialog(
-        title: const Text('设置'),
-        children: [
-          if (isDesktopPlatform)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialogContext, 'hotkey'),
-              child: const _SettingsEntry(Icons.keyboard_outlined, '设置快速唤出热键'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('设置'),
+          scrollable: true,
+          actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          content: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SwitchListTile(
+                  contentPadding: const EdgeInsets.only(left: 12),
+                  title: const Text('显示最近使用'),
+                  value: _showRecent,
+                  onChanged: (value) async {
+                    await _preferences.setShowRecent(value);
+                    if (!mounted) return;
+                    setState(() => _showRecent = value);
+                    if (dialogContext.mounted) setDialogState(() {});
+                  },
+                ),
+                if (isDesktopPlatform)
+                  HotkeySetting(
+                    current: QuickPickerController.instance.hotKey,
+                    onSave: (value) async {
+                      final saved = await QuickPickerController.instance
+                          .updateHotKey(value);
+                      if (dialogContext.mounted) setDialogState(() {});
+                      return saved;
+                    },
+                  ),
+                if (Platform.isWindows) ...[
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('剪贴板兼容性记录'),
+                  ),
+                  if (records.isEmpty)
+                    const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('还没有目标应用发送记录')),
+                  for (final record in records)
+                    ListTile(
+                      dense: true,
+                      title: Text(record.targetApplication),
+                      subtitle: Text(
+                          '${enumValue(record.mediaType).toUpperCase()} · ${_compatibilityDetails(record)}'),
+                      trailing:
+                          Text(_formatCompatibilityTime(record.createdAt)),
+                    ),
+                ],
+                if (Platform.isAndroid)
+                  SwitchListTile(
+                    contentPadding: const EdgeInsets.only(left: 12),
+                    title: const Text('悬浮面板'),
+                    value: _floatingPanelEnabled,
+                    onChanged: (_) async {
+                      await _toggleFloatingPanel();
+                      if (dialogContext.mounted) setDialogState(() {});
+                    },
+                  ),
+              ],
             ),
-          if (Platform.isWindows)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialogContext, 'compatibility'),
-              child:
-                  const _SettingsEntry(Icons.fact_check_outlined, '剪贴板兼容性记录'),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('关闭'),
             ),
-          if (Platform.isAndroid)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialogContext, 'floating_panel'),
-              child: _SettingsEntry(
-                Icons.picture_in_picture_alt_outlined,
-                _floatingPanelEnabled ? '关闭悬浮面板' : '开启悬浮面板',
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
-    if (!mounted || action == null) return;
-    switch (action) {
-      case 'hotkey':
-        await _configureHotKey();
-      case 'compatibility':
-        await _showCompatibilityRecords();
-      case 'floating_panel':
-        await _toggleFloatingPanel();
-    }
   }
 
   @override
@@ -1785,7 +1677,9 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     final visible = _visibleStickers;
     return _quickPickerMode
         ? _buildQuickPickerScaffold(visible)
-        : _buildManagementScaffold(visible);
+        : Focus(
+            onKeyEvent: _handleImportShortcut,
+            child: _buildManagementScaffold(visible));
   }
 
   Widget _buildManagementScaffold(List<RankedSticker> visible) {
@@ -1820,6 +1714,9 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                             SelectionToolbar(
                               selectedCount: _selectedStickerIds.length,
                               onSelectAll: _toggleSelectAllVisible,
+                              onAdd: _selectedStickerIds.isEmpty
+                                  ? null
+                                  : _addSelectedGroups,
                               onMove: _selectedStickerIds.isEmpty
                                   ? null
                                   : _manageSelectedGroups,
@@ -1830,12 +1727,18 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                             )
                           else
                             LibraryToolbar(
+                              searchAll: _searchAll,
+                              onScopeChanged: _changeSearchScope,
+                              onFilter: _showFilters,
+                              filterCount: _filter.activeCount,
                               searchController: _searchController,
                               onSearchChanged: (_) =>
                                   setState(_resetKeyboardFocus),
                               onClearSearch: _clearSearch,
                               onEnterSelection: _enterSelectionMode,
                               onImport: _importFiles,
+                              importMenu:
+                                  _desktopImport ? _buildImportMenu() : null,
                               moreMenu: _buildMoreMenu(quickPicker: false),
                               fixedControlHeight: isDesktopPlatform,
                               leading: wide
@@ -1848,7 +1751,8 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                                     ),
                             ),
                           Expanded(
-                              child: _buildContentArea(visible, searchQuery)),
+                              child: _buildDropArea(
+                                  _buildContentArea(visible, searchQuery))),
                         ],
                       ),
                     ),
@@ -1879,6 +1783,85 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     setState(_resetKeyboardFocus);
   }
 
+  void _changeSearchScope(bool all) {
+    setState(() {
+      _searchAll = all;
+      _resetKeyboardFocus();
+    });
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _filter = const StickerFilter();
+      _resetKeyboardFocus();
+    });
+  }
+
+  Future<void> _showFilters() async {
+    final platform = Theme.of(context).platform;
+    final mobile =
+        platform == TargetPlatform.android || platform == TargetPlatform.iOS;
+    final StickerFilter? result;
+    if (mobile) {
+      result = await showModalBottomSheet<StickerFilter>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (context) => ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * .9,
+          ),
+          child: FilterPanel(initial: _filter),
+        ),
+      );
+    } else {
+      result = await showDialog<StickerFilter>(
+        context: context,
+        builder: (context) => Dialog(
+          alignment: Alignment.topRight,
+          child: SizedBox(width: 420, child: FilterPanel(initial: _filter)),
+        ),
+      );
+    }
+    final applied = result;
+    if (!mounted || applied == null) return;
+    setState(() {
+      _filter = applied;
+      _resetKeyboardFocus();
+    });
+  }
+
+  Widget _buildFilterSummary() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Tooltip(
+              message: _filter.summary,
+              child: Text(
+                _filter.summary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          TextButton(onPressed: _clearFilters, child: const Text('清除筛选')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyResults() => _SearchEmptyState(
+        onClearSearch:
+            _searchController.text.trim().isEmpty ? null : _clearSearch,
+        onClearFilters: _filter.activeCount == 0 ? null : _clearFilters,
+        onSearchAll:
+            _searchAll || _selectedGroup == null || _selectedGroup == 'all'
+                ? null
+                : () => _changeSearchScope(true),
+      );
+
   Widget _buildContentArea(List<RankedSticker> visible, String searchQuery) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -1886,11 +1869,13 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     if (_error != null) return _buildLoadError();
     return Column(
       children: [
+        if (_filter.activeCount > 0) _buildFilterSummary(),
+        _buildRecent(),
         _buildContentHeader(visible, searchQuery),
         Expanded(
           child: visible.isEmpty
-              ? (searchQuery.isNotEmpty
-                  ? _SearchEmptyState(onClearSearch: _clearSearch)
+              ? (searchQuery.isNotEmpty || _filter.activeCount > 0
+                  ? _buildEmptyResults()
                   : _EmptyState(onImport: _importFiles))
               : _buildGrid(visible),
         ),
@@ -1918,61 +1903,77 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
   }
 
   Widget _buildContentHeader(List<RankedSticker> visible, String searchQuery) {
-    final countLabel = searchQuery.isEmpty
+    final countLabel = searchQuery.isEmpty && _filter.activeCount == 0
         ? '${visible.length} 张表情'
         : '搜索到 ${visible.length} 个表情';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.contentPadding, 20, AppTheme.contentPadding, 0),
-      child: LayoutBuilder(builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 550;
-        final title = Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Flexible(
-              child: Text(
-                _currentGroupName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(width: 24),
-            Text(
-              countLabel,
-              style:
-                  const TextStyle(fontSize: 14, color: AppTheme.secondaryText),
-            ),
-          ],
-        );
-        final controls = Row(mainAxisSize: MainAxisSize.min, children: [
-          _buildSortControl(),
-          const SizedBox(width: 16),
-          _buildDensityControl(),
-        ]);
-        if (narrow) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        AppTheme.contentPadding,
+        20,
+        AppTheme.contentPadding,
+        0,
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 550;
+          final title = Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
-              title,
-              const SizedBox(height: 16),
-              Align(alignment: Alignment.centerRight, child: controls),
+              Flexible(
+                child: Text(
+                  _searchAll ? '全部表情' : _currentGroupName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 24),
+              Text(
+                countLabel,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.secondaryText,
+                ),
+              ),
             ],
           );
-        }
-        return Row(children: [
-          Expanded(child: title),
-          const SizedBox(width: 24),
-          controls,
-        ]);
-      }),
+          final controls = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildSortControl(),
+              const SizedBox(width: 16),
+              _buildDensityControl(),
+            ],
+          );
+          if (narrow) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                title,
+                const SizedBox(height: 16),
+                Align(alignment: Alignment.centerRight, child: controls),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: title),
+              const SizedBox(width: 24),
+              controls,
+            ],
+          );
+        },
+      ),
     );
   }
 
   Widget _buildSortControl() {
-    final defaultLabel = _selectedGroup == 'qq_favorites' ? '来源顺序' : '常用优先';
+    final defaultLabel =
+        !_searchAll && _selectedGroup == 'qq_favorites' ? '来源顺序' : '常用优先';
     return Container(
       width: 148,
       height: AppTheme.secondaryControlHeight,
@@ -2172,6 +2173,35 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                   ),
                 ),
               ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  children: [
+                    DropdownButton<bool>(
+                      value: _searchAll,
+                      onChanged: (value) {
+                        if (value != null) _changeSearchScope(value);
+                      },
+                      items: const [
+                        DropdownMenuItem(value: false, child: Text('当前分组')),
+                        DropdownMenuItem(value: true, child: Text('全部表情')),
+                      ],
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: _showFilters,
+                      icon: const Icon(Icons.filter_list),
+                      label: Text(
+                        _filter.activeCount == 0
+                            ? '筛选'
+                            : '筛选 · ${_filter.activeCount}',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _buildRecent(),
+              if (_filter.activeCount > 0) _buildFilterSummary(),
               SizedBox(
                 height: 40,
                 child: ListView(
@@ -2200,8 +2230,8 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
                     : _error != null
                         ? _buildLoadError()
                         : visible.isEmpty
-                            ? (searchQuery.isNotEmpty
-                                ? _SearchEmptyState(onClearSearch: _clearSearch)
+                            ? (searchQuery.isNotEmpty || _filter.activeCount > 0
+                                ? _buildEmptyResults()
                                 : _EmptyState(onImport: _importFiles))
                             : _buildGrid(visible),
               ),
@@ -2267,53 +2297,24 @@ class _LibraryPageState extends State<LibraryPage> with WidgetsBindingObserver {
     );
   }
 
+  String _compatibilityDetails(ClipboardCompatibilityRecord record) {
+    final status = switch (record.status) {
+      'sent' => '发送成功',
+      'copied' => '已粘贴',
+      _ => '失败',
+    };
+    return record.message == null || record.message!.trim().isEmpty
+        ? status
+        : '$status：${record.message}';
+  }
+
   String _formatCompatibilityTime(DateTime value) {
     final local = value.toLocal();
     String twoDigits(int number) => number.toString().padLeft(2, '0');
     return '${local.month}/${local.day} ${twoDigits(local.hour)}:${twoDigits(local.minute)}';
   }
 
-  Future<void> _configureHotKey() async {
-    if (!isDesktopPlatform) return;
-    HotKey? recorded;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('设置快速唤出热键'),
-        content: SizedBox(
-          width: 320,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('请按下至少包含一个修饰键的组合键。'),
-              const SizedBox(height: 16),
-              HotKeyRecorder(
-                initalHotKey: QuickPickerController.instance.hotKey,
-                onHotKeyRecorded: (value) => recorded = value,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || recorded == null || !mounted) return;
-    final updated =
-        await QuickPickerController.instance.updateHotKey(recorded!);
-    if (mounted) {
-      _showMessage(updated ? '快速唤出热键已更新' : '热键注册失败，可能与其他程序冲突');
-    }
-  }
+  Future<void> _configureHotKey() => _showSettings();
 }
 
 class _ImportBatch {
@@ -2335,31 +2336,6 @@ class _ImportBatch {
   }
 
   bool get defaultSelected => defaultSelectImportBatch(label);
-}
-
-class _ImportSelection {
-  const _ImportSelection({required this.batch, required this.files});
-
-  final _ImportBatch batch;
-  final List<File> files;
-}
-
-class _SettingsEntry extends StatelessWidget {
-  const _SettingsEntry(this.icon, this.label);
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 20, color: AppTheme.secondaryText),
-        const SizedBox(width: 12),
-        Expanded(child: Text(label)),
-      ],
-    );
-  }
 }
 
 class _EmptyState extends StatelessWidget {
@@ -2392,25 +2368,50 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _SearchEmptyState extends StatelessWidget {
-  const _SearchEmptyState({required this.onClearSearch});
+  const _SearchEmptyState({
+    this.onClearSearch,
+    this.onClearFilters,
+    this.onSearchAll,
+  });
 
-  final VoidCallback onClearSearch;
+  final VoidCallback? onClearSearch;
+  final VoidCallback? onClearFilters;
+  final VoidCallback? onSearchAll;
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.search_off, size: 56, color: AppTheme.secondaryText),
-          const SizedBox(height: 12),
-          const Text('没有匹配的表情',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          const Text('可以尝试搜索备注或表情 ID'),
-          const SizedBox(height: 16),
-          TextButton(onPressed: onClearSearch, child: const Text('清除搜索')),
-        ],
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_off,
+                size: 56, color: AppTheme.secondaryText),
+            const SizedBox(height: 12),
+            const Text('没有匹配的表情',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            const Text('可以调整关键词、筛选条件或搜索范围'),
+            const SizedBox(height: 16),
+            Wrap(
+              alignment: WrapAlignment.center,
+              children: [
+                if (onClearSearch != null)
+                  TextButton(
+                      onPressed: onClearSearch, child: const Text('清除搜索')),
+                if (onClearFilters != null)
+                  TextButton(
+                    onPressed: onClearFilters,
+                    child: const Text('清除筛选'),
+                  ),
+                if (onSearchAll != null)
+                  TextButton(
+                      onPressed: onSearchAll, child: const Text('搜索全部表情')),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

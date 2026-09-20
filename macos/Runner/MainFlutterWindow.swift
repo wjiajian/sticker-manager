@@ -22,6 +22,18 @@ class MainFlutterWindow: NSWindow {
         result(Self.isHotKeyAvailable(call.arguments as? [String: Any]))
         return
       }
+      if call.method == "readClipboardImageData" {
+        do {
+          if let data = try Self.readClipboardImageData(from: .general) {
+            result(FlutterStandardTypedData(bytes: data))
+          } else {
+            result(nil)
+          }
+        } catch {
+          result(FlutterError(code: "clipboard_import", message: error.localizedDescription, details: nil))
+        }
+        return
+      }
       guard call.method == "copySticker" else {
         result(FlutterMethodNotImplemented)
         return
@@ -70,6 +82,28 @@ class MainFlutterWindow: NSWindow {
     if isMiniaturized { deminiaturize(nil) }
     makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  /// Reads the preferred encoded representation without changing the pasteboard.
+  static func readClipboardImageData(from board: NSPasteboard) throws -> Data? {
+    for type in [NSPasteboard.PasteboardType("com.compuserve.gif"), .png, .tiff] {
+      guard let data = board.data(forType: type) else { continue }
+      guard data.count <= 64 * 1024 * 1024 else {
+        throw NSError(domain: "StickerImport", code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "剪贴板图片超过 64 MiB"])
+      }
+      if type == .tiff {
+        guard let bitmap = NSBitmapImageRep(data: data),
+              let png = bitmap.representation(using: .png, properties: [:]) else { continue }
+        guard png.count <= 64 * 1024 * 1024 else {
+          throw NSError(domain: "StickerImport", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "剪贴板图片超过 64 MiB"])
+        }
+        return png
+      }
+      return data
+    }
+    return nil
   }
 
   /// Prepare every representation before replacing the user's clipboard.
