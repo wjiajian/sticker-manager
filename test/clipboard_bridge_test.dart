@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +19,7 @@ void main() {
   });
   tearDown(() async {
     messenger.setMockMethodCallHandler(channel, null);
+    messenger.setMockMethodCallHandler(const MethodChannel('pasteboard'), null);
     await temporary.delete(recursive: true);
   });
 
@@ -31,6 +33,56 @@ void main() {
         createdAt: DateTime(2026),
         updatedAt: DateTime(2026),
       );
+
+  test('clipboard file representation wins over bitmap and is never deleted',
+      () async {
+    final file =
+        await File('${temporary.path}/original.gif').writeAsBytes([1, 2]);
+    messenger.setMockMethodCallHandler(const MethodChannel('pasteboard'),
+        (call) async {
+      expect(call.method, 'files');
+      return [file.path];
+    });
+    messenger.setMockMethodCallHandler(
+        channel, (_) async => fail('Do not decode a file clipboard'));
+    final input = await ClipboardBridge.instance.readForImport();
+    expect(input.files.single.path, file.path);
+    await input.dispose();
+    expect(await file.exists(), isTrue);
+  });
+
+  test(
+      'raw GIF import preserves bytes and cancellation removes only temporary data',
+      () async {
+    final bytes = base64Decode(
+        'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+    messenger.setMockMethodCallHandler(const MethodChannel('pasteboard'),
+        (call) async {
+      expect(call.method, 'files');
+      return [];
+    });
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'readClipboardImageData');
+      return bytes;
+    });
+    final input = await ClipboardBridge.instance.readForImport();
+    final file = input.files.single;
+    expect(file.path, endsWith('.gif'));
+    expect(await file.readAsBytes(), bytes);
+    await input.dispose();
+    expect(await file.exists(), isFalse);
+  });
+
+  test('text-only clipboard has no import and is not modified', () async {
+    messenger.setMockMethodCallHandler(const MethodChannel('pasteboard'),
+        (call) async {
+      if (call.method == 'files') return [];
+      if (call.method == 'image') return null;
+      fail('Clipboard must not be written');
+    });
+    messenger.setMockMethodCallHandler(channel, (_) async => null);
+    expect((await ClipboardBridge.instance.readForImport()).files, isEmpty);
+  });
 
   test('missing media does not invoke the native clipboard', () async {
     messenger.setMockMethodCallHandler(channel, (_) async {

@@ -29,7 +29,7 @@ Flutter 业务层不直接依赖具体平台 API。`StickerRepository` 和 `Impo
 - `lib/ui/library_page.dart` 的 `LibraryPage` 协调分组、搜索、排序、导入和管理动作。页面通过 `StickerRepository` 读取数据，默认使用 `StickerDatabase`；测试可提供内存仓库，因此无需访问用户数据库。
 - `LibrarySidebar` 展示分组及全量计数；`LibraryToolbar` 在窄窗口中将搜索和操作分行，多选操作改用带说明的图标。主管理正文使用系统安全边距。
 - `StickerGrid` 负责网格、滚动和框选，`GridMetrics` 为渲染、命中判断及键盘定位提供同一组尺寸。排序和数据刷新后，页面按表情 ID 恢复焦点；表情离开当前结果时选择有效位置。
-- `StickerCard` 负责缩略图回退、GIF 悬停播放、置顶标记和桌面右键菜单。选择状态使用青绿色边框与勾选，键盘焦点使用独立深色轮廓。快捷键监听仅位于网格范围，并要求网格自身拥有输入焦点。
+- `StickerCard` 负责缩略图回退、GIF 悬停播放、置顶标记和桌面右键菜单。选择状态使用青绿色边框与勾选，键盘焦点使用独立深色轮廓。表情导航与使用快捷键要求网格自身拥有输入焦点；图片导入快捷键作用于主管理窗口，并排除文本框和弹窗。
 - 网格使用 `UsageRankingService` 的结果；默认规则保留普通分组的使用排序和 QQ 收藏的来源顺序，显式选择最近导入时按创建时间降序排列。
 - `LibraryFeedback` 展示短暂操作结果与独立进度提示。主管理和快速选择窗口共用加载失败说明与重试界面。
 
@@ -38,9 +38,12 @@ Flutter 业务层不直接依赖具体平台 API。`StickerRepository` 和 `Impo
 ### 领域服务
 
 - `MediaStore`：读取文件、文件签名识别、SHA-256 去重、复制托管媒体、批量提交记录、删除应用副本、后台生成和升级缩略图。
-- `UsageRankingService`：先按分组和查询过滤，再应用普通分组或 QQ 收藏排序规则。
+- `UsageRankingService`：先按搜索范围、关键词和 `StickerFilter` 条件过滤，再应用普通分组或 QQ 收藏排序规则。筛选状态属于当前会话，不写入数据库。
+- `RecentUsage`：在本机偏好中保存最多 20 条成功使用记录，包含表情 ID 和操作时间；与 `usageCount`、`lastUsedAt` 及迁移包独立。`RecentStickers` 负责单行显示，主管理与快速选择复用同一记录及操作回调。
+- `MediaStore.inspectFiles`：只读检查文件签名、哈希和大小，产生 `ImportCandidate`。`ImportPreviewDialog` 返回所选文件及目标分组；确认后由 `MediaStore.importFiles` 重新校验并提交。不同来源在同一批次共用大小限制，QQ 收藏关系只用于 QQ 来源记录。
+- `ClipboardBridge.readForImport`：按文件、原始 GIF、静态图片的顺序读取。`DropImport` 管理桌面拖放文件的访问权限及临时副本生命周期，目录枚举仍使用 `ImportSource`。临时图片在确认、取消或失败后清理。
 - `ExportPackageService`：把数据库元数据与媒体写入版本化归档，调用 `EncryptedPackageCodec` 加密；导入时校验 manifest 和媒体哈希后恢复。
-- `AppPreferences`：热键配置、剪贴板兼容性记录和网格密度使用本地偏好存储；密度支持标准与紧凑，缺失或未知字符串恢复为标准。
+- `AppPreferences`：热键配置、剪贴板兼容性记录、网格密度和最近使用显示开关使用本地偏好存储；密度支持标准与紧凑，缺失或未知字符串恢复为标准。
 
 导入的并发边界是准备阶段最多 4 个 worker，缩略图阶段最多 2 个 worker；每个文件最多 64 MiB、每批最多 512 MiB，数据库提交使用单个事务。`onRecordsCommitted` 用于让 UI 在缩略图完成前刷新卡片。
 
@@ -64,6 +67,8 @@ sticker_groups
 ```
 
 数据库启动时创建 `all/全部` 和 `qq_favorites/QQ收藏`。删除操作显式清理关联表，不依赖每个 SQLite 驱动都开启外键。批量插入按 `hash` 忽略重复记录，同时为重复媒体补齐新分组关系；成功使用后按事务更新计数和最近使用时间。
+
+`attachGroupsMany` 在一个事务内验证分组和表情是否存在，再添加关系；重复关系直接跳过，异常时整体回退。此操作保留原有分组，不改变现有批量移动的替换语义。本次功能不改变 schema 和迁移包格式。
 
 媒体文件名以完整哈希命名，图片使用 `.image`，GIF 使用 `.gif`；缩略图以哈希命名为 PNG。删除服务只允许删除应用媒体目录下的文件，防止误删源目录。
 

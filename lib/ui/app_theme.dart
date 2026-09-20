@@ -17,11 +17,17 @@ class AppTheme {
   static const Color primaryText = Color(0xFF101828);
   static const Color secondaryText = Color(0xFF788698);
 
+  static double thumbnailSize(TargetPlatform platform) =>
+      platform == TargetPlatform.windows || platform == TargetPlatform.macOS
+          ? 64
+          : 56;
+
   static const double sidebarWidth = 240;
   static const double controlHeight = 48;
   static const double secondaryControlHeight = 40;
-  static const double buttonRadius = 10;
-  static const double cardRadius = 12;
+  static const double buttonRadius = 6;
+  static const double cardRadius = 6;
+  static const double dialogRadius = 8;
   static const double contentPadding = 20;
   static const double gridSpacing = 14;
 
@@ -42,6 +48,57 @@ class AppTheme {
     );
     return base.copyWith(
       scaffoldBackgroundColor: background,
+      dialogTheme: DialogThemeData(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(dialogRadius)),
+      ),
+      cardTheme: CardThemeData(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(cardRadius)),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(buttonRadius)),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(buttonRadius)),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(buttonRadius)),
+        ),
+      ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+            shape: WidgetStatePropertyAll(RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(buttonRadius)))),
+      ),
+      chipTheme: base.chipTheme.copyWith(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(buttonRadius)),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(buttonRadius)),
+      ),
+      menuTheme: MenuThemeData(
+          style: MenuStyle(
+              shape: WidgetStatePropertyAll(RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(buttonRadius))))),
+      bottomSheetTheme: BottomSheetThemeData(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(dialogRadius)),
+      ),
+      drawerTheme: DrawerThemeData(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(dialogRadius)),
+      ),
       textTheme: base.textTheme.apply(
         bodyColor: primaryText,
         displayColor: primaryText,

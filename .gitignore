@@ -30,22 +30,16 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
 /dist/
 **/build/
-/tmp-*.png
 /*.png
 /*.jpg
 /*.jpeg
 /*.gif
 /*.bmp
 /*.webp
-/hotkey-probe.png
-/selection-probe.png
-/qq-test*.png
 
 # Local Flutter/Android runner state
-.flutter-plugins-dependencies
 /android/local.properties
 /android/.gradle/
 /android/.kotlin/

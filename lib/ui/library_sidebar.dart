@@ -78,7 +78,7 @@ class LibrarySidebar extends StatelessWidget {
                   height: 32,
                   decoration: BoxDecoration(
                     color: AppTheme.cardBackground,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
                     border: Border.all(color: AppTheme.border),
                   ),
                   child: IconButton(

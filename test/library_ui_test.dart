@@ -14,6 +14,12 @@ import 'package:sticker_manager/ui/app_theme.dart';
 import 'package:sticker_manager/ui/grid_metrics.dart';
 import 'package:sticker_manager/ui/library_page.dart';
 import 'package:sticker_manager/ui/library_toolbar.dart';
+import 'package:sticker_manager/ui/filter_panel.dart';
+import 'package:sticker_manager/ui/hotkey_setting.dart';
+import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:sticker_manager/ui/recent_stickers.dart';
+import 'package:sticker_manager/ui/import_preview_dialog.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:sticker_manager/ui/sticker_card.dart';
 import 'package:sticker_manager/ui/sticker_grid.dart';
 
@@ -21,6 +27,12 @@ class MemoryRepository extends Fake implements StickerRepository {
   MemoryRepository(this.entries);
   List<RankedSticker> entries;
   bool failLoading = false;
+  final extraGroups = <StickerGroup>[];
+  @override
+  Future<void> createGroup(String id, String name) async {
+    extraGroups
+        .add(StickerGroup(id: id, name: name, createdAt: DateTime.now()));
+  }
 
   @override
   Future<List<RankedSticker>> loadRanked() async {
@@ -33,7 +45,18 @@ class MemoryRepository extends Fake implements StickerRepository {
         StickerGroup(id: 'all', name: '全部', createdAt: DateTime(2026)),
         StickerGroup(
             id: 'qq_favorites', name: 'QQ收藏', createdAt: DateTime(2026)),
+        ...extraGroups,
       ];
+
+  @override
+  Future<void> attachGroupsMany(
+      Iterable<String> ids, Iterable<String> groups) async {
+    entries = entries
+        .map((e) => ids.contains(e.sticker.id)
+            ? RankedSticker(e.sticker, {...e.groupIds, ...groups})
+            : e)
+        .toList();
+  }
 
   @override
   Future<void> recordUsage(String id, DateTime usedAt) async {
@@ -99,18 +122,24 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  Future<void> loadPage(WidgetTester tester,
-      {double topInset = 0, bool expectLoaded = true}) async {
-    await tester.pumpWidget(MaterialApp(
-      // Exercise the touch card layout on every host, including macOS CI.
-      theme: AppTheme.themeData().copyWith(platform: TargetPlatform.android),
-      builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context)
-            .copyWith(padding: EdgeInsets.only(top: topInset)),
-        child: child!,
+  Future<void> loadPage(
+    WidgetTester tester, {
+    double topInset = 0,
+    bool expectLoaded = true,
+    TargetPlatform platform = TargetPlatform.android,
+  }) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        // Exercise the touch card layout on every host, including macOS CI.
+        theme: AppTheme.themeData().copyWith(platform: platform),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(padding: EdgeInsets.only(top: topInset)),
+          child: child!,
+        ),
+        home: LibraryPage(repository: repository),
       ),
-      home: LibraryPage(repository: repository),
-    ));
+    );
     await tester.pumpAndSettle();
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -239,6 +268,561 @@ void main() {
     expect(find.text('搜索到 0 个表情'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
+  });
+
+  testWidgets('global search retains query and group switch restores scope', (
+    tester,
+  ) async {
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    await tester.tap(find.text('QQ收藏'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'NEW');
+    await tester.pumpAndSettle();
+    expect(find.text('没有匹配的表情'), findsOneWidget);
+    await tester.tap(find.text('搜索全部表情'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<StickerGrid>(find.byType(StickerGrid))
+          .stickers
+          .single
+          .sticker
+          .id,
+      'new',
+    );
+    expect(find.text('全部表情'), findsWidgets);
+    expect(
+      tester.widget<LibraryToolbar>(find.byType(LibraryToolbar)).searchAll,
+      isTrue,
+    );
+    await tester.tap(find.text('QQ收藏'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<LibraryToolbar>(find.byType(LibraryToolbar)).searchAll,
+      isFalse,
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'NEW',
+    );
+    expect(find.text('没有匹配的表情'), findsOneWidget);
+  });
+
+  testWidgets('filter draft, reset, and search have independent lifetimes', (
+    tester,
+  ) async {
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    await tester.tap(find.text('筛选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('GIF'));
+    await tester.tap(find.byTooltip('关闭筛选'));
+    await tester.pumpAndSettle();
+    expect(find.byType(StickerGrid), findsOneWidget);
+    expect(find.text('筛选 · 1'), findsNothing);
+
+    await tester.tap(find.text('筛选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('GIF'));
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(find.text('搜索到 0 个表情'), findsOneWidget);
+    expect(find.text('还没有表情包'), findsNothing);
+    expect(find.text('筛选 · 1'), findsOneWidget);
+
+    await tester.tap(find.text('筛选 · 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重置'));
+    await tester.tap(find.byTooltip('关闭筛选'));
+    await tester.pumpAndSettle();
+    expect(find.text('筛选 · 1'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'old');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('清除搜索'));
+    await tester.pumpAndSettle();
+    expect(find.text('筛选 · 1'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'new');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清除筛选').first);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<StickerGrid>(find.byType(StickerGrid))
+          .stickers
+          .single
+          .sticker
+          .id,
+      'new',
+    );
+  });
+
+  testWidgets('group switch retains filters and relaunch clears them', (
+    tester,
+  ) async {
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    await tester.tap(find.text('筛选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('仅置顶'));
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('QQ收藏'));
+    await tester.pumpAndSettle();
+    expect(find.text('筛选 · 1'), findsOneWidget);
+    expect(find.text('搜索到 0 个表情'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await loadPage(tester);
+    expect(find.text('筛选 · 1'), findsNothing);
+    expect(find.text('2 张表情'), findsOneWidget);
+  });
+
+  testWidgets('filter layouts fit phone, short desktop and wide desktop', (
+    tester,
+  ) async {
+    for (final entry in [
+      (const Size(360, 640), TargetPlatform.android),
+      (const Size(720, 420), TargetPlatform.macOS),
+      (const Size(1440, 900), TargetPlatform.windows),
+    ]) {
+      viewport(tester, entry.$1);
+      await loadPage(tester, platform: entry.$2);
+      await tester.tap(find.text('筛选'));
+      await tester.pumpAndSettle();
+      expect(find.byType(FilterPanel), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('GIF'));
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(find.byType(FilterPanel), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+
+  testWidgets('quick picker exposes and clears management filters', (
+    tester,
+  ) async {
+    viewport(tester, const Size(760, 600));
+    await loadPage(tester);
+    await tester.tap(find.text('筛选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('GIF'));
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    QuickPickerController.instance.onModeChanged?.call(QuickPickerMode.quick);
+    await tester.pumpAndSettle();
+    expect(find.text('筛选 · 1'), findsOneWidget);
+    expect(find.text('没有匹配的表情'), findsOneWidget);
+    await tester.tap(find.text('清除筛选').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(StickerGrid), findsOneWidget);
+  }, skip: !(Platform.isMacOS || Platform.isWindows));
+
+  testWidgets(
+      'recent row is global, hidden by search and selection, and configurable',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'recentStickerUses': [
+        jsonEncode({'id': 'new', 'at': '2026-09-20'})
+      ]
+    });
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    expect(find.byType(RecentStickers), findsOneWidget);
+    await tester.tap(find.text('QQ收藏'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<RecentStickers>(find.byType(RecentStickers))
+            .entries
+            .single
+            .sticker
+            .id,
+        'new');
+    await tester.enterText(find.byType(TextField), 'old');
+    await tester.pumpAndSettle();
+    expect(find.byType(RecentStickers), findsNothing);
+    await tester.tap(find.byTooltip('清除搜索'));
+    await tester.tap(find.text('多选'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RecentStickers), findsNothing);
+    await tester.tap(find.byTooltip('退出多选'));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示最近使用'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RecentStickers), findsNothing);
+    expect(
+        (await SharedPreferences.getInstance()).getBool('showRecent'), isFalse);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isFalse);
+    await tester.tap(find.text('显示最近使用'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isTrue);
+    expect(
+        (await SharedPreferences.getInstance()).getBool('showRecent'), isTrue);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byType(RecentStickers), findsOneWidget);
+  });
+
+  testWidgets('settings edits hotkey inline without opening a second dialog',
+      (tester) async {
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('快速唤出快捷键'), findsOneWidget);
+    final editButton = find.descendant(
+        of: find.byType(HotkeySetting), matching: find.byType(OutlinedButton));
+    final closeButton = find.widgetWithText(FilledButton, '关闭');
+    final rightEdge = tester.getRect(closeButton).right;
+    expect(tester.getRect(editButton).right, closeTo(rightEdge, 0.01));
+    expect(tester.getRect(find.byType(Switch)).right, closeTo(rightEdge, 0.01));
+    await tester.tap(find.descendant(
+        of: find.byType(HotkeySetting), matching: find.byType(OutlinedButton)));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(HotKeyRecorder), findsOneWidget);
+    expect(tester.getRect(find.byKey(const ValueKey('hotkey-editor'))).right,
+        closeTo(rightEdge, 0.01));
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('显示最近使用'), findsOneWidget);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+  }, skip: !(Platform.isMacOS || Platform.isWindows));
+
+  testWidgets('inline hotkey validates draft and keeps editing on failure',
+      (tester) async {
+    viewport(tester, const Size(600, 400));
+    var calls = 0;
+    var succeed = false;
+    final current = QuickPickerController.instance.hotKey;
+    await tester.pumpWidget(shell(
+        HotkeySetting(
+            current: current,
+            onSave: (_) async {
+              calls++;
+              return succeed;
+            }),
+        platform: TargetPlatform.macOS));
+    await tester.tap(find.byType(OutlinedButton));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(calls, 0);
+    expect(find.text('请使用包含修饰键和普通按键的组合键'), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(calls, 1);
+    expect(find.byType(HotKeyRecorder), findsOneWidget);
+    expect(find.text('无法保存，快捷键可能已被占用，请换一组重试'), findsOneWidget);
+    succeed = true;
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(calls, 2);
+    expect(find.byType(HotKeyRecorder), findsNothing);
+    expect(find.text('快捷键已保存'), findsOneWidget);
+  });
+
+  testWidgets(
+      'desktop images fill square cards and short recent row hides paging',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'recentStickerUses': [
+        jsonEncode({'id': 'new', 'at': '2026-09-20'})
+      ]
+    });
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester, platform: TargetPlatform.macOS);
+    final recentImage = find
+        .descendant(
+            of: find.byType(RecentStickers), matching: find.byType(Image))
+        .first;
+    final gridImage = find
+        .descendant(of: find.byType(StickerGrid), matching: find.byType(Image))
+        .first;
+    expect(tester.getSize(recentImage), const Size(72, 72));
+    final cardSize = tester.getSize(find.byType(StickerCard).first);
+    expect(cardSize.width, closeTo(cardSize.height, 0.01));
+    // Four pixels of padding plus the one-pixel border on each side.
+    expect(tester.getSize(gridImage).width, closeTo(cardSize.width - 10, 0.01));
+    expect(
+        tester.getSize(gridImage).height, closeTo(cardSize.height - 10, 0.01));
+    expect(tester.widget<Image>(gridImage).fit, BoxFit.contain);
+    expect(find.byTooltip('下一页最近使用'), findsNothing);
+  });
+
+  testWidgets('recent paging follows overflow and scroll position',
+      (tester) async {
+    viewport(tester, const Size(360, 240));
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.themeData().copyWith(platform: TargetPlatform.macOS),
+      home: Scaffold(
+          body: RecentStickers(
+        entries: List.generate(10, (_) => repository.entries.first),
+        onUse: (_) {},
+        onCopy: (_) {},
+      )),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<IconButton>(find.byWidgetPredicate((widget) =>
+                widget is IconButton && widget.tooltip == '上一页最近使用'))
+            .onPressed,
+        isNull);
+    expect(
+        tester
+            .widget<IconButton>(find.byWidgetPredicate((widget) =>
+                widget is IconButton && widget.tooltip == '下一页最近使用'))
+            .onPressed,
+        isNotNull);
+    await tester.tap(find.byTooltip('下一页最近使用'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<IconButton>(find.byWidgetPredicate((widget) =>
+                widget is IconButton && widget.tooltip == '上一页最近使用'))
+            .onPressed,
+        isNotNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('successful copy records recent; failed copy does not',
+      (tester) async {
+    viewport(tester, const Size(1100, 760));
+    var succeed = false;
+    var nativeCalls = 0;
+    const channel = MethodChannel('sticker_manager/platform');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'copySticker') {
+        nativeCalls++;
+        return succeed;
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(const MethodChannel('pasteboard'),
+        (_) async => throw PlatformException(code: 'unavailable'));
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(channel, null);
+      messenger.setMockMethodCallHandler(
+          const MethodChannel('pasteboard'), null);
+    });
+    await loadPage(tester);
+    var grid = tester.widget<StickerGrid>(find.byType(StickerGrid));
+    await tester.runAsync(() async {
+      grid.onCopy(RankedSticker(
+          Sticker(
+              id: 'missing',
+              hash: 'missing',
+              mediaType: StickerMediaType.image,
+              filePath: '${directory.path}/missing.png',
+              thumbnailPath: '',
+              source: StickerSource.manual,
+              createdAt: DateTime(2026),
+              updatedAt: DateTime(2026)),
+          {'all'}));
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+    });
+    await tester.pumpAndSettle();
+    expect(find.byType(RecentStickers), findsNothing);
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 400)));
+    expect(find.textContaining('无法写入'), findsWidgets);
+    succeed = true;
+    grid = tester.widget<StickerGrid>(find.byType(StickerGrid));
+    await tester.runAsync(() async {
+      grid.onCopy(grid.stickers.first);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(nativeCalls, 1, reason: 'success action must reach native copy');
+    expect(
+        (await SharedPreferences.getInstance())
+            .getStringList('recentStickerUses'),
+        isNotEmpty);
+    expect(
+        tester
+            .widget<RecentStickers>(find.byType(RecentStickers))
+            .entries
+            .single
+            .sticker
+            .id,
+        'old');
+    if (Platform.isWindows) {
+      expect(repository.entries.first.sticker.usageCount, 10);
+    }
+  }, skip: !(Platform.isMacOS || Platform.isWindows));
+
+  testWidgets('batch addition retains selection and original memberships',
+      (tester) async {
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    await tester.tap(find.text('多选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('全选当前列表'));
+    await tester.pump();
+    await tester.tap(find.text('添加到分组'));
+    await tester.pumpAndSettle();
+    expect(find.text('已有 1/2 张'), findsOneWidget);
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'QQ收藏'));
+    await tester.pump();
+    await tester.tap(find.text('添加到 1 个分组'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<SelectionToolbar>(find.byType(SelectionToolbar))
+            .selectedCount,
+        2);
+    expect(
+        repository.entries
+            .every((e) => e.groupIds.containsAll({'all', 'qq_favorites'})),
+        isTrue);
+  });
+
+  testWidgets('new group in batch dialog is selected automatically',
+      (tester) async {
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    await tester.tap(find.text('多选'));
+    await tester.pump();
+    await tester.tap(find.text('全选当前列表'));
+    await tester.pump();
+    await tester.tap(find.text('添加到分组'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '新建分组'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '新收藏');
+    await tester.tap(find.text('创建'));
+    await tester.pumpAndSettle();
+    expect(find.text('添加到 1 个分组'), findsOneWidget);
+    expect(
+        tester
+            .widget<CheckboxListTile>(
+                find.widgetWithText(CheckboxListTile, '新收藏'))
+            .value,
+        isTrue);
+    await tester.tap(find.text('添加到 1 个分组'));
+    await tester.pumpAndSettle();
+    final id = repository.extraGroups.single.id;
+    expect(repository.entries.every((e) => e.groupIds.contains(id)), isTrue);
+  });
+
+  testWidgets('paste shortcut respects text fields and modal focus',
+      (tester) async {
+    viewport(tester, const Size(1100, 760));
+    var reads = 0;
+    const clipboard = MethodChannel('pasteboard');
+    const platform = MethodChannel('sticker_manager/platform');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(clipboard, (call) async {
+      if (call.method == 'files') {
+        reads++;
+        return [];
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(platform, (_) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(clipboard, null);
+      messenger.setMockMethodCallHandler(platform, null);
+    });
+    Future<void> paste() async {
+      final modifier = Platform.isMacOS
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(modifier);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(modifier);
+      await tester.pumpAndSettle();
+    }
+
+    await loadPage(tester);
+    await tester.tap(find.byType(TextField));
+    await paste();
+    expect(reads, 0);
+    tester
+        .widget<KeyboardListener>(find.byType(KeyboardListener))
+        .focusNode
+        .requestFocus();
+    await tester.pump();
+    await paste();
+    expect(reads, 1);
+    await tester.tap(find.text('筛选'));
+    await tester.pumpAndSettle();
+    await paste();
+    expect(reads, 1);
+  }, skip: !(Platform.isMacOS || Platform.isWindows));
+
+  testWidgets(
+      'drop opens shared preview, cancel preserves originals and library',
+      (tester) async {
+    viewport(tester, const Size(1100, 760));
+    await loadPage(tester);
+    final target = tester.widget<DropTarget>(find.byType(DropTarget));
+    await tester.runAsync(() async {
+      target.onDragDone!(DropDoneDetails(
+          files: [DropItemFile(imagePath)],
+          localPosition: Offset.zero,
+          globalPosition: Offset.zero));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    });
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(ImportPreviewDialog), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(repository.entries.length, 2);
+    expect(File(imagePath).existsSync(), isTrue);
+    QuickPickerController.instance.onModeChanged?.call(QuickPickerMode.quick);
+    await tester.pumpAndSettle();
+    expect(find.byType(DropTarget), findsNothing);
+  }, skip: !(Platform.isMacOS || Platform.isWindows));
+
+  testWidgets('desktop note is hidden until hovering sticker image',
+      (tester) async {
+    viewport(tester, const Size(1100, 760));
+    const note = '这是一段超过卡片宽度的完整备注，用来确认图片悬停时不会截断备注内容。';
+    final entry = repository.entries.first;
+    repository.entries = [
+      RankedSticker(entry.sticker.copyWith(note: note), entry.groupIds)
+    ];
+    await loadPage(tester, platform: TargetPlatform.macOS);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    expect(find.text(note, findRichText: true), findsNothing);
+    final image = find
+        .descendant(of: find.byType(StickerCard), matching: find.byType(Image))
+        .first;
+    await mouse.moveTo(tester.getCenter(image));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.text(note, findRichText: true), findsOneWidget);
+    await mouse.moveTo(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    expect(find.text(note, findRichText: true), findsNothing);
   });
 
   testWidgets('hover copy button does not invoke card use', (tester) async {

@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models.dart';
 import 'database.dart';
 import 'import_source.dart';
+import 'import_preview.dart';
 import 'repository.dart';
 
 class ImportProgress {
@@ -40,12 +41,15 @@ class ImportResult {
     required this.duplicates,
     required this.skipped,
     required this.thumbnailsGenerated,
+    this.existingGrouped = 0,
     this.skippedTooLarge = 0,
     this.skippedByTotalLimit = 0,
   });
 
   final int added;
   final int duplicates;
+  final int existingGrouped;
+  int get alreadyExists => duplicates - existingGrouped;
   final int skipped;
   final int thumbnailsGenerated;
 
@@ -94,16 +98,68 @@ class MediaStore {
     return directory;
   }
 
+  /// Read-only validation. No managed files or records exist until confirmation.
+  Future<List<ImportCandidate>> inspectFiles(
+    Iterable<File> files, {
+    StickerSource Function(File)? sourceForFile,
+  }) async {
+    final existing = {
+      for (final e in await database.loadRanked()) e.sticker.hash: e
+    };
+    final result = <ImportCandidate>[];
+    var total = 0;
+    for (final file in files) {
+      final source = sourceForFile?.call(file) ?? StickerSource.manual;
+      final length = await _fileLength(file) ?? 0;
+      String? error;
+      String? hash;
+      StickerMediaType? type;
+      if (length <= 0) {
+        error = '文件为空或无法读取';
+      } else if (length > maxImportFileBytes) {
+        error = '单文件超过 64 MiB';
+      } else if (length > maxImportTotalBytes - total) {
+        error = '批次超过 512 MiB';
+      } else {
+        total += length;
+        final read = await _readBytesWithinLimit(file);
+        if (read.bytes == null) {
+          error = '文件无法读取或大小发生变化';
+        } else {
+          type = _mediaTypeFor(read.bytes!);
+          if (type == null) {
+            error = '不支持的图片格式';
+          } else {
+            hash = sha256.convert(read.bytes!).toString();
+          }
+        }
+      }
+      result.add(ImportCandidate(
+          file: file,
+          source: source,
+          bytes: length,
+          hash: hash,
+          mediaType: type,
+          existing: existing[hash],
+          error: error));
+    }
+    return result;
+  }
+
   Future<ImportResult> importFiles(
     Iterable<File> files, {
     StickerSource source = StickerSource.manual,
     StickerSource Function(File file)? sourceForFile,
+    Map<String, String>? expectedHashes,
     Iterable<String> groupIds = const ['all'],
     void Function(ImportProgress progress)? onProgress,
     FutureOr<void> Function(List<Sticker> stickers)? onRecordsCommitted,
   }) async {
     final input = files.toList(growable: false);
     final importGroupIds = groupIds.toSet();
+    final existing = {
+      for (final e in await database.loadRanked()) e.sticker.hash: e
+    };
     final target = await _mediaDirectory;
     final outcomes = List<_PreparationOutcome?>.filled(input.length, null);
     final candidates = <_PreparationInput>[];
@@ -147,6 +203,8 @@ class MediaStore {
           candidate.file,
           candidate.source,
           target,
+          existing: existing,
+          expectedHash: expectedHashes?[candidate.file.path],
           sourceOrder: candidate.source == StickerSource.qq
               ? candidate.inputIndex
               : null,
@@ -186,9 +244,16 @@ class MediaStore {
       skippedByTotalLimit: skippedByTotalLimit,
     ));
 
-    if (source == StickerSource.qq ||
-        prepared.any((sticker) => sticker.source == StickerSource.qq)) {
-      importGroupIds.add('qq_favorites');
+    final associated = <String>{};
+    for (final sticker in prepared) {
+      final old = existing[sticker.hash];
+      final desired = {
+        ...importGroupIds,
+        if (sticker.source == StickerSource.qq) 'qq_favorites'
+      };
+      if (old != null && !old.groupIds.containsAll(desired)) {
+        associated.add(sticker.hash);
+      }
     }
     final inserted = await database.insertStickers(
       prepared,
@@ -220,6 +285,7 @@ class MediaStore {
     return ImportResult(
       added: inserted.length,
       duplicates: duplicates,
+      existingGrouped: associated.length,
       skipped: skipped,
       thumbnailsGenerated: thumbnailsGenerated,
       skippedTooLarge: skippedTooLarge,
@@ -238,7 +304,9 @@ class MediaStore {
 
   Future<_PreparationOutcome> _prepare(
       File file, StickerSource source, Directory target,
-      {int? sourceOrder}) async {
+      {int? sourceOrder,
+      Map<String, RankedSticker> existing = const {},
+      String? expectedHash}) async {
     try {
       final read = await _readBytesWithinLimit(file);
       if (read.reason != null) {
@@ -248,11 +316,16 @@ class MediaStore {
       final mediaType = _mediaTypeFor(bytes);
       if (mediaType == null) return const _PreparationOutcome.skipped();
       final hash = sha256.convert(bytes).toString();
+      if (expectedHash != null && hash != expectedHash) {
+        return const _PreparationOutcome.skipped();
+      }
       final extension = mediaType == StickerMediaType.gif ? 'gif' : 'image';
-      final destination = File(path.join(target.path, '$hash.$extension'));
-      if (!await destination.exists()) {
+      final old = existing[hash]?.sticker;
+      final destination =
+          File(old?.filePath ?? path.join(target.path, '$hash.$extension'));
+      if (old == null && !await destination.exists()) {
         await destination.writeAsBytes(bytes);
-      } else if (await destination.length() != bytes.length) {
+      } else if (old == null && await destination.length() != bytes.length) {
         // A previous interrupted import may have left a partial hash-named
         // file. Repair it before creating the database record.
         await destination.writeAsBytes(bytes);

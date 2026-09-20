@@ -1,4 +1,5 @@
 import '../models.dart';
+import 'sticker_filter.dart';
 
 /// Sort rule applied after group and query filtering.
 ///
@@ -12,14 +13,19 @@ class UsageRankingService {
     String? groupId,
     String query = '',
     StickerSortOrder order = StickerSortOrder.defaultRule,
+    StickerFilter filter = const StickerFilter(),
+    DateTime? now,
   }) {
+    final evaluatedAt = now ?? DateTime.now();
     final normalizedQuery = query.trim().toLowerCase();
     final filtered = stickers.where((entry) {
       final inGroup = groupId == null || entry.groupIds.contains(groupId);
       final matchesQuery = normalizedQuery.isEmpty ||
           entry.sticker.note.toLowerCase().contains(normalizedQuery) ||
           entry.sticker.id.toLowerCase().contains(normalizedQuery);
-      return inGroup && matchesQuery;
+      return inGroup &&
+          matchesQuery &&
+          filter.matches(entry.sticker, now: evaluatedAt);
     }).toList();
 
     if (order == StickerSortOrder.recentImport) {

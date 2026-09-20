@@ -32,6 +32,9 @@ abstract interface class StickerRepository {
 
   Future<void> attachGroup(String stickerId, String groupId);
 
+  Future<void> attachGroupsMany(
+      Iterable<String> stickerIds, Iterable<String> groupIds);
+
   Future<void> replaceStickerGroups(
       String stickerId, Iterable<String> groupIds);
 

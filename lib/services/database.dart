@@ -176,7 +176,10 @@ class StickerDatabase implements StickerRepository {
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
         if (row == 0) continue;
-        for (final groupId in groups) {
+        for (final groupId in {
+          ...groups,
+          if (sticker.source == StickerSource.qq) 'qq_favorites'
+        }) {
           await transaction.insert(
               'sticker_groups',
               {
@@ -198,7 +201,10 @@ class StickerDatabase implements StickerRepository {
             limit: 1);
         if (existing.isEmpty) continue;
         final existingId = existing.first['id'] as String;
-        for (final groupId in groups) {
+        for (final groupId in {
+          ...groups,
+          if (sticker.source == StickerSource.qq) 'qq_favorites'
+        }) {
           await transaction.insert(
               'sticker_groups',
               {
@@ -366,6 +372,35 @@ class StickerDatabase implements StickerRepository {
   Future<void> replaceStickerGroups(
       String stickerId, Iterable<String> groupIds) async {
     await replaceStickerGroupsMany([stickerId], groupIds);
+  }
+
+  @override
+  Future<void> attachGroupsMany(
+      Iterable<String> stickerIds, Iterable<String> groupIds) async {
+    final ids = stickerIds.toSet();
+    final groups = groupIds.toSet();
+    final db = await database;
+    await db.transaction((transaction) async {
+      for (final group in groups) {
+        if ((await transaction.query('groups',
+                columns: ['id'], where: 'id = ?', whereArgs: [group]))
+            .isEmpty) {
+          throw StateError('分组不存在：$group');
+        }
+      }
+      for (final id in ids) {
+        if ((await transaction.query('stickers',
+                columns: ['id'], where: 'id = ?', whereArgs: [id]))
+            .isEmpty) {
+          throw StateError('表情不存在：$id');
+        }
+        for (final group in groups) {
+          await transaction.insert(
+              'sticker_groups', {'sticker_id': id, 'group_id': group},
+              conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
+      }
+    });
   }
 
   @override
