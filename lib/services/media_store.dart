@@ -323,11 +323,10 @@ class MediaStore {
       final old = existing[hash]?.sticker;
       final destination =
           File(old?.filePath ?? path.join(target.path, '$hash.$extension'));
-      if (old == null && !await destination.exists()) {
-        await destination.writeAsBytes(bytes);
-      } else if (old == null && await destination.length() != bytes.length) {
-        // A previous interrupted import may have left a partial hash-named
-        // file. Repair it before creating the database record.
+      if (!await destination.exists() ||
+          await destination.length() != bytes.length) {
+        // Restore missing or truncated media even when its database record
+        // already exists. Leave intact duplicate files untouched.
         await destination.writeAsBytes(bytes);
       }
       final now = DateTime.now();

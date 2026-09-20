@@ -5,6 +5,7 @@ import 'package:sticker_manager/platform/desktop_drop_bridge.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sticker_manager/models.dart';
 import 'package:sticker_manager/services/database.dart';
+import 'package:sticker_manager/services/export_service.dart';
 import 'package:sticker_manager/services/media_store.dart';
 
 void main() {
@@ -68,6 +69,53 @@ void main() {
     expect(again.existingGrouped, 0);
     expect(again.alreadyExists, 1);
   });
+
+  for (final missing in [true, false]) {
+    for (final fromPackage in [false, true]) {
+      test(
+          '${fromPackage ? 'package restore' : 'reimport'} repairs ${missing ? 'missing' : 'truncated'} managed media',
+          () async {
+        final originalBytes = await png.readAsBytes();
+        await store.importFiles([png], groupIds: ['all', 'work']);
+        final before = (await db.loadRanked()).single;
+        await db.updateSticker(
+            before.sticker.copyWith(note: '保留备注', usageCount: 9));
+        final exporter = ExportPackageService(db);
+        final package = File('${root.path}/backup.smp');
+        if (fromPackage) {
+          await package
+              .writeAsBytes(await exporter.buildPackage('password123'));
+        }
+        final managed = File(before.sticker.filePath);
+        if (missing) {
+          await managed.delete();
+        } else {
+          await managed.writeAsBytes(originalBytes.take(8).toList());
+        }
+
+        final preview = (await store.inspectFiles([png])).single;
+        expect(preview.existing!.sticker.id, before.sticker.id);
+        expect(await managed.exists(), !missing);
+        if (!missing) expect(await managed.length(), 8);
+
+        final result = fromPackage
+            ? await exporter.importFrom(package, 'password123', store)
+            : await store.importFiles([png],
+                expectedHashes: {png.path: preview.hash!},
+                groupIds: ['all', 'work']);
+        expect(result.added, 0);
+        expect(result.duplicates, 1);
+        expect(result.skipped, 0);
+        expect(await managed.readAsBytes(), originalBytes);
+        expect(await png.readAsBytes(), originalBytes);
+        final after = (await db.loadRanked()).single;
+        expect(after.sticker.id, before.sticker.id);
+        expect(after.sticker.note, '保留备注');
+        expect(after.sticker.usageCount, 9);
+        expect(after.groupIds, before.groupIds);
+      });
+    }
+  }
 
   test('drop data keeps GIF bytes and cleanup leaves original files untouched',
       () async {
