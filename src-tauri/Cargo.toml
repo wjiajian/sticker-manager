@@ -14,5 +14,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde.workspace = true
 sticker-core = { path = "../crates/core" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
 thiserror.workspace = true

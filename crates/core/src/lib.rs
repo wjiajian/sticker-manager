@@ -5,7 +5,9 @@
 
 mod db;
 mod error;
+mod import;
 mod library;
 
 pub use error::{Error, Result};
-pub use library::{Library, LibraryOverview};
+pub use import::{ImportFailure, ImportReport};
+pub use library::{Library, LibraryOverview, LibraryView, Sticker};

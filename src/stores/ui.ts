@@ -1,13 +1,17 @@
 import { create } from "zustand";
 
-export type LibraryView = "all" | "recent" | "favorites" | "untagged" | "recentlyDeleted";
+import type { LibraryView } from "../lib/ipc";
 
 interface UiState {
   view: LibraryView;
+  selectedStickerId: string | null;
   setView: (view: LibraryView) => void;
+  selectSticker: (id: string) => void;
 }
 
 export const useUiStore = create<UiState>()((set) => ({
   view: "all",
-  setView: (view) => set({ view }),
+  selectedStickerId: null,
+  setView: (view) => set({ view, selectedStickerId: null }),
+  selectSticker: (id) => set({ selectedStickerId: id }),
 }));

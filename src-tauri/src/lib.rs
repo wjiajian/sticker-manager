@@ -7,6 +7,7 @@ mod commands;
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // macOS：~/Library/Application Support/<identifier>/；Windows：%APPDATA%\<identifier>\
             let library = Library::open(&app.path().app_data_dir()?)?;
@@ -14,7 +15,11 @@ pub fn run() {
             create_main_window(app)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::library_overview])
+        .invoke_handler(tauri::generate_handler![
+            commands::library_overview,
+            commands::list_stickers,
+            commands::import_stickers,
+        ])
         .run(tauri::generate_context!())
         .expect("启动应用失败");
 }

@@ -1,8 +1,9 @@
-import { CloudSlashIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react";
+import { CloudSlashIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { Button } from "../../components/Button";
 import { platform } from "../../lib/platform";
+import { ImportButton } from "./ImportButton";
 
-export function TitleBar() {
+export function TitleBar({ busy, onChoose }: { busy: boolean; onChoose: (directory: boolean) => void }) {
   return (
     <header data-tauri-drag-region className="flex items-center gap-4 bg-chrome px-4 py-3">
       {/* macOS 的红绿灯按钮浮在这块空白上，位置在 src-tauri/src/lib.rs 里设置 */}
@@ -23,10 +24,7 @@ export function TitleBar() {
           <CloudSlashIcon size={16} className="text-ink-secondary" />
           未设置同步
         </Button>
-        <Button variant="primary">
-          <PlusIcon size={16} />
-          导入表情
-        </Button>
+        <ImportButton disabled={busy} onChoose={onChoose} />
       </div>
     </header>
   );

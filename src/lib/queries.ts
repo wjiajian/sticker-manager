@@ -1,5 +1,5 @@
-import { QueryClient, useQuery } from "@tanstack/react-query";
-import { ipc } from "./ipc";
+import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ipc, type LibraryView } from "./ipc";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,4 +15,18 @@ export const queryClient = new QueryClient({
 
 export function useLibraryOverview() {
   return useQuery({ queryKey: ["library", "overview"], queryFn: ipc.libraryOverview });
+}
+
+export function useStickers(view: LibraryView) {
+  return useQuery({ queryKey: ["library", "stickers", view], queryFn: () => ipc.listStickers(view) });
+}
+
+export function useImportStickers() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ipc.importStickers,
+    // 连续拖入时按批次导入，避免覆盖尚未完成的请求。
+    scope: { id: "import-stickers" },
+    onSettled: () => client.invalidateQueries({ queryKey: ["library"] }),
+  });
 }

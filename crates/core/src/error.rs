@@ -3,6 +3,18 @@ pub enum Error {
     #[error("读写仓库文件失败：{0}")]
     Io(#[from] std::io::Error),
 
+    #[error("无法读取图片：{0}")]
+    Image(#[from] image::ImageError),
+
+    #[error("图片没有可读取的帧")]
+    EmptyImage,
+
+    #[error("系统时间早于 Unix 起点，请检查系统时间")]
+    InvalidTime,
+
+    #[error("文件过大，无法记录文件大小")]
+    FileTooLarge,
+
     #[error("数据库出错：{0}")]
     Db(#[from] rusqlite::Error),
 

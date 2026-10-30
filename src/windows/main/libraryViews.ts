@@ -6,7 +6,7 @@ import {
   TrashIcon,
   TrayIcon,
 } from "@phosphor-icons/react";
-import type { LibraryView } from "../../stores/ui";
+import type { LibraryView } from "../../lib/ipc";
 
 export const LIBRARY_VIEWS: { view: LibraryView; label: string; icon: Icon }[] = [
   { view: "all", label: "全部表情", icon: SquaresFourIcon },
