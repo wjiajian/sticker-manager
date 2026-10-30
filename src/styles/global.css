@@ -1,0 +1,92 @@
+@import "tailwindcss";
+@import "@fontsource-variable/manrope";
+
+/* 取值见 design/README.md 的视觉规范 */
+@theme {
+  --font-sans: "Manrope Variable", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+
+  /* 字号只用这六档 */
+  --text-*: initial;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+  --text-3xl: 30px;
+  --text-3xl--line-height: 36px;
+
+  --color-ink: #1f1f1f;
+  --color-ink-secondary: #6b6a66;
+  --color-ink-tertiary: #4a4945;
+  --color-surface: #ffffff;
+  --color-chrome: #f5f4f0; /* 侧栏、标题栏 */
+  --color-detail: #fafaf8;
+  --color-tile: #f3f2ee; /* 表情格子、分段控件底色 */
+  --color-line: #e2e0d9;
+  --color-hover: #eae8e1;
+  --color-accent: #c2410c;
+  --color-synced: #1e8a4c;
+
+  /* Windows 版收小圆角，见下方 data-platform 覆盖 */
+  --radius-card: 12px;
+  --radius-control: 8px;
+
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@custom-variant windows (&:where([data-platform="windows"], [data-platform="windows"] *));
+
+:root[data-platform="windows"] {
+  --radius-card: 8px;
+  --radius-control: 4px;
+}
+
+/*
+ * 可交互元素的统一动效：位移 500ms，颜色和透明度 300ms；减少动态效果时只保留透明度变化。
+ * Tailwind v4 的 scale-* / translate-* 写的是独立的 scale、translate 属性，不是 transform。
+ */
+@utility interactive {
+  transition-property: transform, translate, scale, opacity, background-color, border-color;
+  transition-duration: 500ms, 500ms, 500ms, 300ms, 300ms, 300ms;
+  transition-timing-function: var(--ease-standard);
+
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: opacity;
+    transition-duration: 300ms;
+    transform: none !important;
+    translate: none !important;
+    scale: none !important;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-surface font-sans text-sm text-ink antialiased select-none;
+    cursor: default;
+  }
+
+  input,
+  textarea {
+    @apply select-text;
+  }
+
+  input::placeholder {
+    @apply text-ink-secondary;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}

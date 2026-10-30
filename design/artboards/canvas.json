@@ -1,0 +1,23 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-10-30T09:30:00Z" },
+  "title": "表情包管理器 · 界面方案",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1280, "h": 800, "title": "01 三栏资料库 · macOS", "expand": "fill", "is_interactive": true },
+    "MainWin.dc.html": { "x": 1360, "y": 0, "w": 1280, "h": 800, "title": "01 三栏资料库 · Windows", "expand": "fill", "is_interactive": true },
+    "Dock.dc.html": { "x": 2720, "y": 0, "w": 1280, "h": 800, "title": "06 悬浮球展开面板", "expand": "fill", "is_interactive": true },
+    "Ball.dc.html": { "x": 2720, "y": 920, "w": 1280, "h": 560, "title": "06 悬浮球状态" }
+  },
+  "order": [
+    "Main.dc.html",
+    "MainWin.dc.html",
+    "Dock.dc.html",
+    "Ball.dc.html"
+  ],
+  "notes": {
+    "title": { "x": 0, "y": -300, "text": "表情包管理器 · 界面方案", "kind": "title1", "maxW": 4000 }
+  },
+  "designSystems": []
+}

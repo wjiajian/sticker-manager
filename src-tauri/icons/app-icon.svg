@@ -1,0 +1,9 @@
+<!-- 应用图标源文件：悬浮球里的品牌笑脸（design/artboards/Ball.dc.html）。改完后运行 pnpm tauri icon src-tauri/icons/app-icon.svg 重新生成各尺寸 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#FFFFFF"/>
+  <g transform="translate(512 512) scale(12) translate(-32 -34)">
+    <circle cx="32" cy="34" r="24" fill="#FFC94A" stroke="#1F1F1F" stroke-width="3"/>
+    <path d="M21 31q4 -5 8 0M35 31q4 -5 8 0" fill="none" stroke="#1F1F1F" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M24 41q8 8 16 0" fill="none" stroke="#1F1F1F" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+</svg>
