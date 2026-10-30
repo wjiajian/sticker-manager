@@ -20,6 +20,10 @@ export interface Sticker {
   byteSize: number;
   animated: boolean;
   addedAt: number;
+  favorite: boolean;
+  deletedAt: number | null;
+  usageCount: number;
+  lastUsedAt: number | null;
   objectPath: string;
   thumbnailPath: string;
 }
@@ -41,4 +45,9 @@ export const ipc = {
   libraryOverview: () => invoke<LibraryOverview>("library_overview"),
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
   importStickers: (paths: string[]) => invoke<ImportReport>("import_stickers", { paths }),
+  copySticker: (id: string, fileOnly: boolean) => invoke<void>("copy_sticker", { id, fileOnly }),
+  prepareStickerDrag: (id: string) => invoke<{ path: string; thumbnailPath: string }>("prepare_sticker_drag", { id }),
+  recordStickerUsage: (id: string) => invoke<void>("record_sticker_usage", { id }),
+  toggleStickerFavorite: (id: string) => invoke<boolean>("toggle_sticker_favorite", { id }),
+  revealSticker: (id: string) => invoke<void>("reveal_sticker", { id }),
 };

@@ -6,6 +6,15 @@ pub enum Error {
     #[error("无法读取图片：{0}")]
     Image(#[from] image::ImageError),
 
+    #[error("本机设备信息损坏，请恢复 local/device.json，避免重新生成设备 ID")]
+    InvalidDevice,
+
+    #[error("无法读取电脑名：{0}")]
+    DeviceName(String),
+
+    #[error("表情不存在或已在最近删除中")]
+    StickerUnavailable,
+
     #[error("图片没有可读取的帧")]
     EmptyImage,
 

@@ -3,9 +3,11 @@ import { Sidebar } from "./Sidebar";
 import { StickerGrid } from "./StickerGrid";
 import { TitleBar } from "./TitleBar";
 import { useImport } from "./useImport";
+import { useStickerActions } from "./useStickerActions";
 
 export function App() {
-  const { choose, busy, dragging, message } = useImport();
+  const actions = useStickerActions();
+  const { choose, busy, dragging, message } = useImport(actions.draggingOut, actions.onInternalDrop);
 
   return (
     <div className={`flex h-full flex-col ${dragging ? "outline-2 -outline-offset-2 outline-accent" : ""}`}>
@@ -15,8 +17,8 @@ export function App() {
       </div>
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <StickerGrid />
-        <DetailPanel />
+        <StickerGrid actions={actions} />
+        <DetailPanel actions={actions} />
       </div>
     </div>
   );

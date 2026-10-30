@@ -209,7 +209,7 @@ fn supported_extension(format: Option<ImageFormat>) -> Option<&'static str> {
     }
 }
 
-fn decode(path: &Path, format: ImageFormat) -> Result<(DynamicImage, bool)> {
+pub(crate) fn decode(path: &Path, format: ImageFormat) -> Result<(DynamicImage, bool)> {
     let reader = BufReader::new(File::open(path)?);
     match format {
         ImageFormat::Gif => {

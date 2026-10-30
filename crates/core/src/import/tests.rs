@@ -239,6 +239,8 @@ fn imports_jpeg_webp_gif_and_apng_with_animation_metadata() {
     for sticker in library.list_stickers(LibraryView::All).unwrap() {
         assert_eq!((sticker.width, sticker.height), (8, 4));
         assert_eq!(sticker.animated, sticker.name == "动图");
+        let first_frame = sticker.read_image().unwrap();
+        assert_eq!((first_frame.width(), first_frame.height()), (8, 4));
         assert_eq!(image::open(sticker.thumbnail_path).unwrap().width(), 8);
     }
 }

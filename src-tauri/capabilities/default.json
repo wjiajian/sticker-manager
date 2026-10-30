@@ -3,5 +3,11 @@
   "identifier": "default",
   "description": "主窗口的权限",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:allow-open",
+    "drag:allow-start-drag",
+    "opener:allow-reveal-item-in-dir"
+  ]
 }

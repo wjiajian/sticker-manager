@@ -1,10 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, db};
+use crate::{Device, Error, Result, db};
+
+const STICKER_COLUMNS: &str = "s.id, s.name, s.width, s.height, s.byte_size, s.animated,
+    s.added_at, s.hash, s.ext, s.favorite, s.deleted_at,
+    COALESCE((SELECT SUM(u.count) FROM usages u WHERE u.sticker_id = s.id), 0),
+    (SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id)";
 
 /// 仓库：应用托管的、存放全部表情的唯一位置（ADR 0002）。
 ///
@@ -12,9 +17,11 @@ use crate::{Result, db};
 /// - `library.db`：元数据
 /// - `objects/`：表情原文件，按内容哈希命名
 /// - `thumbs/`：本机生成的缩略图，不同步
+/// - `local/device.json`：本机设备身份，不同步
 pub struct Library {
     pub(crate) conn: Connection,
     pub(crate) root: PathBuf,
+    pub(crate) device: Device,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -37,6 +44,10 @@ pub struct Sticker {
     pub byte_size: i64,
     pub animated: bool,
     pub added_at: i64,
+    pub favorite: bool,
+    pub deleted_at: Option<i64>,
+    pub usage_count: i64,
+    pub last_used_at: Option<i64>,
     pub object_path: PathBuf,
     pub thumbnail_path: PathBuf,
 }
@@ -57,11 +68,36 @@ impl Library {
     pub fn open(root: &Path) -> Result<Self> {
         fs::create_dir_all(root.join("objects"))?;
         fs::create_dir_all(root.join("thumbs"))?;
+        let device = Device::load_or_create(root)?;
         let conn = db::open(&root.join("library.db"))?;
         Ok(Self {
             conn,
             root: root.canonicalize()?,
+            device,
         })
+    }
+
+    pub fn device(&self) -> &Device {
+        &self.device
+    }
+
+    pub fn sticker(&self, id: &str) -> Result<Sticker> {
+        self.conn
+            .query_row(
+                &format!("SELECT {STICKER_COLUMNS} FROM stickers s WHERE s.id = ?1"),
+                [id],
+                |row| Sticker::from_row(row, &self.root),
+            )
+            .optional()?
+            .ok_or(Error::StickerUnavailable)
+    }
+
+    pub fn sticker_for_use(&self, id: &str) -> Result<Sticker> {
+        let sticker = self.sticker(id)?;
+        if sticker.deleted_at.is_some() {
+            return Err(Error::StickerUnavailable);
+        }
+        Ok(sticker)
     }
 
     pub fn list_stickers(&self, view: LibraryView) -> Result<Vec<Sticker>> {
@@ -82,24 +118,9 @@ impl Library {
             "s.added_at DESC, s.rowid DESC"
         };
         let mut statement = self.conn.prepare(&format!(
-            "SELECT s.id, s.name, s.width, s.height, s.byte_size, s.animated, s.added_at, s.hash, s.ext
-             FROM stickers s WHERE {filter} ORDER BY {order}"
+            "SELECT {STICKER_COLUMNS} FROM stickers s WHERE {filter} ORDER BY {order}"
         ))?;
-        let stickers = statement.query_map([], |row| {
-            let hash: String = row.get(7)?;
-            let ext: String = row.get(8)?;
-            Ok(Sticker {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                width: row.get(2)?,
-                height: row.get(3)?,
-                byte_size: row.get(4)?,
-                animated: row.get(5)?,
-                added_at: row.get(6)?,
-                object_path: self.root.join("objects").join(format!("{hash}.{ext}")),
-                thumbnail_path: self.root.join("thumbs").join(format!("{hash}.png")),
-            })
-        })?;
+        let stickers = statement.query_map([], |row| Sticker::from_row(row, &self.root))?;
         Ok(stickers.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -120,6 +141,37 @@ impl Library {
             )?,
             recently_deleted: count("SELECT COUNT(*) FROM stickers WHERE deleted_at IS NOT NULL")?,
         })
+    }
+}
+
+impl Sticker {
+    fn from_row(row: &Row<'_>, root: &Path) -> rusqlite::Result<Self> {
+        let hash: String = row.get(7)?;
+        let ext: String = row.get(8)?;
+        Ok(Self {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            width: row.get(2)?,
+            height: row.get(3)?,
+            byte_size: row.get(4)?,
+            animated: row.get(5)?,
+            added_at: row.get(6)?,
+            favorite: row.get(9)?,
+            deleted_at: row.get(10)?,
+            usage_count: row.get(11)?,
+            last_used_at: row.get(12)?,
+            object_path: root.join("objects").join(format!("{hash}.{ext}")),
+            thumbnail_path: root.join("thumbs").join(format!("{hash}.png")),
+        })
+    }
+
+    /// 使用与导入共用解码逻辑，动图读取第一帧，保留原始尺寸。
+    pub fn read_image(&self) -> Result<image::DynamicImage> {
+        let format = image::ImageReader::open(&self.object_path)?
+            .with_guessed_format()?
+            .format()
+            .ok_or(Error::EmptyImage)?;
+        Ok(crate::import::decode(&self.object_path, format)?.0)
     }
 }
 

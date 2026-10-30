@@ -4,9 +4,13 @@
 //! 术语见仓库根目录的 GLOSSARY.md。
 
 mod db;
+mod device;
 mod error;
 mod import;
 mod library;
+mod usage;
+
+pub use device::Device;
 
 pub use error::{Error, Result};
 pub use import::{ImportFailure, ImportReport};

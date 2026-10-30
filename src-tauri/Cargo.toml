@@ -16,4 +16,16 @@ serde.workspace = true
 sticker-core = { path = "../crates/core" }
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-drag = "2.1.1"
+tauri-plugin-opener = "2"
+tempfile = "3"
+image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
 thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSString", "NSURL"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+clipboard-win = "5.4"

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@crabnebula/tauri-plugin-drag':
+        specifier: ^2.1.0
+        version: 2.1.0
       '@fontsource-variable/manrope':
         specifier: ^5.3.0
         version: 5.3.0
@@ -59,6 +62,9 @@ importers:
         version: 8.3.5(jiti@2.7.0)
 
 packages:
+
+  '@crabnebula/tauri-plugin-drag@2.1.0':
+    resolution: {integrity: sha512-LnUXAZwQt1cdMoGDLJ6ogW9wFCYServCZXlGadS7CA+CZ9eXS7L+Q7QyQW6g/zGw9YI2MwKFqf1aSNBGyWw+OA==}
 
   '@fontsource-variable/manrope@5.3.0':
     resolution: {integrity: sha512-6D5dgokHsWDDMtmXHznKa0hK229NN+1a4BLPmUCLqcO1Pw5EEhWY5RFt0AcXnVRAljFFPfRtLkJePQj6LSsV6g==}
@@ -818,6 +824,10 @@ packages:
         optional: true
 
 snapshots:
+
+  '@crabnebula/tauri-plugin-drag@2.1.0':
+    dependencies:
+      '@tauri-apps/api': 2.12.4
 
   '@fontsource-variable/manrope@5.3.0': {}
 

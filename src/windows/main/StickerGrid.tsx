@@ -1,9 +1,12 @@
+import type { Sticker } from "../../lib/ipc";
 import { useStickers } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { LIBRARY_VIEWS } from "./libraryViews";
 import { StickerImage } from "./StickerImage";
+import { useDragOut } from "./useDragOut";
+import type { StickerActions } from "./useStickerActions";
 
-export function StickerGrid() {
+export function StickerGrid({ actions }: { actions: StickerActions }) {
   const view = useUiStore((s) => s.view);
   const selectedId = useUiStore((s) => s.selectedStickerId);
   const selectSticker = useUiStore((s) => s.selectSticker);
@@ -31,24 +34,42 @@ export function StickerGrid() {
       ) : (
         <section aria-label={label} className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-3">
           {stickers.map((sticker) => (
-            <button
+            <StickerTile
               key={sticker.id}
-              type="button"
-              aria-label={sticker.name}
-              aria-pressed={selectedId === sticker.id}
-              onClick={() => selectSticker(sticker.id)}
-              className={`interactive relative flex aspect-square w-full items-center justify-center rounded-card bg-tile p-4 hover:-translate-y-0.5 active:scale-98 ${
-                selectedId === sticker.id ? "ring-2 ring-accent ring-offset-2 ring-offset-surface" : ""
-              }`}
-            >
-              <StickerImage path={sticker.thumbnailPath} name={sticker.name} lazy />
-              {sticker.animated && (
-                <span aria-label="动图" className="absolute top-2 right-2 rounded-sm bg-surface px-1 text-xs font-semibold windows:rounded-xs">GIF</span>
-              )}
-            </button>
+              sticker={sticker}
+              selected={selectedId === sticker.id}
+              onSelect={() => selectSticker(sticker.id)}
+              actions={actions}
+            />
           ))}
         </section>
       )}
     </main>
+  );
+}
+
+function StickerTile({ sticker, selected, onSelect, actions }: {
+  sticker: Sticker;
+  selected: boolean;
+  onSelect: () => void;
+  actions: StickerActions;
+}) {
+  const drag = useDragOut((isPressed) => actions.drag(sticker, isPressed), sticker.deletedAt !== null || actions.busy);
+  return (
+    <button
+      type="button"
+      aria-label={sticker.name}
+      aria-pressed={selected}
+      onClick={onSelect}
+      {...drag}
+      className={`interactive relative flex aspect-square w-full touch-none items-center justify-center rounded-card bg-tile p-4 hover:-translate-y-0.5 active:scale-98 ${
+        selected ? "ring-2 ring-accent ring-offset-2 ring-offset-surface" : ""
+      }`}
+    >
+      <StickerImage path={sticker.thumbnailPath} name={sticker.name} lazy />
+      {sticker.animated && (
+        <span aria-label="动图" className="absolute top-2 right-2 rounded-sm bg-surface px-1 text-xs font-semibold windows:rounded-xs">GIF</span>
+      )}
+    </button>
   );
 }

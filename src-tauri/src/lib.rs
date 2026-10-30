@@ -3,15 +3,24 @@ use std::sync::Mutex;
 use sticker_core::Library;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod clipboard;
 mod commands;
+mod export;
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_drag::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // macOS：~/Library/Application Support/<identifier>/；Windows：%APPDATA%\<identifier>\
             let library = Library::open(&app.path().app_data_dir()?)?;
             app.manage(Mutex::new(library));
+            app.manage(export::ExportDirectory::new(
+                std::env::temp_dir()
+                    .join(app.config().identifier.clone())
+                    .join("exports"),
+            ));
             create_main_window(app)?;
             Ok(())
         })
@@ -19,6 +28,11 @@ pub fn run() {
             commands::library_overview,
             commands::list_stickers,
             commands::import_stickers,
+            commands::copy_sticker,
+            commands::prepare_sticker_drag,
+            commands::record_sticker_usage,
+            commands::toggle_sticker_favorite,
+            commands::reveal_sticker,
         ])
         .run(tauri::generate_context!())
         .expect("启动应用失败");
