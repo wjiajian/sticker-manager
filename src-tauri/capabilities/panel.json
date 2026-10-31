@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "panel",
+  "description": "表情面板的最小权限",
+  "windows": ["panel"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "drag:allow-start-drag",
+    "panel-commands"
+  ]
+}

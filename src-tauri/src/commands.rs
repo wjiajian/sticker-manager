@@ -9,7 +9,7 @@ use serde::{Serialize, Serializer};
 use sticker_core::{
     ImportReport, Library, LibraryOverview, LibraryView, Sticker, Tag, TagGroup, TagSidebar,
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{clipboard, export::ExportDirectory};
 
@@ -205,7 +205,7 @@ pub async fn import_stickers(app: AppHandle, paths: Vec<PathBuf>) -> CommandResu
 #[tauri::command]
 pub async fn copy_sticker(app: AppHandle, id: String, file_only: bool) -> CommandResult<()> {
     let handle = app.clone();
-    with_library(app, move |library| {
+    with_library(app.clone(), move |library| {
         let sticker = library.sticker_for_use(&id)?;
         let image = if file_only {
             None
@@ -217,7 +217,9 @@ pub async fn copy_sticker(app: AppHandle, id: String, file_only: bool) -> Comman
             .map_err(|error| CommandError::Clipboard(error.to_string()))?;
         library.record_usage(&id).map_err(CommandError::Usage)
     })
-    .await
+    .await?;
+    notify_usage(&app);
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -242,10 +244,18 @@ pub async fn prepare_sticker_drag(app: AppHandle, id: String) -> CommandResult<P
 
 #[tauri::command]
 pub async fn record_sticker_usage(app: AppHandle, id: String) -> CommandResult<()> {
-    with_library(app, move |library| {
+    with_library(app.clone(), move |library| {
         library.record_usage(&id).map_err(CommandError::Usage)
     })
-    .await
+    .await?;
+    notify_usage(&app);
+    Ok(())
+}
+
+fn notify_usage(app: &AppHandle) {
+    if let Err(error) = app.emit("library-changed", ()) {
+        eprintln!("通知仓库更新失败：{error}");
+    }
 }
 
 #[tauri::command]

@@ -71,6 +71,12 @@ export interface ImportReport {
 }
 
 export const ipc = {
+  panelSession: () => invoke<{ pinned: boolean; visible: boolean }>("panel_session"),
+  setPanelPinned: (pinned: boolean) => invoke<void>("set_panel_pinned", { pinned }),
+  setPanelDragging: (dragging: boolean) => invoke<void>("set_panel_dragging", { dragging }),
+  hidePanel: (onlyIfUnpinned = false) => invoke<boolean>("hide_panel", { onlyIfUnpinned }),
+  showMainWindow: () => invoke<void>("show_main_window"),
+  globalShortcutError: () => invoke<string | null>("global_shortcut_error"),
   libraryOverview: () => invoke<LibraryOverview>("library_overview"),
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
   searchStickers: (query: string) => invoke<Sticker[]>("search_stickers", { query }),

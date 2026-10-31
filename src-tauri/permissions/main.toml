@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "main-commands"
+description = "主窗口的仓库管理命令和快捷键注册状态。"
+commands.allow = [
+  "library_overview", "list_stickers", "search_stickers", "sticker", "tag_sidebar",
+  "delete_sticker", "restore_sticker", "purge_sticker", "create_tag", "rename_tag",
+  "set_tag_color", "move_tag", "delete_tag", "create_tag_group", "rename_tag_group",
+  "delete_tag_group", "add_sticker_tag", "remove_sticker_tag", "create_tag_and_add",
+  "set_sticker_caption", "import_stickers", "copy_sticker", "prepare_sticker_drag",
+  "record_sticker_usage", "toggle_sticker_favorite", "reveal_sticker", "global_shortcut_error",
+]

@@ -36,6 +36,8 @@
 
 同步合并规则是最容易出错的部分，放在 `crates/core/` 里，脱离界面写单元测试。
 
+`src-tauri/permissions/` 里给每个窗口列了允许调用的命令（主窗口 `main.toml`，表情面板 `panel.toml`）。有了这个目录，Tauri 会拒绝名单之外的命令，所以新增命令时要同时加进用到它的窗口的名单。
+
 ### 代码命名
 
 代码里的英文名与 [GLOSSARY.md](../GLOSSARY.md) 的术语一一对应。GLOSSARY 里的"避免"只约束中文文案和讨论，比如 `sticker` 只出现在标识符里，界面上仍然写"表情"。
@@ -43,6 +45,7 @@
 | 术语 | 代码里 |
 |---|---|
 | 表情 | sticker |
+| 表情面板 | panel |
 | 表情包 | pack |
 | 仓库 | library |
 | 配文 | caption |

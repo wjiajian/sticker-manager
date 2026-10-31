@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { Sticker } from "../../lib/ipc";
+import { useQuery } from "@tanstack/react-query";
+import { ipc, type Sticker } from "../../lib/ipc";
 import { useLibraryChangedEvents, useStickerSearch, useStickers } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { DetailPanel } from "./DetailPanel";
@@ -30,7 +31,8 @@ export function App() {
   const actions = useStickerActions(stickers);
   const { choose, busy, dragging, message } = useImport(actions.claimDragDrop);
   const eventError = useLibraryChangedEvents();
-  const status = [message, eventError].filter(Boolean).join("\n");
+  const shortcut = useQuery({ queryKey: ["global-shortcut-error"], queryFn: ipc.globalShortcutError });
+  const status = [message, eventError, shortcut.data, shortcut.error && String(shortcut.error)].filter(Boolean).join("\n");
 
   return (
     <div className={`flex h-full flex-col ${dragging ? "outline-2 -outline-offset-2 outline-accent" : ""}`}>

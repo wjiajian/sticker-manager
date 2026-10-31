@@ -1,0 +1,64 @@
+html, body, #root { background: transparent; overflow: hidden; }
+
+.panel {
+  position: relative;
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr) 32px;
+  gap: 12px;
+  width: 100%; height: 100%; padding: 12px;
+  border-radius: 24px;
+  background: var(--color-surface);
+}
+.panel button { cursor: pointer; }
+.panel-toolbar { display: flex; gap: 8px; }
+.panel-search {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  padding: 8px 12px; border-radius: 12px;
+  color: var(--color-ink-secondary); background: var(--color-tile);
+}
+.panel-search:focus-within { box-shadow: 0 0 0 2px var(--color-accent); }
+.panel-search svg { flex-shrink: 0; }
+.panel-search input { width: 100%; min-width: 0; outline: none; background: transparent; color: var(--color-ink); }
+.panel-pin {
+  display: grid; place-items: center; width: 36px; border-radius: 12px;
+  background: var(--color-tile); color: var(--color-ink-tertiary);
+}
+.panel-pin[aria-pressed="true"] { background: var(--color-ink); color: white; }
+.panel-content { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.panel-recent { flex-shrink: 0; }
+.panel-heading { display: flex; justify-content: space-between; padding: 0 4px; margin-bottom: 8px; font-size: 12px; line-height: 16px; color: var(--color-ink-secondary); }
+.panel-heading h2 { font-weight: 600; color: var(--color-ink-tertiary); }
+.panel-recent-grid, .panel-tag-grid { height: 164px; flex-shrink: 0; }
+.panel-tag-grid, .panel-results { overflow-y: auto; overscroll-behavior: contain; }
+.panel-results { height: 100%; }
+.panel-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.panel-tile {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 100%; aspect-ratio: 1; min-height: 0; padding: 12px;
+  border-radius: 8px; background: var(--color-tile); touch-action: none;
+  transition: transform 500ms var(--ease-standard), opacity 300ms var(--ease-standard);
+}
+/* 选中环放在格子内，滚动区域的边缘不会裁掉描边。 */
+.panel-tile[data-selected="true"] { box-shadow: inset 0 0 0 2px var(--color-accent), inset 0 0 0 4px white; }
+.panel-tile:hover { transform: translateY(-2px); }
+.panel-tile:active { transform: scale(.98); }
+.panel-number, .panel-gif {
+  position: absolute; top: 4px; min-width: 16px; padding: 0 4px;
+  border-radius: 4px; background: white; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--color-ink-tertiary);
+}
+.panel-number { left: 4px; }
+.panel-gif { right: 4px; }
+.panel-copied { position: absolute; bottom: 4px; left: 4px; right: 4px; border-radius: 4px; padding: 2px; background: var(--color-ink); color: white; font-size: 12px; line-height: 16px; }
+.panel-tags { display: flex; align-items: center; gap: 8px; height: 32px; flex-shrink: 0; overflow-x: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.panel-tag { display: flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 4px 12px; border: 1px solid var(--color-line); border-radius: 9999px; white-space: nowrap; font-size: 12px; line-height: 16px; font-weight: 600; }
+.panel-tag[aria-pressed="true"] { background: var(--color-ink); border-color: var(--color-ink); color: white; }
+.panel-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: 12px; background: var(--color-chrome); color: var(--color-ink-tertiary); font-size: 12px; line-height: 16px; white-space: nowrap; }
+.panel-footer button { font-weight: 600; }
+.panel-empty { display: flex; flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--color-ink-secondary); }
+.panel-empty button { font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
+.panel-error { position: absolute; bottom: 56px; left: 12px; right: 12px; max-height: 96px; overflow-y: auto; padding: 8px 12px; border: 1px solid var(--color-accent); border-radius: 8px; background: white; font-size: 12px; line-height: 16px; color: var(--color-accent); }
+.panel-pin:hover, .panel-tag:hover, .panel-footer button:hover { opacity: .82; }
+@media (prefers-reduced-motion: reduce) {
+  .panel-tile { transition: opacity 300ms var(--ease-standard); }
+  .panel-tile:hover, .panel-tile:active { transform: none; }
+}

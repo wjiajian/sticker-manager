@@ -9,12 +9,18 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 mod clipboard;
 mod commands;
 mod export;
+mod panel;
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let mut library = open_library(app)?;
             if let Err(error) = library.purge_expired() {
@@ -26,10 +32,13 @@ pub fn run() {
                     .join(app.config().identifier.clone())
                     .join("exports"),
             ));
+            panel::create(app)?;
+            panel::register_shortcut(app.handle());
             create_main_window(app)?;
             start_expiry_cleanup(app.handle().clone());
             Ok(())
         })
+        .on_window_event(panel::on_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::library_overview,
             commands::list_stickers,
@@ -57,9 +66,23 @@ pub fn run() {
             commands::record_sticker_usage,
             commands::toggle_sticker_favorite,
             commands::reveal_sticker,
+            panel::panel_session,
+            panel::set_panel_pinned,
+            panel::set_panel_dragging,
+            panel::hide_panel,
+            panel::show_main_window,
+            panel::global_shortcut_error,
         ])
-        .run(tauri::generate_context!())
-        .expect("启动应用失败");
+        .build(tauri::generate_context!())
+        .expect("启动应用失败")
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event
+                && let Err(error) = panel::show_main_window(_app.clone())
+            {
+                eprintln!("无法打开主窗口：{error}");
+            }
+        });
 }
 
 fn start_expiry_cleanup(app: tauri::AppHandle) {
