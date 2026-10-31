@@ -1,15 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::params;
 
-use crate::{Error, Library, Result};
+use crate::{Error, Library, Result, time::unix_millis};
 
 impl Library {
     pub fn record_usage(&self, id: &str) -> Result<()> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| Error::InvalidTime)?;
-        let now = i64::try_from(now.as_millis()).map_err(|_| Error::InvalidTime)?;
+        let now = unix_millis()?;
         let changed = self.conn.execute(
             "INSERT INTO usages (sticker_id, device_id, count, last_used_at)
              SELECT id, ?2, 1, ?3 FROM stickers WHERE id = ?1 AND deleted_at IS NULL
@@ -51,10 +46,7 @@ mod tests {
     }
 
     fn now() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64
+        unix_millis().unwrap()
     }
 
     #[test]

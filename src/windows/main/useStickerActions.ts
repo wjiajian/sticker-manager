@@ -1,6 +1,7 @@
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { useQueryClient } from "@tanstack/react-query";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc, type Sticker } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
@@ -17,11 +18,12 @@ interface Outgoing {
   settle?: () => void;
 }
 
-export function useStickerActions() {
+export function useStickerActions(stickers: Sticker[]) {
   const client = useQueryClient();
   const selectedId = useUiStore((s) => s.selectedStickerId);
   const selectSticker = useUiStore((s) => s.selectSticker);
-  const { data: selected } = useSticker(selectedId);
+  const { data: detail } = useSticker(selectedId);
+  const selected = detail ?? stickers.find((sticker) => sticker.id === selectedId);
   const working = useRef(false);
   // 拖出的表情经过本窗口时，webview 也会收到拖放事件。这些事件要在事件循环里排队，比拖拽结束的回调晚到，
   // 所以松手时还不知道落在哪：再等一会儿，等到这份副本的放下事件才说明拖回了本窗口。
@@ -32,6 +34,10 @@ export function useStickerActions() {
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(feedbackTimer.current), []);
+
+  useEffect(() => {
+    if (detail === null) selectSticker(null);
+  }, [detail, selectSticker]);
 
   /** 拖放事件属于拖出的表情时返回 true，调用方不应再把它当成导入。 */
   const claimDragDrop = useCallback((event: DragDropEvent) => {
@@ -73,19 +79,44 @@ export function useStickerActions() {
     });
   }, [perform]);
 
+  const removeFromList = useCallback((sticker: Sticker, operation: "deleteSticker" | "restoreSticker" | "purgeSticker") => perform(async () => {
+    const index = stickers.findIndex((item) => item.id === sticker.id);
+    const nextId = index < 0 ? null : (stickers[index + 1] ?? stickers[index - 1])?.id ?? null;
+    const focused = document.activeElement?.id === `sticker-${sticker.id}`;
+    const { view, searchQuery } = useUiStore.getState();
+    if (operation === "purgeSticker" && !await confirm(
+      "彻底删除后无法恢复。以后再导入同一张图，会作为一张新表情，标签、配文、收藏和使用次数都不会找回。",
+      { title: `彻底删除“${sticker.name}”`, kind: "warning", okLabel: "彻底删除", cancelLabel: "取消" },
+    )) return;
+    await ipc[operation](sticker.id);
+    const current = useUiStore.getState();
+    // 操作期间用户已切换列表或选中别的表情，就保留新的选择。
+    if (current.selectedStickerId !== sticker.id || current.view !== view || current.searchQuery !== searchQuery) return;
+    selectSticker(nextId);
+    if (focused && nextId) requestAnimationFrame(() => document.getElementById(`sticker-${nextId}`)?.focus());
+  }), [stickers, perform, selectSticker]);
+
+  const deleteSticker = useCallback((sticker: Sticker) => removeFromList(sticker, "deleteSticker"), [removeFromList]);
+  const restoreSticker = (sticker: Sticker) => removeFromList(sticker, "restoreSticker");
+  const purgeSticker = (sticker: Sticker) => removeFromList(sticker, "purgeSticker");
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target;
-      if (!selected || selected.deletedAt !== null || event.defaultPrevented || event.isComposing || event.altKey) return;
-      if (target instanceof HTMLElement && (target.closest("input, textarea, select, [role='textbox'], dialog, [role='listbox']") || target.isContentEditable)) return;
+      if (!selected || selected.deletedAt !== null || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey) return;
+      if (target instanceof HTMLElement && (target.closest("input, textarea, select, [role='textbox'], dialog, [role='dialog'], [role='listbox']") || target.isContentEditable)) return;
       const modifier = platform === "macos" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-      if (!modifier || event.key.toLowerCase() !== "c") return;
+      const copying = modifier && event.key.toLowerCase() === "c";
+      const deleting = !event.shiftKey && (platform === "macos"
+        ? modifier && event.key === "Backspace"
+        : event.key === "Delete" && !event.ctrlKey && !event.metaKey);
+      if (!copying && !deleting) return;
       event.preventDefault();
-      if (!event.repeat) void copy(selected, event.shiftKey);
+      if (!event.repeat) void (deleting ? deleteSticker(selected) : copy(selected, event.shiftKey));
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selected, copy]);
+  }, [selected, copy, deleteSticker]);
 
   function drag(sticker: Sticker, isPressed: () => boolean) {
     if (sticker.deletedAt !== null) return Promise.resolve();
@@ -140,7 +171,7 @@ export function useStickerActions() {
     return perform(() => ipc.revealSticker(sticker.id), false);
   }
 
-  return { copy, drag, toggleFavorite, reveal, busy, claimDragDrop, copiedId, error };
+  return { copy, drag, toggleFavorite, reveal, deleteSticker, restoreSticker, purgeSticker, busy, claimDragDrop, copiedId, error };
 }
 
 /** 拖放事件里的路径写法可能和导出时不同（比如 /var 与 /private/var），只比较 export-xxx/文件名 这两段。 */

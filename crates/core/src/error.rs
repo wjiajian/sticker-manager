@@ -15,6 +15,9 @@ pub enum Error {
     #[error("表情不存在或已在最近删除中")]
     StickerUnavailable,
 
+    #[error("表情不在最近删除中，可能已经恢复或彻底删除")]
+    StickerNotDeleted,
+
     #[error("{0}名称不能为空")]
     EmptyName(&'static str),
 

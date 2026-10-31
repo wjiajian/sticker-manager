@@ -4,12 +4,14 @@
 //! 术语见仓库根目录的 GLOSSARY.md。
 
 mod db;
+mod deletion;
 mod device;
 mod error;
 mod import;
 mod library;
 mod organization;
 mod search;
+mod time;
 mod usage;
 
 pub use device::Device;

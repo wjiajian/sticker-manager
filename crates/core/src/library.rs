@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, Row, params_from_iter};
 use serde::{Deserialize, Serialize};
 
-use crate::{Device, Error, Result, Tag, db};
+use crate::{Device, Error, Result, Tag, db, deletion::RETENTION_MS};
 
 const STICKER_COLUMNS: &str = "s.id, s.name, s.width, s.height, s.byte_size, s.animated,
     s.added_at, s.hash, s.ext, s.favorite, s.deleted_at,
@@ -48,6 +48,7 @@ pub struct Sticker {
     pub added_at: i64,
     pub favorite: bool,
     pub deleted_at: Option<i64>,
+    pub purge_at: Option<i64>,
     pub usage_count: i64,
     pub last_used_at: Option<i64>,
     pub caption: Option<String>,
@@ -114,10 +115,12 @@ impl Library {
                 "s.deleted_at IS NULL AND EXISTS (SELECT 1 FROM sticker_tags st WHERE st.sticker_id = s.id AND st.tag_id = ?1)"
             }
         };
-        let order = if matches!(view, LibraryView::Recent) {
-            "(SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id) DESC, s.added_at DESC, s.rowid DESC"
-        } else {
-            "s.added_at DESC, s.rowid DESC"
+        let order = match view {
+            LibraryView::Recent => {
+                "(SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id) DESC, s.added_at DESC, s.rowid DESC"
+            }
+            LibraryView::RecentlyDeleted => "s.deleted_at DESC, s.added_at DESC, s.rowid DESC",
+            _ => "s.added_at DESC, s.rowid DESC",
         };
         let tag_id = match &view {
             LibraryView::Tag(id) => Some(id.as_str()),
@@ -191,6 +194,7 @@ impl Sticker {
     fn from_row(row: &Row<'_>, root: &Path) -> rusqlite::Result<Self> {
         let hash: String = row.get(7)?;
         let ext: String = row.get(8)?;
+        let deleted_at: Option<i64> = row.get(10)?;
         Ok(Self {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -200,7 +204,8 @@ impl Sticker {
             animated: row.get(5)?,
             added_at: row.get(6)?,
             favorite: row.get(9)?,
-            deleted_at: row.get(10)?,
+            deleted_at,
+            purge_at: deleted_at.map(|time| time + RETENTION_MS),
             usage_count: row.get(11)?,
             last_used_at: row.get(12)?,
             caption: row.get(13)?,

@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon, FolderOpenIcon, StarIcon } from "@phosphor-icons/react";
+import { ArrowCounterClockwiseIcon, CheckIcon, CopyIcon, FolderOpenIcon, StarIcon, TrashIcon } from "@phosphor-icons/react";
 import { Button } from "../../components/Button";
 import { platform } from "../../lib/platform";
 import { useSticker } from "../../lib/queries";
@@ -7,6 +7,7 @@ import { CaptionEditor } from "./CaptionEditor";
 import { StickerTags } from "./StickerTags";
 import { StickerImage } from "./StickerImage";
 import { useDragOut } from "./useDragOut";
+import { usePurgeDays } from "./usePurgeDays";
 import type { StickerActions } from "./useStickerActions";
 
 export function DetailPanel({ actions }: { actions: StickerActions }) {
@@ -16,6 +17,7 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
   const drag = useDragOut((isPressed) => sticker ? actions.drag(sticker, isPressed) : Promise.resolve(), unavailable || actions.busy);
   const revealLabel = platform === "windows" ? "在资源管理器中显示" : "在访达中显示";
   const copied = actions.copiedId === sticker?.id;
+  const days = usePurgeDays(sticker?.purgeAt ?? null);
 
   return (
     <aside
@@ -36,8 +38,15 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
             <p className="text-xs text-ink-secondary">
               {sticker.width} × {sticker.height} · {formatSize(sticker.byteSize)} · {new Date(sticker.addedAt).toLocaleDateString("zh-CN")} 添加
             </p>
+            {days !== null && <p className="text-xs text-ink-secondary">{days > 0 ? `${days} 天后彻底删除` : "即将彻底删除"}</p>}
           </div>
-          <div className="flex gap-2">
+          {sticker.deletedAt !== null ? <div className="flex gap-2">
+            <Button variant="accent" disabled={actions.busy} onClick={() => void actions.restoreSticker(sticker)} className="flex-1 justify-center text-base disabled:opacity-50">
+              <ArrowCounterClockwiseIcon size={16} aria-hidden />
+              恢复
+            </Button>
+            <Button disabled={actions.busy} onClick={() => void actions.purgeSticker(sticker)} className="disabled:opacity-50">彻底删除</Button>
+          </div> : <div className="flex gap-2">
             <Button
               variant="accent"
               aria-label={copied ? "已复制" : "复制"}
@@ -62,7 +71,7 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
             >
               <StarIcon size={16} weight={sticker.favorite ? "fill" : "regular"} className={sticker.favorite ? "text-accent" : ""} aria-hidden />
             </Button>
-          </div>
+          </div>}
           <StickerTags key={`tags-${sticker.id}`} sticker={sticker} />
           <CaptionEditor key={`caption-${sticker.id}`} sticker={sticker} />
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
@@ -70,11 +79,20 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
             <dd>{sticker.usageCount.toLocaleString("zh-CN")} 次</dd>
             <dt className="text-ink-secondary">上次使用</dt>
             <dd>{sticker.lastUsedAt === null ? "尚未使用" : new Date(sticker.lastUsedAt).toLocaleString("zh-CN", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</dd>
-            {platform === "windows" && <>
+            {platform === "windows" && sticker.deletedAt === null && <>
               <dt className="text-ink-secondary">快捷键</dt>
-              <dd>Ctrl+C 复制<br />Ctrl+Shift+C 复制为文件</dd>
+              <dd>Ctrl+C 复制<br />Ctrl+Shift+C 复制为文件<br />Delete 删除</dd>
             </>}
           </dl>
+          {sticker.deletedAt === null && <Button
+            disabled={actions.busy}
+            onClick={() => void actions.deleteSticker(sticker)}
+            title={`移到最近删除，30 天内可以恢复 · ${platform === "macos" ? "⌘⌫" : "Delete"}`}
+            className="mt-auto justify-center disabled:opacity-50"
+          >
+            <TrashIcon size={16} aria-hidden />
+            删除
+          </Button>}
         </>
       ) : error ? <p role="alert">{String(error)}</p> : selectedId && isPending ? <p role="status">正在读取表情…</p> : "选中一张表情查看详情"}
       {actions.error && <p role="alert" className="text-xs text-ink-secondary">{actions.error}</p>}

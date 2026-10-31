@@ -68,8 +68,29 @@ pub async fn search_stickers(app: AppHandle, query: String) -> CommandResult<Vec
 }
 
 #[tauri::command]
-pub async fn sticker(app: AppHandle, id: String) -> CommandResult<Sticker> {
-    with_library(app, move |library| Ok(library.sticker(&id)?)).await
+pub async fn sticker(app: AppHandle, id: String) -> CommandResult<Option<Sticker>> {
+    with_library(app, move |library| match library.sticker(&id) {
+        Ok(sticker) => Ok(Some(sticker)),
+        // 自动清理后，界面可以清空选中；其他读取错误仍正常报告。
+        Err(sticker_core::Error::StickerUnavailable) => Ok(None),
+        Err(error) => Err(error.into()),
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_sticker(app: AppHandle, id: String) -> CommandResult<()> {
+    with_library(app, move |library| Ok(library.delete_sticker(&id)?)).await
+}
+
+#[tauri::command]
+pub async fn restore_sticker(app: AppHandle, id: String) -> CommandResult<()> {
+    with_library(app, move |library| Ok(library.restore_sticker(&id)?)).await
+}
+
+#[tauri::command]
+pub async fn purge_sticker(app: AppHandle, id: String) -> CommandResult<()> {
+    with_library(app, move |library| Ok(library.purge_sticker(&id)?)).await
 }
 
 #[tauri::command]

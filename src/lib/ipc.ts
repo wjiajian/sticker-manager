@@ -48,6 +48,7 @@ export interface Sticker {
   addedAt: number;
   favorite: boolean;
   deletedAt: number | null;
+  purgeAt: number | null;
   usageCount: number;
   lastUsedAt: number | null;
   caption: string | null;
@@ -74,7 +75,10 @@ export const ipc = {
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
   searchStickers: (query: string) => invoke<Sticker[]>("search_stickers", { query }),
   tagSidebar: () => invoke<TagSidebar>("tag_sidebar"),
-  sticker: (id: string) => invoke<Sticker>("sticker", { id }),
+  sticker: (id: string) => invoke<Sticker | null>("sticker", { id }),
+  deleteSticker: (id: string) => invoke<void>("delete_sticker", { id }),
+  restoreSticker: (id: string) => invoke<void>("restore_sticker", { id }),
+  purgeSticker: (id: string) => invoke<void>("purge_sticker", { id }),
   createTag: (name: string, color: string | null = null, groupId: string | null = null) => invoke<Tag>("create_tag", { name, color, groupId }),
   renameTag: (id: string, name: string) => invoke<void>("rename_tag", { id, name }),
   setTagColor: (id: string, color: string) => invoke<void>("set_tag_color", { id, color }),

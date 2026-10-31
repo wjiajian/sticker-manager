@@ -2,7 +2,6 @@ use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
 use image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
@@ -12,7 +11,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
-use crate::{Error, Library, Result};
+use crate::{Error, Library, Result, time::unix_millis};
 
 const THUMBNAIL_SIZE: u32 = 256;
 
@@ -148,11 +147,7 @@ impl Library {
                 [&hash],
             )?;
         } else {
-            let added_at = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|_| Error::InvalidTime)?
-                .as_millis();
-            let added_at = i64::try_from(added_at).map_err(|_| Error::InvalidTime)?;
+            let added_at = unix_millis()?;
             let name = path.file_stem().unwrap_or_default().to_string_lossy();
             tx.execute(
                 "INSERT INTO stickers (id, hash, ext, name, animated, width, height, byte_size, added_at)

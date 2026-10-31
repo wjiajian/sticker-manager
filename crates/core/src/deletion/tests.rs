@@ -1,0 +1,322 @@
+use std::path::Path;
+
+use super::*;
+use crate::{LibraryOverview, LibraryView};
+
+fn library(root: &Path) -> Library {
+    let library = Library::open(root).unwrap();
+    library
+        .conn
+        .execute_batch(
+            "INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at) VALUES
+            ('one', 'hash1', 'png', '表情一', 1, 1, 1, 1),
+            ('two', 'hash2', 'png', '表情二', 1, 1, 1, 2),
+            ('three', 'hash3', 'png', '表情三', 1, 1, 1, 3);",
+        )
+        .unwrap();
+    for sticker in library.list_stickers(LibraryView::All).unwrap() {
+        fs::write(sticker.object_path, b"original").unwrap();
+        fs::write(sticker.thumbnail_path, b"thumbnail").unwrap();
+    }
+    library
+}
+
+fn add_metadata(library: &mut Library, id: &str) {
+    for name in ["开心", "回复"] {
+        let tag = library.create_tag(name, None, None).unwrap();
+        library.add_sticker_tag(id, &tag.id).unwrap();
+    }
+    library.set_sticker_caption(id, "收到").unwrap();
+    library.toggle_favorite(id).unwrap();
+    library.record_usage(id).unwrap();
+    library.record_usage(id).unwrap();
+    library
+        .conn
+        .execute(
+            "INSERT INTO usages VALUES (?1, 'other-device', 7, 100)",
+            [id],
+        )
+        .unwrap();
+}
+
+fn ids(library: &Library, view: LibraryView) -> Vec<String> {
+    library
+        .list_stickers(view)
+        .unwrap()
+        .into_iter()
+        .map(|sticker| sticker.id)
+        .collect()
+}
+
+#[test]
+fn deletion_updates_views_search_and_counts_without_removing_tag_associations() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    add_metadata(&mut library, "one");
+    let tag = library.sticker("one").unwrap().tags[0].clone();
+    assert_eq!(ids(&library, LibraryView::Tag(tag.id.clone())), ["one"]);
+    assert_eq!(library.search_stickers("收到").unwrap().len(), 1);
+    assert_eq!(
+        library.overview().unwrap(),
+        LibraryOverview {
+            all: 3,
+            recent: 1,
+            favorites: 1,
+            untagged: 2,
+            recently_deleted: 0,
+        }
+    );
+
+    let before = unix_millis().unwrap();
+    library.delete_sticker("one").unwrap();
+    library.delete_sticker("two").unwrap();
+    assert!(
+        (before..=unix_millis().unwrap())
+            .contains(&library.sticker("one").unwrap().deleted_at.unwrap())
+    );
+    assert_eq!(ids(&library, LibraryView::All), ["three"]);
+    assert_eq!(ids(&library, LibraryView::Untagged), ["three"]);
+    for view in [
+        LibraryView::Favorites,
+        LibraryView::Recent,
+        LibraryView::Tag(tag.id),
+    ] {
+        assert!(ids(&library, view).is_empty());
+    }
+    for query in ["表情一", "收到", "开心"] {
+        assert!(library.search_stickers(query).unwrap().is_empty());
+    }
+    assert_eq!(library.search_stickers("表情").unwrap().len(), 1);
+    assert_eq!(
+        library.overview().unwrap(),
+        LibraryOverview {
+            all: 1,
+            recent: 0,
+            favorites: 0,
+            untagged: 1,
+            recently_deleted: 2,
+        }
+    );
+    let deleted = ids(&library, LibraryView::RecentlyDeleted);
+    assert!(deleted.contains(&"one".into()) && deleted.contains(&"two".into()));
+    for tag in library.tag_sidebar().unwrap().ungrouped {
+        assert_eq!((tag.sticker_count, tag.total_sticker_count), (0, 1));
+    }
+}
+
+#[test]
+fn invalid_transitions_return_the_corresponding_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    for id in ["one", "missing"] {
+        assert!(matches!(
+            library.restore_sticker(id),
+            Err(Error::StickerNotDeleted)
+        ));
+        assert!(matches!(
+            library.purge_sticker(id),
+            Err(Error::StickerNotDeleted)
+        ));
+    }
+    library.delete_sticker("one").unwrap();
+    let deleted_at = library.sticker("one").unwrap().deleted_at;
+    for id in ["one", "missing"] {
+        assert!(matches!(
+            library.delete_sticker(id),
+            Err(Error::StickerUnavailable)
+        ));
+    }
+    assert_eq!(library.sticker("one").unwrap().deleted_at, deleted_at);
+    library.purge_sticker("one").unwrap();
+    assert!(matches!(
+        library.restore_sticker("one"),
+        Err(Error::StickerNotDeleted)
+    ));
+    assert!(matches!(
+        library.purge_sticker("one"),
+        Err(Error::StickerNotDeleted)
+    ));
+}
+
+#[test]
+fn restoring_preserves_metadata_and_each_devices_usage() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    add_metadata(&mut library, "one");
+    let before = library.sticker("one").unwrap();
+    let usages = |library: &Library| {
+        library.conn.prepare("SELECT device_id, count, last_used_at FROM usages WHERE sticker_id = 'one' ORDER BY device_id").unwrap()
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)))
+            .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()
+    };
+    let before_usages = usages(&library);
+    library.delete_sticker("one").unwrap();
+    library.restore_sticker("one").unwrap();
+    let after = library.sticker("one").unwrap();
+    assert_eq!(after.deleted_at, None);
+    assert_eq!(after.purge_at, None);
+    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.caption, before.caption);
+    assert_eq!(after.favorite, before.favorite);
+    assert_eq!(
+        (after.usage_count, after.last_used_at),
+        (9, before.last_used_at)
+    );
+    assert_eq!(usages(&library), before_usages);
+    assert_eq!((after.id, after.added_at), (before.id, before.added_at));
+    assert_eq!(ids(&library, LibraryView::Favorites), ["one"]);
+    assert_eq!(ids(&library, LibraryView::Recent), ["one"]);
+    for tag in library.tag_sidebar().unwrap().ungrouped {
+        assert_eq!((tag.sticker_count, tag.total_sticker_count), (1, 1));
+    }
+}
+
+#[test]
+fn purging_cascades_metadata_and_removes_both_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    add_metadata(&mut library, "one");
+    let sticker = library.sticker("one").unwrap();
+    library.delete_sticker("one").unwrap();
+    library.purge_sticker("one").unwrap();
+    assert!(matches!(
+        library.sticker("one"),
+        Err(Error::StickerUnavailable)
+    ));
+    for table in ["sticker_tags", "usages"] {
+        let count: i64 = library
+            .conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE sticker_id = 'one'"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+    assert!(!sticker.object_path.exists());
+    assert!(!sticker.thumbnail_path.exists());
+    assert_eq!(library.tag_sidebar().unwrap().ungrouped.len(), 2);
+    assert!(library.sticker("two").unwrap().object_path.is_file());
+}
+
+#[test]
+fn missing_original_and_file_cleanup_failure_do_not_fail_purging() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    let sticker = library.sticker("one").unwrap();
+    fs::remove_file(&sticker.object_path).unwrap();
+    library.delete_sticker("one").unwrap();
+    library.purge_sticker("one").unwrap();
+    assert!(!sticker.thumbnail_path.exists());
+
+    let sticker = library.sticker("two").unwrap();
+    fs::remove_file(&sticker.object_path).unwrap();
+    fs::create_dir(&sticker.object_path).unwrap();
+    library.delete_sticker("two").unwrap();
+    library.purge_sticker("two").unwrap();
+    assert!(matches!(
+        library.sticker("two"),
+        Err(Error::StickerUnavailable)
+    ));
+    assert!(sticker.object_path.is_dir());
+    assert!(!sticker.thumbnail_path.exists());
+}
+
+#[test]
+fn failed_commit_preserves_metadata_and_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    add_metadata(&mut library, "one");
+    let sticker = library.sticker("one").unwrap();
+    library.delete_sticker("one").unwrap();
+    // 延迟外键检查，让 DELETE 成功但 COMMIT 失败。
+    library.conn.execute_batch(
+        "CREATE TABLE retained (sticker_id TEXT REFERENCES stickers(id) DEFERRABLE INITIALLY DEFERRED);
+         CREATE TRIGGER fail_commit AFTER DELETE ON stickers BEGIN INSERT INTO retained VALUES (OLD.id); END;"
+    ).unwrap();
+    assert!(library.purge_sticker("one").is_err());
+    let after = library.sticker("one").unwrap();
+    assert!(after.deleted_at.is_some());
+    assert_eq!(after.tags, sticker.tags);
+    assert_eq!(after.usage_count, sticker.usage_count);
+    assert!(sticker.object_path.is_file());
+    assert!(sticker.thumbnail_path.is_file());
+}
+
+#[test]
+fn importing_after_purge_creates_a_new_sticker_without_old_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(&dir.path().join("library")).unwrap();
+    let source = dir.path().join("收到.png");
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]))
+        .save(&source)
+        .unwrap();
+    assert_eq!(library.import_paths(std::slice::from_ref(&source)).added, 1);
+    let before = library.list_stickers(LibraryView::All).unwrap().remove(0);
+    add_metadata(&mut library, &before.id);
+    library.delete_sticker(&before.id).unwrap();
+    library.purge_sticker(&before.id).unwrap();
+    let report = library.import_paths(&[source]);
+    assert!(report.failures.is_empty());
+    assert_eq!((report.added, report.existing, report.restored), (1, 0, 0));
+    let after = library.list_stickers(LibraryView::All).unwrap().remove(0);
+    assert_ne!(after.id, before.id);
+    assert!(after.tags.is_empty());
+    assert!(!after.favorite);
+    assert_eq!(after.caption, None);
+    assert_eq!((after.usage_count, after.last_used_at), (0, None));
+    assert!(after.object_path.is_file() && after.thumbnail_path.is_file());
+}
+
+#[test]
+fn expiry_includes_exact_boundary_and_preserves_active_stickers() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    let now = RETENTION_MS + 1000;
+    library
+        .conn
+        .execute_batch(
+            "UPDATE stickers SET deleted_at = 1000 WHERE id = 'one';
+         UPDATE stickers SET deleted_at = 1001 WHERE id = 'two';",
+        )
+        .unwrap();
+    let expired = library.sticker("one").unwrap();
+    assert_eq!(library.purge_expired_at(now).unwrap(), 1);
+    assert!(!expired.object_path.exists() && !expired.thumbnail_path.exists());
+    assert_eq!(ids(&library, LibraryView::RecentlyDeleted), ["two"]);
+    assert_eq!(ids(&library, LibraryView::All), ["three"]);
+    assert_eq!(library.purge_expired_at(now).unwrap(), 0);
+    assert_eq!(library.purge_expired_at(now + 1).unwrap(), 1);
+    assert_eq!(library.purge_expired().unwrap(), 0);
+    assert!(library.sticker("three").unwrap().object_path.is_file());
+}
+
+#[test]
+fn recently_deleted_orders_by_deletion_time_and_exposes_purge_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = library(dir.path());
+    assert_eq!(library.sticker("three").unwrap().purge_at, None);
+    library
+        .conn
+        .execute_batch(
+            "UPDATE stickers SET deleted_at = 300 WHERE id = 'one';
+         UPDATE stickers SET deleted_at = 100 WHERE id = 'two';
+         UPDATE stickers SET deleted_at = 200 WHERE id = 'three';",
+        )
+        .unwrap();
+    assert_eq!(
+        ids(&library, LibraryView::RecentlyDeleted),
+        ["one", "three", "two"]
+    );
+    for sticker in library.list_stickers(LibraryView::RecentlyDeleted).unwrap() {
+        assert_eq!(
+            sticker.purge_at,
+            Some(sticker.deleted_at.unwrap() + RETENTION_MS)
+        );
+        assert_eq!(
+            serde_json::to_value(&sticker).unwrap()["purgeAt"],
+            sticker.purge_at.unwrap()
+        );
+    }
+}

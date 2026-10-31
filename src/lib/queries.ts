@@ -1,4 +1,7 @@
 import { keepPreviousData, QueryClient, skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
 import { ipc, type LibraryView } from "./ipc";
 
 export const queryClient = new QueryClient({
@@ -44,6 +47,19 @@ export function useStickerSearch(query: string) {
     queryFn: query.trim() ? () => ipc.searchStickers(query) : skipToken,
     placeholderData: keepPreviousData,
   });
+}
+
+/** 仓库在界面之外被改动（比如到期自动清理）时，Rust 发出 library-changed，所有仓库查询重新读取。 */
+export function useLibraryChangedEvents() {
+  const client = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isTauri()) return;
+    const listening = listen("library-changed", () => { void client.invalidateQueries({ queryKey: ["library"] }); });
+    void listening.catch((reason: unknown) => setError(`无法监听仓库更新：${String(reason)}`));
+    return () => { void listening.then((unlisten) => unlisten(), () => {}); };
+  }, [client]);
+  return error;
 }
 
 export function useImportStickers() {

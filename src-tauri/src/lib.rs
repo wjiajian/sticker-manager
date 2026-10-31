@@ -1,9 +1,10 @@
 #[cfg(debug_assertions)]
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use sticker_core::Library;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod clipboard;
 mod commands;
@@ -15,7 +16,10 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let library = open_library(app)?;
+            let mut library = open_library(app)?;
+            if let Err(error) = library.purge_expired() {
+                eprintln!("清理最近删除失败：{error}");
+            }
             app.manage(Mutex::new(library));
             app.manage(export::ExportDirectory::new(
                 std::env::temp_dir()
@@ -23,6 +27,7 @@ pub fn run() {
                     .join("exports"),
             ));
             create_main_window(app)?;
+            start_expiry_cleanup(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -30,6 +35,9 @@ pub fn run() {
             commands::list_stickers,
             commands::search_stickers,
             commands::sticker,
+            commands::delete_sticker,
+            commands::restore_sticker,
+            commands::purge_sticker,
             commands::tag_sidebar,
             commands::create_tag,
             commands::rename_tag,
@@ -52,6 +60,31 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("启动应用失败");
+}
+
+fn start_expiry_cleanup(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(60 * 60));
+            let state = app.state::<Mutex<Library>>();
+            let result = match state.lock() {
+                Ok(mut library) => library.purge_expired(),
+                Err(error) => {
+                    eprintln!("清理最近删除失败：{error}");
+                    continue;
+                }
+            };
+            match result {
+                Ok(count) if count > 0 => {
+                    if let Err(error) = app.emit("library-changed", ()) {
+                        eprintln!("通知仓库更新失败：{error}");
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => eprintln!("清理最近删除失败：{error}"),
+            }
+        }
+    });
 }
 
 /// 开发构建里设置了这个环境变量，就改用它指向的目录做仓库，调试和验证时不碰真实仓库。
