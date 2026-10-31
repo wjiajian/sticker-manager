@@ -20,11 +20,12 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
   return (
     <aside
       aria-label="表情详情"
-      className={`flex w-66 shrink-0 flex-col gap-6 overflow-y-auto bg-detail p-6 ${sticker ? "" : "items-center justify-center text-center text-ink-secondary"}`}
+      // 子项不收缩：内容超高时整栏滚动，而不是把配文框、使用记录压扁
+      className={`flex w-66 shrink-0 flex-col gap-6 overflow-y-auto bg-detail p-6 *:shrink-0 ${sticker ? "" : "items-center justify-center text-center text-ink-secondary"}`}
     >
       {sticker ? (
         <>
-          <div {...drag} className={`relative flex aspect-square w-full touch-none items-center justify-center rounded-card bg-tile p-4 ${unavailable ? "" : "cursor-grab active:cursor-grabbing"}`}>
+          <div {...drag} className={`relative flex aspect-square min-h-0 w-full touch-none items-center justify-center rounded-card bg-tile p-4 ${unavailable ? "" : "cursor-grab active:cursor-grabbing"}`}>
             <StickerImage key={sticker.id} path={sticker.objectPath} name={sticker.name} />
             {sticker.animated && (
               <span aria-label="动图" className="absolute top-3 right-3 rounded-sm bg-surface px-1 text-xs font-semibold windows:rounded-xs">GIF</span>

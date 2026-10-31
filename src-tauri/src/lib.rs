@@ -91,7 +91,7 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
-        .traffic_light_position(tauri::LogicalPosition::new(16.0, 25.0));
+        .traffic_light_position(tauri::LogicalPosition::new(16.0, 33.0));
 
     builder.build()?;
     Ok(())

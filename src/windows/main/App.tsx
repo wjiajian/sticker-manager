@@ -7,7 +7,7 @@ import { useStickerActions } from "./useStickerActions";
 
 export function App() {
   const actions = useStickerActions();
-  const { choose, busy, dragging, message } = useImport(actions.draggingOut, actions.onInternalDrop);
+  const { choose, busy, dragging, message } = useImport(actions.claimDragDrop);
 
   return (
     <div className={`flex h-full flex-col ${dragging ? "outline-2 -outline-offset-2 outline-accent" : ""}`}>

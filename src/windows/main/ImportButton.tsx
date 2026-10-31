@@ -73,6 +73,8 @@ export function ImportButton({ disabled, onChoose }: ImportButtonProps) {
             type="button"
             role="menuitem"
             disabled={disabled}
+            // WebKit 点击按钮会先失焦，避免 onBlur 在 click 前卸载菜单。
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               setOpen(false);
               toggle.current?.focus();

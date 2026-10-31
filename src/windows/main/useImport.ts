@@ -1,14 +1,12 @@
 import { isTauri } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ImportReport } from "../../lib/ipc";
 import { useImportStickers } from "../../lib/queries";
 
-export function useImport(draggingOut: boolean, onInternalDrop: () => void) {
-  const outgoing = useRef(draggingOut);
-  useEffect(() => { outgoing.current = draggingOut; }, [draggingOut]);
+export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
   const { mutate, data, error, isPending } = useImportStickers();
   const [choosing, setChoosing] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -21,8 +19,7 @@ export function useImport(draggingOut: boolean, onInternalDrop: () => void) {
     let unlisten: UnlistenFn | undefined;
     getCurrentWebview().onDragDropEvent(({ payload }) => {
       if (disposed) return;
-      if (outgoing.current) {
-        if (payload.type === "drop") onInternalDrop();
+      if (claimDragDrop(payload)) {
         setDragging(false);
         return;
       }
@@ -41,7 +38,7 @@ export function useImport(draggingOut: boolean, onInternalDrop: () => void) {
       disposed = true;
       unlisten?.();
     };
-  }, [mutate, onInternalDrop]);
+  }, [mutate, claimDragDrop]);
 
   async function choose(directory: boolean) {
     setChoosing(true);

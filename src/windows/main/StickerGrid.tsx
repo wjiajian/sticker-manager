@@ -65,7 +65,7 @@ function StickerTile({ sticker, selected, onSelect, actions }: {
       aria-pressed={selected}
       onClick={onSelect}
       {...drag}
-      className={`interactive relative flex aspect-square w-full touch-none items-center justify-center rounded-card bg-tile p-4 hover:-translate-y-0.5 active:scale-98 ${
+      className={`interactive relative flex aspect-square min-h-0 w-full touch-none items-center justify-center rounded-card bg-tile p-4 hover:-translate-y-0.5 active:scale-98 ${
         selected ? "ring-2 ring-accent ring-offset-2 ring-offset-surface" : ""
       }`}
     >
