@@ -15,6 +15,12 @@ pnpm install
 pnpm tauri dev      # 启动应用，前端改动热更新，Rust 改动自动重新编译
 ```
 
+开发时默认打开真实仓库（macOS 在 `~/Library/Application Support/com.shaojian.sticker-manager/`）。想用一个临时仓库调试，就把环境变量 `STICKER_LIBRARY_DIR` 设成一个绝对路径，目录不存在会自动新建；这个变量只在开发构建里生效，打包出来的应用会忽略它。
+
+```bash
+STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm tauri dev
+```
+
 ```bash
 cargo test          # 核心库单元测试
 pnpm typecheck      # 前端类型检查
