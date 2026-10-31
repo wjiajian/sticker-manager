@@ -15,6 +15,21 @@ pub enum Error {
     #[error("表情不存在或已在最近删除中")]
     StickerUnavailable,
 
+    #[error("{0}名称不能为空")]
+    EmptyName(&'static str),
+
+    #[error("已存在同名{0}，请使用其他名称")]
+    DuplicateName(&'static str),
+
+    #[error("标签不存在")]
+    TagUnavailable,
+
+    #[error("标签分组不存在")]
+    TagGroupUnavailable,
+
+    #[error("请选择八种标签颜色之一")]
+    InvalidTagColor,
+
     #[error("图片没有可读取的帧")]
     EmptyImage,
 

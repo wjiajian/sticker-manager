@@ -6,9 +6,9 @@ import {
   TrashIcon,
   TrayIcon,
 } from "@phosphor-icons/react";
-import type { LibraryView } from "../../lib/ipc";
+import type { FixedLibraryView } from "../../lib/ipc";
 
-export const LIBRARY_VIEWS: { view: LibraryView; label: string; icon: Icon }[] = [
+export const LIBRARY_VIEWS: { view: FixedLibraryView; label: string; icon: Icon }[] = [
   { view: "all", label: "全部表情", icon: SquaresFourIcon },
   { view: "recent", label: "最近使用", icon: ClockCounterClockwiseIcon },
   { view: "favorites", label: "收藏", icon: StarIcon },

@@ -3,18 +3,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc, type Sticker } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
-import { useStickers } from "../../lib/queries";
+import { useSticker } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 
 export type StickerActions = ReturnType<typeof useStickerActions>;
 
 export function useStickerActions() {
   const client = useQueryClient();
-  const view = useUiStore((s) => s.view);
   const selectedId = useUiStore((s) => s.selectedStickerId);
   const selectSticker = useUiStore((s) => s.selectSticker);
-  const { data: stickers } = useStickers(view);
-  const selected = stickers?.find((sticker) => sticker.id === selectedId);
+  const { data: selected } = useSticker(selectedId);
   const working = useRef(false);
   const internalDrop = useRef(false);
   const onInternalDrop = useCallback(() => { internalDrop.current = true; }, []);
@@ -57,7 +55,7 @@ export function useStickerActions() {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target;
       if (!selected || selected.deletedAt !== null || event.defaultPrevented || event.isComposing || event.altKey) return;
-      if (target instanceof HTMLElement && (target.closest("input, textarea, select, [role='textbox']") || target.isContentEditable)) return;
+      if (target instanceof HTMLElement && (target.closest("input, textarea, select, [role='textbox'], dialog, [role='listbox']") || target.isContentEditable)) return;
       const modifier = platform === "macos" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
       if (!modifier || event.key.toLowerCase() !== "c") return;
       event.preventDefault();

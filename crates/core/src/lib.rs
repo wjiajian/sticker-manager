@@ -8,6 +8,7 @@ mod device;
 mod error;
 mod import;
 mod library;
+mod organization;
 mod usage;
 
 pub use device::Device;
@@ -15,3 +16,4 @@ pub use device::Device;
 pub use error::{Error, Result};
 pub use import::{ImportFailure, ImportReport};
 pub use library::{Library, LibraryOverview, LibraryView, Sticker};
+pub use organization::{TAG_COLORS, Tag, TagGroup, TagSidebar, TagSummary};

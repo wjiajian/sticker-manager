@@ -1,15 +1,16 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OptionalExtension, Row};
+use rusqlite::{Connection, Row, params_from_iter};
 use serde::{Deserialize, Serialize};
 
-use crate::{Device, Error, Result, db};
+use crate::{Device, Error, Result, Tag, db};
 
 const STICKER_COLUMNS: &str = "s.id, s.name, s.width, s.height, s.byte_size, s.animated,
     s.added_at, s.hash, s.ext, s.favorite, s.deleted_at,
     COALESCE((SELECT SUM(u.count) FROM usages u WHERE u.sticker_id = s.id), 0),
-    (SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id)";
+    (SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id), s.caption";
 
 /// 仓库：应用托管的、存放全部表情的唯一位置（ADR 0002）。
 ///
@@ -24,7 +25,7 @@ pub struct Library {
     pub(crate) device: Device,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LibraryView {
     All,
@@ -32,6 +33,7 @@ pub enum LibraryView {
     Favorites,
     Untagged,
     RecentlyDeleted,
+    Tag(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -48,6 +50,8 @@ pub struct Sticker {
     pub deleted_at: Option<i64>,
     pub usage_count: i64,
     pub last_used_at: Option<i64>,
+    pub caption: Option<String>,
+    pub tags: Vec<Tag>,
     pub object_path: PathBuf,
     pub thumbnail_path: PathBuf,
 }
@@ -82,13 +86,8 @@ impl Library {
     }
 
     pub fn sticker(&self, id: &str) -> Result<Sticker> {
-        self.conn
-            .query_row(
-                &format!("SELECT {STICKER_COLUMNS} FROM stickers s WHERE s.id = ?1"),
-                [id],
-                |row| Sticker::from_row(row, &self.root),
-            )
-            .optional()?
+        self.query_stickers("s.id = ?1", "s.id", Some(id))?
+            .pop()
             .ok_or(Error::StickerUnavailable)
     }
 
@@ -101,7 +100,7 @@ impl Library {
     }
 
     pub fn list_stickers(&self, view: LibraryView) -> Result<Vec<Sticker>> {
-        let filter = match view {
+        let filter = match &view {
             LibraryView::All => "s.deleted_at IS NULL",
             LibraryView::Recent => {
                 "s.deleted_at IS NULL AND EXISTS (SELECT 1 FROM usages u WHERE u.sticker_id = s.id)"
@@ -111,17 +110,61 @@ impl Library {
                 "s.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sticker_tags st WHERE st.sticker_id = s.id)"
             }
             LibraryView::RecentlyDeleted => "s.deleted_at IS NOT NULL",
+            LibraryView::Tag(_) => {
+                "s.deleted_at IS NULL AND EXISTS (SELECT 1 FROM sticker_tags st WHERE st.sticker_id = s.id AND st.tag_id = ?1)"
+            }
         };
         let order = if matches!(view, LibraryView::Recent) {
             "(SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id) DESC, s.added_at DESC, s.rowid DESC"
         } else {
             "s.added_at DESC, s.rowid DESC"
         };
+        let tag_id = match &view {
+            LibraryView::Tag(id) => Some(id.as_str()),
+            _ => None,
+        };
+        self.query_stickers(filter, order, tag_id)
+    }
+
+    fn query_stickers(
+        &self,
+        filter: &str,
+        order: &str,
+        parameter: Option<&str>,
+    ) -> Result<Vec<Sticker>> {
         let mut statement = self.conn.prepare(&format!(
             "SELECT {STICKER_COLUMNS} FROM stickers s WHERE {filter} ORDER BY {order}"
         ))?;
-        let stickers = statement.query_map([], |row| Sticker::from_row(row, &self.root))?;
-        Ok(stickers.collect::<rusqlite::Result<_>>()?)
+        let mut stickers = statement
+            .query_map(params_from_iter(parameter), |row| {
+                Sticker::from_row(row, &self.root)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if stickers.is_empty() {
+            return Ok(stickers);
+        }
+        let indexes: HashMap<_, _> = stickers
+            .iter()
+            .enumerate()
+            .map(|(i, sticker)| (sticker.id.clone(), i))
+            .collect();
+        // 一次读取列表中所有表情的标签，避免为每张表情单独查询。
+        let mut statement = self.conn.prepare(&format!(
+            "SELECT t.id, t.name, t.color, t.group_id, t.position, st.sticker_id
+             FROM tags t JOIN sticker_tags st ON st.tag_id = t.id
+             JOIN stickers s ON s.id = st.sticker_id
+             WHERE {filter} ORDER BY t.position, t.id"
+        ))?;
+        let tags = statement.query_map(params_from_iter(parameter), |row| {
+            Ok((row.get::<_, String>(5)?, Tag::from_row(row)?))
+        })?;
+        for tag in tags {
+            let (sticker_id, tag) = tag?;
+            if let Some(&index) = indexes.get(&sticker_id) {
+                stickers[index].tags.push(tag);
+            }
+        }
+        Ok(stickers)
     }
 
     pub fn overview(&self) -> Result<LibraryOverview> {
@@ -160,6 +203,8 @@ impl Sticker {
             deleted_at: row.get(10)?,
             usage_count: row.get(11)?,
             last_used_at: row.get(12)?,
+            caption: row.get(13)?,
+            tags: Vec::new(),
             object_path: root.join("objects").join(format!("{hash}.{ext}")),
             thumbnail_path: root.join("thumbs").join(format!("{hash}.png")),
         })

@@ -1,17 +1,17 @@
 import { CheckIcon, CopyIcon, FolderOpenIcon, StarIcon } from "@phosphor-icons/react";
 import { Button } from "../../components/Button";
 import { platform } from "../../lib/platform";
-import { useStickers } from "../../lib/queries";
+import { useSticker } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
+import { CaptionEditor } from "./CaptionEditor";
+import { StickerTags } from "./StickerTags";
 import { StickerImage } from "./StickerImage";
 import { useDragOut } from "./useDragOut";
 import type { StickerActions } from "./useStickerActions";
 
 export function DetailPanel({ actions }: { actions: StickerActions }) {
-  const view = useUiStore((s) => s.view);
   const selectedId = useUiStore((s) => s.selectedStickerId);
-  const { data: stickers } = useStickers(view);
-  const sticker = stickers?.find((item) => item.id === selectedId);
+  const { data: sticker, error, isPending } = useSticker(selectedId);
   const unavailable = !sticker || sticker.deletedAt !== null;
   const drag = useDragOut((isPressed) => sticker ? actions.drag(sticker, isPressed) : Promise.resolve(), unavailable || actions.busy);
   const revealLabel = platform === "windows" ? "在资源管理器中显示" : "在访达中显示";
@@ -62,6 +62,8 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
               <StarIcon size={16} weight={sticker.favorite ? "fill" : "regular"} className={sticker.favorite ? "text-accent" : ""} aria-hidden />
             </Button>
           </div>
+          <StickerTags key={`tags-${sticker.id}`} sticker={sticker} />
+          <CaptionEditor key={`caption-${sticker.id}`} sticker={sticker} />
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
             <dt className="text-ink-secondary">使用次数</dt>
             <dd>{sticker.usageCount.toLocaleString("zh-CN")} 次</dd>
@@ -73,7 +75,7 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
             </>}
           </dl>
         </>
-      ) : "选中一张表情查看详情"}
+      ) : error ? <p role="alert">{String(error)}</p> : selectedId && isPending ? <p role="status">正在读取表情…</p> : "选中一张表情查看详情"}
       {actions.error && <p role="alert" className="text-xs text-ink-secondary">{actions.error}</p>}
     </aside>
   );

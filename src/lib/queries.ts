@@ -1,4 +1,4 @@
-import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc, type LibraryView } from "./ipc";
 
 export const queryClient = new QueryClient({
@@ -15,6 +15,23 @@ export const queryClient = new QueryClient({
 
 export function useLibraryOverview() {
   return useQuery({ queryKey: ["library", "overview"], queryFn: ipc.libraryOverview });
+}
+
+export function useTagSidebar() {
+  return useQuery({ queryKey: ["library", "tags"], queryFn: ipc.tagSidebar });
+}
+
+export function useLibraryMutation<TData, TVariables>(mutationFn: (variables: TVariables) => Promise<TData>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    scope: { id: "library-metadata" },
+    onSettled: () => client.invalidateQueries({ queryKey: ["library"] }),
+  });
+}
+
+export function useSticker(id: string | null) {
+  return useQuery({ queryKey: ["library", "sticker", id], queryFn: id === null ? skipToken : () => ipc.sticker(id) });
 }
 
 export function useStickers(view: LibraryView) {

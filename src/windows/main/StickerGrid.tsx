@@ -1,5 +1,5 @@
 import type { Sticker } from "../../lib/ipc";
-import { useStickers } from "../../lib/queries";
+import { useStickers, useTagSidebar } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { LIBRARY_VIEWS } from "./libraryViews";
 import { StickerImage } from "./StickerImage";
@@ -11,13 +11,16 @@ export function StickerGrid({ actions }: { actions: StickerActions }) {
   const selectedId = useUiStore((s) => s.selectedStickerId);
   const selectSticker = useUiStore((s) => s.selectSticker);
   const { data: stickers, error, isPending } = useStickers(view);
-  const label = LIBRARY_VIEWS.find((v) => v.view === view)?.label;
+  const { data: sidebar } = useTagSidebar();
+  const label = typeof view === "string"
+    ? LIBRARY_VIEWS.find((v) => v.view === view)?.label
+    : [...(sidebar?.groups.flatMap((group) => group.tags) ?? []), ...(sidebar?.ungrouped ?? [])].find((tag) => tag.id === view.tag)?.name;
 
   return (
     <main className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6" aria-busy={isPending}>
       <div className="flex items-baseline gap-3">
-        <h1 className="text-2xl font-semibold">{label}</h1>
-        {stickers && <span className="text-ink-secondary">{stickers.length} 张</span>}
+        <h1 title={label} className="min-w-0 truncate text-2xl font-semibold">{label}</h1>
+        {stickers && <span className="shrink-0 text-ink-secondary">{stickers.length} 张</span>}
       </div>
 
       {error ? (
@@ -67,6 +70,7 @@ function StickerTile({ sticker, selected, onSelect, actions }: {
       }`}
     >
       <StickerImage path={sticker.thumbnailPath} name={sticker.name} lazy />
+      {sticker.caption && <span title={sticker.caption} className="absolute bottom-2 left-1/2 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-sm bg-ink px-2 py-0.5 text-xs font-semibold text-surface windows:rounded-xs">{sticker.caption}</span>}
       {sticker.animated && (
         <span aria-label="动图" className="absolute top-2 right-2 rounded-sm bg-surface px-1 text-xs font-semibold windows:rounded-xs">GIF</span>
       )}
