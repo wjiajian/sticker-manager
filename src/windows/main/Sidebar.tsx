@@ -15,6 +15,7 @@ export function Sidebar() {
   const { data: overview } = useLibraryOverview();
   const { data: sidebar, error, isPending } = useTagSidebar();
   const view = useUiStore((s) => s.view);
+  const searching = useUiStore((s) => !!s.searchQuery);
   const setView = useUiStore((s) => s.setView);
   const [collapsed, setCollapsed] = useState<Set<string | null>>(() => new Set());
   const [creation, setCreation] = useState<TagCreation | null>(null);
@@ -37,7 +38,7 @@ export function Sidebar() {
   }
 
   function tagRow(tag: TagSummary) {
-    const selected = typeof view !== "string" && view.tag === tag.id;
+    const selected = !searching && typeof view !== "string" && view.tag === tag.id;
     return rename?.kind === "tag" && rename.id === tag.id ? (
       <div key={tag.id} className="py-1 pr-2 pl-6">
         <InlineName key={tag.id} target={rename} onFinish={finishRename} />
@@ -97,7 +98,7 @@ export function Sidebar() {
     <nav aria-label="仓库导航" className="flex w-54 shrink-0 flex-col gap-6 overflow-y-auto bg-chrome px-3 pt-2 pb-4">
       <Section title="仓库">
         {LIBRARY_VIEWS.map(({ view: id, label, icon: Icon }) => {
-          const selected = id === view;
+          const selected = !searching && id === view;
           return (
             <button
               key={id}

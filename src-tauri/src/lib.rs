@@ -28,6 +28,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::library_overview,
             commands::list_stickers,
+            commands::search_stickers,
             commands::sticker,
             commands::tag_sidebar,
             commands::create_tag,

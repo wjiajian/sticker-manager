@@ -72,6 +72,7 @@ export interface ImportReport {
 export const ipc = {
   libraryOverview: () => invoke<LibraryOverview>("library_overview"),
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
+  searchStickers: (query: string) => invoke<Sticker[]>("search_stickers", { query }),
   tagSidebar: () => invoke<TagSidebar>("tag_sidebar"),
   sticker: (id: string) => invoke<Sticker>("sticker", { id }),
   createTag: (name: string, color: string | null = null, groupId: string | null = null) => invoke<Tag>("create_tag", { name, color, groupId }),

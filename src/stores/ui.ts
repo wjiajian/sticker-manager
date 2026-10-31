@@ -4,15 +4,31 @@ import type { LibraryView } from "../lib/ipc";
 
 interface UiState {
   view: LibraryView;
+  searchText: string;
+  searchQuery: string;
+  /** 搜索框里按了 ↓ 或 Enter，等当前搜索词的结果回来后选中第一张。 */
+  resultFocusRequested: boolean;
+  setSearchText: (text: string) => void;
+  setSearchQuery: (query: string) => void;
+  requestResultFocus: (requested: boolean) => void;
   selectedStickerId: string | null;
   captionDrafts: Record<string, string>;
   setCaptionDraft: (id: string, value: string | null) => void;
   setView: (view: LibraryView) => void;
-  selectSticker: (id: string) => void;
+  selectSticker: (id: string | null) => void;
 }
 
 export const useUiStore = create<UiState>()((set) => ({
   view: "all",
+  searchText: "",
+  searchQuery: "",
+  resultFocusRequested: false,
+  // 继续打字说明还没选好，取消待选中第一张的请求。
+  setSearchText: (searchText) => set({ searchText, resultFocusRequested: false }),
+  // 只有真的退出搜索才取消选中；没进入搜索时清空搜索框（比如取消输入法组字）不影响选中。
+  setSearchQuery: (searchQuery) => set((state) =>
+    searchQuery || !state.searchQuery ? { searchQuery } : { searchQuery, selectedStickerId: null }),
+  requestResultFocus: (resultFocusRequested) => set({ resultFocusRequested }),
   selectedStickerId: null,
   captionDrafts: {},
   setCaptionDraft: (id, value) => set((state) => {
@@ -21,6 +37,6 @@ export const useUiStore = create<UiState>()((set) => ({
     else captionDrafts[id] = value;
     return { captionDrafts };
   }),
-  setView: (view) => set({ view, selectedStickerId: null }),
+  setView: (view) => set({ view, searchText: "", searchQuery: "", resultFocusRequested: false, selectedStickerId: null }),
   selectSticker: (id) => set({ selectedStickerId: id }),
 }));

@@ -9,6 +9,7 @@ mod error;
 mod import;
 mod library;
 mod organization;
+mod search;
 mod usage;
 
 pub use device::Device;

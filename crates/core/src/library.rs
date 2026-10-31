@@ -86,7 +86,7 @@ impl Library {
     }
 
     pub fn sticker(&self, id: &str) -> Result<Sticker> {
-        self.query_stickers("s.id = ?1", "s.id", Some(id))?
+        self.query_stickers("s.id = ?1", "s.id", &[id])?
             .pop()
             .ok_or(Error::StickerUnavailable)
     }
@@ -123,20 +123,20 @@ impl Library {
             LibraryView::Tag(id) => Some(id.as_str()),
             _ => None,
         };
-        self.query_stickers(filter, order, tag_id)
+        self.query_stickers(filter, order, tag_id.as_slice())
     }
 
-    fn query_stickers(
+    pub(crate) fn query_stickers(
         &self,
         filter: &str,
         order: &str,
-        parameter: Option<&str>,
+        parameters: &[&str],
     ) -> Result<Vec<Sticker>> {
         let mut statement = self.conn.prepare(&format!(
             "SELECT {STICKER_COLUMNS} FROM stickers s WHERE {filter} ORDER BY {order}"
         ))?;
         let mut stickers = statement
-            .query_map(params_from_iter(parameter), |row| {
+            .query_map(params_from_iter(parameters), |row| {
                 Sticker::from_row(row, &self.root)
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -155,7 +155,7 @@ impl Library {
              JOIN stickers s ON s.id = st.sticker_id
              WHERE {filter} ORDER BY t.position, t.id"
         ))?;
-        let tags = statement.query_map(params_from_iter(parameter), |row| {
+        let tags = statement.query_map(params_from_iter(parameters), |row| {
             Ok((row.get::<_, String>(5)?, Tag::from_row(row)?))
         })?;
         for tag in tags {

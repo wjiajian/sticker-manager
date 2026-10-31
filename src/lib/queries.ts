@@ -1,4 +1,4 @@
-import { QueryClient, skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc, type LibraryView } from "./ipc";
 
 export const queryClient = new QueryClient({
@@ -36,6 +36,14 @@ export function useSticker(id: string | null) {
 
 export function useStickers(view: LibraryView) {
   return useQuery({ queryKey: ["library", "stickers", view], queryFn: () => ipc.listStickers(view) });
+}
+
+export function useStickerSearch(query: string) {
+  return useQuery({
+    queryKey: ["library", "search", query],
+    queryFn: query.trim() ? () => ipc.searchStickers(query) : skipToken,
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useImportStickers() {

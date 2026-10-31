@@ -63,6 +63,11 @@ pub async fn list_stickers(app: AppHandle, view: LibraryView) -> CommandResult<V
 }
 
 #[tauri::command]
+pub async fn search_stickers(app: AppHandle, query: String) -> CommandResult<Vec<Sticker>> {
+    with_library(app, move |library| Ok(library.search_stickers(&query)?)).await
+}
+
+#[tauri::command]
 pub async fn sticker(app: AppHandle, id: String) -> CommandResult<Sticker> {
     with_library(app, move |library| Ok(library.sticker(&id)?)).await
 }
