@@ -1,9 +1,11 @@
+import { useMemo } from "react";
 import type { Sticker } from "../../lib/ipc";
 import { useLibraryChangedEvents, useStickerSearch, useStickers } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { DetailPanel } from "./DetailPanel";
 import { Sidebar } from "./Sidebar";
 import { StickerGrid } from "./StickerGrid";
+import { filterStickers, sortStickers } from "./stickerList";
 import { TitleBar } from "./TitleBar";
 import { useImport } from "./useImport";
 import { useStickerActions } from "./useStickerActions";
@@ -14,10 +16,18 @@ const NO_STICKERS: Sticker[] = [];
 export function App() {
   const view = useUiStore((s) => s.view);
   const searchQuery = useUiStore((s) => s.searchQuery);
+  const typeFilter = useUiStore((s) => s.typeFilter);
+  const sortOrder = useUiStore((s) => s.sortOrder);
   const listing = useStickers(view);
   const search = useStickerSearch(searchQuery);
   const visible = searchQuery ? search : listing;
-  const actions = useStickerActions(visible.data ?? NO_STICKERS);
+  const source = visible.data ?? NO_STICKERS;
+  const sortable = !searchQuery && view !== "recent" && view !== "recentlyDeleted";
+  const stickers = useMemo(() => {
+    const filtered = filterStickers(source, typeFilter);
+    return sortable ? sortStickers(filtered, sortOrder) : filtered;
+  }, [source, typeFilter, sortOrder, sortable]);
+  const actions = useStickerActions(stickers);
   const { choose, busy, dragging, message } = useImport(actions.claimDragDrop);
   const eventError = useLibraryChangedEvents();
   const status = [message, eventError].filter(Boolean).join("\n");
@@ -30,7 +40,7 @@ export function App() {
       </div>
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <StickerGrid actions={actions} listing={visible} />
+        <StickerGrid actions={actions} listing={visible} stickers={stickers} sortable={sortable} />
         <DetailPanel actions={actions} />
       </div>
     </div>
