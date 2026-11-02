@@ -367,6 +367,7 @@ mod native {
     };
     tauri_panel! { panel!(StickerBall { config: {can_become_key_window:false,can_become_main_window:false,is_floating_panel:true} }) }
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
+        let theme = crate::appearance::preference(app.handle());
         PanelBuilder::<_, StickerBall>::new(app.handle(), "ball")
             .url(tauri::WebviewUrl::App("ball.html".into()))
             .title("悬浮球")
@@ -386,8 +387,9 @@ mod native {
                     // 单击墙纸显示桌面、调度中心时留在原处，用户仍能把桌面上的图片拖到球上。
                     .stationary(),
             )
-            .with_window(|w| {
-                w.decorations(false)
+            .with_window(move |w| {
+                w.theme(theme)
+                    .decorations(false)
                     // PanelBuilder 的 transparent 只清除 NSPanel 背景；WKWebView 也必须透明。
                     .transparent(true)
                     .visible(false)
@@ -424,6 +426,7 @@ mod native {
     use super::*;
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
         tauri::WebviewWindowBuilder::new(app, "ball", tauri::WebviewUrl::App("ball.html".into()))
+            .theme(crate::appearance::preference(app.handle()))
             .title("悬浮球")
             .inner_size(300.0, 168.0)
             .decorations(false)

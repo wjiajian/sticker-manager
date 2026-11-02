@@ -74,19 +74,19 @@ export function Ball() {
       }}
       onContextMenu={(event) => { event.preventDefault(); void run(ipc.showBallMenu); }}>
       <svg viewBox="0 0 64 64" className="block h-full w-full" aria-hidden>
-        <circle cx="32" cy="34" r="24" fill="var(--color-brand)" stroke="var(--color-ink)" strokeWidth="3" />
-        <path d={eyes} fill="none" stroke="var(--color-ink)" strokeWidth="3.5" strokeLinecap="round" />
-        <path d={mouth} fill="none" stroke="var(--color-ink)" strokeWidth="3.5" strokeLinecap="round" />
+        <circle cx="32" cy="34" r="24" fill="var(--color-brand)" stroke="var(--color-brand-ink)" strokeWidth="3" />
+        <path d={eyes} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3.5" strokeLinecap="round" />
+        <path d={mouth} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3.5" strokeLinecap="round" />
       </svg>
       {dropping && <span aria-hidden className="pointer-events-none absolute -inset-3 rounded-full border-2 border-dashed border-accent" />}
     </button>
     {ring && <svg aria-hidden viewBox="0 0 68 68" className="pointer-events-none absolute transition-opacity duration-300" style={{ left: state.center.x - 34, top: state.center.y - 34, width: 68, height: 68, opacity: sync?.progress ? 1 : 0 }}>
-      <circle cx="34" cy="34" r="32.5" fill="none" stroke="#E2E0D9" strokeWidth="3" />
+      <circle cx="34" cy="34" r="32.5" fill="none" stroke="var(--color-ball-track)" strokeWidth="3" />
       <circle cx="34" cy="34" r="32.5" fill="none" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" pathLength="100"
         strokeDasharray={ring.total ? `${Math.max(0, Math.min(100, ring.completed / ring.total * 100))} 100` : "25 100"}
         className={ring.total === null ? "sync-download-arc" : undefined} style={{ transformOrigin: "34px 34px", transform: "rotate(-90deg)" }} />
     </svg>}
-    {!!sync?.unseen && <span aria-label={`${sync.unseen} 张新表情`} className="pointer-events-none absolute min-w-6 rounded-full bg-accent px-1 py-0.5 text-center text-xs leading-4 font-bold text-surface shadow-[0_0_0_2px_var(--color-surface)]"
+    {!!sync?.unseen && <span aria-label={`${sync.unseen} 张新表情`} className="pointer-events-none absolute min-w-6 rounded-full bg-accent-fill px-1 py-0.5 text-center text-xs leading-4 font-bold text-on-accent shadow-[0_0_0_2px_var(--color-surface)]"
       style={{ top: Math.max(2, state.center.y - 32), ...(state.edge === "right" ? { right: Math.max(2, 300 - state.center.x + 4) } : { left: Math.max(2, state.center.x + 4) }) }}>{sync.unseen > 99 ? "99+" : sync.unseen}</span>}
     {tip && !state.collapsed && <div role="status" className="pointer-events-none absolute max-w-72 rounded-control bg-ink px-2 py-1 text-xs text-surface"
       style={{ ...(state.edge === "right" ? { right: 8 } : { left: 8 }),

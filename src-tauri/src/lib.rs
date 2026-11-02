@@ -5,6 +5,7 @@ use std::time::Duration;
 use sticker_core::Library;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod appearance;
 mod ball;
 mod clipboard;
 mod commands;
@@ -40,17 +41,28 @@ pub fn run() {
             let (mut library, root) = match open_library(app) {
                 Ok(library) => library,
                 Err((path, reason)) => {
+                    app.set_theme(settings::Settings::load(&path).appearance.theme());
                     app.manage(startup::StartupFailure(Mutex::new(Some((path, reason)))));
                     return Ok(());
                 }
             };
             app.manage(settings::SettingsState::new(root));
+            app.set_theme(appearance::preference(app.handle()));
             if let Err(error) = library.purge_expired() {
                 eprintln!("清理最近删除失败：{error}");
             }
             if let Err(error) = library.sweep_orphan_files() {
                 eprintln!("清理残留文件失败：{error}");
             }
+            let sync = app.state::<settings::SettingsState>().get().sync;
+            let maintenance = std::time::Instant::now();
+            if let Err(error) = library
+                .maintain_sync(sync.as_ref().map(|s| s.library_id.as_str()))
+                .and_then(|()| library.compact_database_at_startup())
+            {
+                eprintln!("启动时清理本地日志失败：{error}");
+            }
+            eprintln!("启动时本地日志维护：{:?}", maintenance.elapsed());
             app.manage(Mutex::new(library));
             app.manage(imports::ImportState::default());
             app.manage(export::ExportDirectory::new(
@@ -69,7 +81,10 @@ pub fn run() {
             start_expiry_cleanup(app.handle().clone());
             Ok(())
         })
-        .on_window_event(panel::on_window_event)
+        .on_window_event(|window, event| {
+            panel::on_window_event(window, event);
+            appearance::on_window_event(window, event);
+        })
         .invoke_handler(tauri::generate_handler![
             commands::library_overview,
             commands::list_stickers,
@@ -78,6 +93,7 @@ pub fn run() {
             commands::delete_sticker,
             commands::restore_sticker,
             commands::purge_sticker,
+            commands::purge_deleted_stickers,
             commands::tag_sidebar,
             commands::create_tag,
             commands::rename_tag,
@@ -112,6 +128,7 @@ pub fn run() {
             preview::preview_session,
             preview::preview_ready,
             settings::get_settings,
+            settings::set_appearance,
             settings::set_ball_visible,
             settings::set_ball_auto_hide,
             settings::get_autostart,
@@ -226,10 +243,24 @@ fn open_library(app: &tauri::App) -> Result<(Library, PathBuf), (PathBuf, String
 }
 
 fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
+    let theme = appearance::preference(app.handle());
+    let resolved = theme.unwrap_or(app.get_webview_window("panel").unwrap().theme()?);
+    let show = !std::env::args().any(|arg| arg == "--autostart");
+    // 只在第一次载入完成时显示；之后重新载入（比如开发时整页刷新）不把用户隐藏的窗口弹出来。
+    let first_load = std::sync::Once::new();
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title("表情管理器")
-        .visible(!std::env::args().any(|arg| arg == "--autostart"))
-        .focused(!std::env::args().any(|arg| arg == "--autostart"))
+        .theme(theme)
+        .background_color(appearance::background(resolved))
+        .visible(false)
+        .focused(show)
+        .on_page_load(move |window, payload| {
+            if show && payload.event() == tauri::webview::PageLoadEvent::Finished {
+                first_load.call_once(|| {
+                    let _ = window.show();
+                });
+            }
+        })
         .inner_size(1280.0, 800.0)
         .min_inner_size(960.0, 600.0);
 

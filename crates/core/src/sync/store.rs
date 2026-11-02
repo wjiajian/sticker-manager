@@ -171,13 +171,59 @@ pub(super) fn flatten(change: &Change) -> Vec<Change> {
 }
 pub(super) fn current_revision(conn: &Connection) -> Result<i64> {
     Ok(conn.query_row(
-        "SELECT COALESCE(MAX(revision),0) FROM sync_outbox",
+        "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_outbox'),0)",
         [],
         |r| r.get(0),
     )?)
 }
 
+/// 只有当前目标还会读取 outbox 增量；切回旧目标必须 join_sync，追加快照。
+pub(super) fn prune(conn: &Connection, active: Option<&str>) -> Result<()> {
+    conn.execute(
+        "DELETE FROM sync_outbox WHERE revision <= MIN(
+            (SELECT revision FROM sync_model WHERE singleton=1),
+            COALESCE((SELECT revision FROM sync_targets WHERE library_id=?1),
+                     (SELECT revision FROM sync_model WHERE singleton=1)))",
+        [active],
+    )?;
+    conn.execute("DELETE FROM sync_stream WHERE seq <= (SELECT pushed_seq FROM sync_targets WHERE library_id=sync_stream.library_id)", [])?;
+    Ok(())
+}
+
 impl Library {
+    /// 未配置同步时也折叠本地操作。调用者须传当前目标，不能传已切走的历史目标。
+    pub fn maintain_sync(&mut self, active: Option<&str>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let folded: i64 = tx.query_row(
+            "SELECT revision FROM sync_model WHERE singleton=1",
+            [],
+            |r| r.get(0),
+        )?;
+        if folded < current_revision(&tx)? {
+            let (mut revision, mut model) = load(&tx)?;
+            flush(&tx, &mut model, &mut revision)?;
+            save(&tx, revision, &model)?;
+        }
+        prune(&tx, active)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// 仅在启动、窗口出现前回收明显的空闲空间；运行中的清理只删行并复用空页。
+    pub fn compact_database_at_startup(&mut self) -> Result<()> {
+        let free: i64 = self
+            .conn
+            .pragma_query_value(None, "freelist_count", |r| r.get(0))?;
+        let pages: i64 = self
+            .conn
+            .pragma_query_value(None, "page_count", |r| r.get(0))?;
+        if free >= 256 && free * 4 >= pages {
+            self.conn.execute_batch(
+                "PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);",
+            )?;
+        }
+        Ok(())
+    }
     pub(crate) fn initialize_sync(&self) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         let exists: bool =
@@ -322,6 +368,7 @@ impl Library {
         tx.execute("INSERT INTO sync_targets(library_id,revision,initial_pull_complete) VALUES(?1,?2,0) ON CONFLICT(library_id) DO UPDATE SET revision=excluded.revision",params![library_id,revision])?;
         enqueue(&tx, library_id, change)?;
         save(&tx, revision, &model)?;
+        prune(&tx, Some(library_id))?;
         tx.commit()?;
         Ok(())
     }

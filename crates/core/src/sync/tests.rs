@@ -1186,23 +1186,19 @@ fn purging_a_merged_sticker_lists_and_removes_every_known_copy() {
                 .is_empty()
         );
     }
-    let purged: String = a
-        .lib
-        .lock()
+    // 已推送的本地日志会清理；从远端协议日志验证合并 id 的 purge。
+    let purged = segments(&s)
         .unwrap()
-        .conn
-        .query_row(
-            "SELECT action FROM sync_outbox WHERE action LIKE '%\"purge\"%'",
-            [],
-            |r| r.get(0),
-        )
+        .into_iter()
+        .flat_map(|seg| read_segment(&s, &seg).unwrap().unwrap())
+        .find_map(|op| match op.change.action {
+            Action::Purge { ids, .. } => Some(ids),
+            _ => None,
+        })
         .unwrap();
     let mut both = vec![ia, ib];
     both.sort();
-    assert_eq!(
-        serde_json::from_str::<Value>(&purged).unwrap()["ids"],
-        json!(both)
-    );
+    assert_eq!(json!(purged), json!(both));
 }
 
 #[test]
@@ -1279,3 +1275,152 @@ fn progress_is_outside_repository_lock_and_partial_object_is_repaired() {
 mod network_integration;
 
 mod presence;
+
+#[test]
+fn bulk_purge_reaches_other_device_and_a_restore_already_received_is_skipped() {
+    let (s, m) = backend();
+    let a = Site::new();
+    let b = Site::new();
+    let deleted = a.import(212);
+    let restored = a.import(213);
+    settle(&[&a, &b], &s, &m);
+    for id in [&deleted, &restored] {
+        a.lib.lock().unwrap().delete_sticker(id).unwrap();
+    }
+    settle(&[&a, &b], &s, &m);
+    let confirmed = vec![deleted.clone(), restored.clone()];
+    b.lib.lock().unwrap().restore_sticker(&restored).unwrap();
+    b.sync(&s, &m);
+    a.sync(&s, &m);
+    assert_eq!(
+        a.lib
+            .lock()
+            .unwrap()
+            .purge_deleted_stickers(&confirmed)
+            .unwrap(),
+        1
+    );
+    settle(&[&a, &b], &s, &m);
+    assert_eq!(a.state(), b.state());
+    let lib = b.lib.lock().unwrap();
+    assert!(lib.sticker(&deleted).is_err());
+    assert!(lib.sticker(&restored).unwrap().deleted_at.is_none());
+}
+
+#[test]
+fn bulk_purge_wins_over_an_earlier_restore_not_yet_received_permanent_tombstone_rule() {
+    let (s, m) = backend();
+    let a = Site::new();
+    let b = Site::new();
+    let id = a.import(214);
+    settle(&[&a, &b], &s, &m);
+    a.lib.lock().unwrap().delete_sticker(&id).unwrap();
+    settle(&[&a, &b], &s, &m);
+    b.lib.lock().unwrap().restore_sticker(&id).unwrap();
+    assert_eq!(
+        a.lib
+            .lock()
+            .unwrap()
+            .purge_deleted_stickers(std::slice::from_ref(&id))
+            .unwrap(),
+        1
+    );
+    settle(&[&b, &a], &s, &m);
+    for site in [&a, &b] {
+        assert!(site.lib.lock().unwrap().sticker(&id).is_err());
+    }
+    assert_eq!(a.state(), b.state());
+}
+
+mod log_compaction;
+
+#[test]
+fn local_log_cleanup_preserves_revision_and_offline_snapshot() {
+    let a = Site::new();
+    let old = a.import(215);
+    a.lib.lock().unwrap().delete_sticker(&old).unwrap();
+    a.lib
+        .lock()
+        .unwrap()
+        .purge_deleted_stickers(&[old])
+        .unwrap();
+    let id = a.import(216);
+    {
+        let mut l = a.lib.lock().unwrap();
+        let revision = l.local_revision().unwrap();
+        l.maintain_sync(None).unwrap();
+        assert_eq!(l.local_revision().unwrap(), revision);
+        assert_eq!(
+            l.conn
+                .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        l.record_usage(&id).unwrap();
+        assert!(l.local_revision().unwrap() > revision);
+    }
+    let (s, m) = backend();
+    let b = Site::new();
+    settle(&[&a, &b], &s, &m);
+    assert_eq!(a.state(), b.state());
+    let l = a.lib.lock().unwrap();
+    for table in ["sync_outbox", "sync_stream"] {
+        assert_eq!(
+            l.conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[test]
+fn switching_targets_does_not_pin_outbox_and_rejoining_uses_a_fresh_snapshot() {
+    let a = Site::new();
+    let b = Site::new();
+    let (s, m) = backend();
+    let (other, second) = backend();
+    let id = a.import(217);
+    settle(&[&a, &b], &s, &m);
+    a.lib
+        .lock()
+        .unwrap()
+        .set_sticker_caption(&id, "切换后")
+        .unwrap();
+    join(&a.lib, &other, &second.id).unwrap();
+    a.sync(&other, &second);
+    {
+        let mut l = a.lib.lock().unwrap();
+        assert_eq!(
+            l.conn
+                .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        l.set_sticker_caption(&id, "尚未分配给当前目标").unwrap();
+        l.maintain_sync(Some(&second.id)).unwrap();
+        assert_eq!(
+            l.conn
+                .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+    join(&a.lib, &s, &m.id).unwrap();
+    settle(&[&a, &b], &s, &m);
+    assert_eq!(a.state(), b.state());
+    assert_eq!(
+        b.lib
+            .lock()
+            .unwrap()
+            .sticker(&id)
+            .unwrap()
+            .caption
+            .as_deref(),
+        Some("尚未分配给当前目标")
+    );
+}

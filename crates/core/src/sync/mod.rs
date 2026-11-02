@@ -1,4 +1,5 @@
 //! 阻塞文件后端与可独立测试的同步协议。I/O 在 Library 的锁外，数据库阶段单独提交。
+mod compaction;
 mod model;
 mod presence;
 pub use presence::{StickerSyncInfo, platform};
@@ -205,6 +206,7 @@ struct Segment {
     device: String,
     first: i64,
     last: i64,
+    size: u64,
 }
 /// 访达的 .DS_Store、Windows 的 desktop.ini 这类系统自动放进去的文件，不算文件夹里有内容。
 fn system_file(key: &str) -> bool {
@@ -243,13 +245,18 @@ fn segment(key: &str) -> Option<Segment> {
         device: p[1].into(),
         first,
         last,
+        size: 0,
     })
 }
 fn segments(storage: &dyn Storage) -> Result<Vec<Segment>> {
     let mut result = storage
         .list("ops/")?
         .into_iter()
-        .filter_map(|f| segment(&f.key))
+        .filter_map(|f| {
+            let mut s = segment(&f.key)?;
+            s.size = f.size;
+            Some(s)
+        })
         .collect::<Vec<_>>();
     result.sort_by(|a, b| (&a.device, a.first, a.last).cmp(&(&b.device, b.first, b.last)));
     Ok(result)
@@ -258,29 +265,32 @@ fn read_segment(storage: &dyn Storage, segment: &Segment) -> Result<Option<Vec<O
     let Some(bytes) = storage.read(&segment.key)? else {
         return Ok(None);
     };
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return Ok(None);
+    Ok(decode_segment(&bytes, segment))
+}
+fn decode_segment(bytes: &[u8], segment: &Segment) -> Option<Vec<Operation>> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return None;
     };
     // 尾换行属于提交格式，截断但恰好能解析的最后一行也不会提前应用。
     if !text.ends_with('\n') {
-        return Ok(None);
+        return None;
     }
     let mut result = Vec::new();
     for (index, line) in text.lines().enumerate() {
         let Ok(operation) = serde_json::from_str::<Operation>(line) else {
-            return Ok(None);
+            return None;
         };
         if operation.seq != segment.first + index as i64
             || operation.change.stamp.device != segment.device
         {
-            return Ok(None);
+            return None;
         }
         result.push(operation);
     }
     if result.last().map(|o| o.seq) != Some(segment.last) {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(result))
+    Some(result)
 }
 fn read_devices(storage: &dyn Storage) -> Result<Vec<RemoteDevice>> {
     let mut result = Vec::new();
@@ -356,6 +366,18 @@ pub fn synchronize_with_events(
     progress: &dyn Fn(SyncProgress),
     arrived: &dyn Fn(usize),
 ) -> Result<SyncReport> {
+    synchronize_with_maintenance(library, storage, expected_id, progress, arrived, &|| true)
+}
+
+/// 合并许可在每次维护 I/O 前重新检查；手动同步也不能绕过计费网络限制。
+pub fn synchronize_with_maintenance(
+    library: &Mutex<Library>,
+    storage: &dyn Storage,
+    expected_id: &str,
+    progress: &dyn Fn(SyncProgress),
+    arrived: &dyn Fn(usize),
+    maintenance_allowed: &dyn Fn() -> bool,
+) -> Result<SyncReport> {
     let Some(manifest) = Manifest::read_complete(storage)? else {
         return Ok(SyncReport {
             changed: false,
@@ -422,10 +444,19 @@ pub fn synchronize_with_events(
             total: None,
         });
     };
-    let mut changed = push(library, storage, expected_id, &root, &device, progress)?;
+    let mut published = Vec::new();
+    let mut changed = push(
+        library,
+        storage,
+        expected_id,
+        &root,
+        &device,
+        progress,
+        &mut published,
+    )?;
     let mut first_error = None;
     let mut blocked = BTreeSet::new();
-    for s in remote {
+    for s in &remote {
         if s.device == device.id || blocked.contains(&s.device) {
             continue;
         }
@@ -433,7 +464,11 @@ pub fn synchronize_with_events(
         if s.last <= cursor || s.first > cursor + 1 {
             continue;
         }
-        let Some(mut ops) = read_segment(storage, &s)? else {
+        let Some(bytes) = storage.read(&s.key)? else {
+            blocked.insert(s.device.clone());
+            continue;
+        };
+        let Some(mut ops) = decode_segment(&bytes, s) else {
             continue;
         };
         ops.retain(|o| o.seq > cursor);
@@ -476,6 +511,7 @@ pub fn synchronize_with_events(
         new_stickers += added;
         store::project(&tx, &model)?;
         store::save(&tx, revision, &model)?;
+        store::prune(&tx, Some(expected_id))?;
         tx.execute("INSERT INTO sync_progress VALUES(?1,?2,?3) ON CONFLICT(library_id,device) DO UPDATE SET seq=excluded.seq",params![expected_id,s.device,ops.last().unwrap().seq])?;
         tx.commit()?;
         drop(lib);
@@ -512,13 +548,22 @@ pub fn synchronize_with_events(
             changed = true;
         }
         store::save(&tx, revision, &model)?;
+        store::prune(&tx, Some(expected_id))?;
         tx.commit()?;
         drop(lib);
         if initial_complete && added > 0 {
             arrived(added);
         }
     }
-    changed |= push(library, storage, expected_id, &root, &device, progress)?;
+    changed |= push(
+        library,
+        storage,
+        expected_id,
+        &root,
+        &device,
+        progress,
+        &mut published,
+    )?;
     cleanup_purged_files(library, &root, &files)?;
     if let Some(error) = first_error {
         return Err(error);
@@ -528,7 +573,7 @@ pub fn synchronize_with_events(
     storage.write(
         &format!("devices/{}.json", device.id),
         &serde_json::to_vec(&RemoteDevice {
-            id: device.id,
+            id: device.id.clone(),
             name: device.name,
             last_sync_at,
             platform: platform().into(),
@@ -553,6 +598,27 @@ pub fn synchronize_with_events(
         }
         tx.commit()?;
     }
+    let pulled = {
+        let lib = lock(library)?;
+        remote
+            .iter()
+            .filter(|s| s.device != device.id)
+            .try_fold(true, |complete, s| {
+                Ok::<_, Error>(
+                    complete && store::cursor(&lib.conn, expected_id, &s.device)? >= s.last,
+                )
+            })?
+    };
+    if pulled && pending == 0 && maintenance_allowed() {
+        let own = remote
+            .into_iter()
+            .chain(published)
+            .filter(|s| s.device == device.id)
+            .collect();
+        if let Err(error) = compaction::compact(storage, own, maintenance_allowed) {
+            eprintln!("合并远端操作日志失败：{error}");
+        }
+    }
     Ok(SyncReport {
         changed,
         last_sync_at: Some(last_sync_at),
@@ -569,6 +635,7 @@ fn push(
     root: &Path,
     device: &Device,
     progress: &dyn Fn(SyncProgress),
+    published: &mut Vec<Segment>,
 ) -> Result<bool> {
     let (ops, live, deleted, changed) = {
         let mut lib = lock(library)?;
@@ -609,6 +676,7 @@ fn push(
                 params![id, revision],
             )?;
         }
+        store::prune(&tx, Some(id))?;
         let ops = {
             let mut q=tx.prepare("SELECT operation FROM sync_stream WHERE library_id=?1 AND seq>(SELECT pushed_seq FROM sync_targets WHERE library_id=?1) ORDER BY seq")?;
             let rows = q
@@ -684,10 +752,21 @@ fn push(
             bytes.push(b'\n');
         }
         storage.write(&key, &bytes)?;
-        lock(library)?.conn.execute(
+        published.push(Segment {
+            key,
+            device: device.id.clone(),
+            first,
+            last,
+            size: bytes.len() as u64,
+        });
+        let mut lib = lock(library)?;
+        let tx = lib.conn.transaction()?;
+        tx.execute(
             "UPDATE sync_targets SET pushed_seq=MAX(pushed_seq,?2) WHERE library_id=?1",
             params![id, last],
         )?;
+        store::prune(&tx, Some(id))?;
+        tx.commit()?;
     }
     for key in deleted {
         storage.delete(&key)?;

@@ -104,7 +104,7 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
     {!target && <>
       {wide ? <div className="flex flex-col gap-2">
         <span className="text-xs text-ink-secondary">存储后端</span>
-        <div role="group" aria-label="存储后端" className="flex rounded-control bg-tile p-1">
+        <div role="group" aria-label="存储后端" className="flex rounded-control bg-muted p-1">
           {Object.entries(backends).map(([value, label]) => <button type="button" key={value} aria-pressed={backend === value} disabled={busy || !status}
             onClick={() => { setBackend(value as SyncBackend); setError(null); }}
             className={`interactive min-w-0 flex-1 whitespace-nowrap rounded-control px-2 py-2 text-xs ${backend === value ? "bg-surface font-semibold" : "text-ink-secondary"}`}>{label}</button>)}

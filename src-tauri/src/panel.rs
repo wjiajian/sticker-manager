@@ -266,6 +266,7 @@ mod native {
     }
 
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
+        let theme = crate::appearance::preference(app.handle());
         PanelBuilder::<_, StickerPanel>::new(app.handle(), "panel")
             .url(tauri::WebviewUrl::App("panel.html".into()))
             .title("表情面板")
@@ -285,8 +286,10 @@ mod native {
                     .full_screen_auxiliary()
                     .ignores_cycle(),
             )
-            .with_window(|w| {
-                w.decorations(false)
+            .with_window(move |w| {
+                w.theme(theme)
+                    .decorations(false)
+                    .transparent(true)
                     .visible(false)
                     .focused(false)
                     .accept_first_mouse(true)
@@ -382,6 +385,7 @@ mod native {
 
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
         tauri::WebviewWindowBuilder::new(app, "panel", tauri::WebviewUrl::App("panel.html".into()))
+            .theme(crate::appearance::preference(app.handle()))
             .title("表情面板")
             .inner_size(WIDTH, HEIGHT)
             .decorations(false)

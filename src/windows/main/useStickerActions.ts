@@ -100,6 +100,20 @@ export function useStickerActions(stickers: Sticker[]) {
   const restoreSticker = (sticker: Sticker) => removeFromList(sticker, "restoreSticker");
   const purgeSticker = (sticker: Sticker) => removeFromList(sticker, "purgeSticker");
 
+  const purgeDeletedStickers = (ids: string[]) => perform(async () => {
+    if (!ids.length || !await confirm(
+      `将彻底删除 ${ids.length} 张表情，无法恢复。以后再导入同一张图，会作为一张新表情，标签、配文、收藏和使用次数都不会找回。已设置同步时，其他设备上也会一起删除。`,
+      { title: "清空最近删除", kind: "warning", okLabel: "全部彻底删除", cancelLabel: "取消" },
+    )) return;
+    await ipc.purgeDeletedStickers(ids);
+    const current = useUiStore.getState();
+    if (current.view === "recentlyDeleted" && !current.searchQuery) {
+      selectSticker(null);
+      // 按钮会随空列表卸载；同步和刷新期间标题始终存在，不依赖后台 rAF。
+      document.getElementById("sticker-grid-title")?.focus();
+    }
+  });
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target;
@@ -171,7 +185,7 @@ export function useStickerActions(stickers: Sticker[]) {
     return perform(() => ipc.revealSticker(sticker.id), false);
   }
 
-  return { copy, drag, toggleFavorite, reveal, deleteSticker, restoreSticker, purgeSticker, busy, claimDragDrop, copiedId, error };
+  return { copy, drag, toggleFavorite, reveal, deleteSticker, restoreSticker, purgeSticker, purgeDeletedStickers, busy, claimDragDrop, copiedId, error };
 }
 
 /** 拖放事件里的路径写法可能和导出时不同（比如 /var 与 /private/var），只比较 export-xxx/文件名 这两段。 */

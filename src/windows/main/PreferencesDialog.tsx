@@ -60,10 +60,20 @@ export function PreferencesDialog({ onClose, sync, focusSync = false }: { onClos
   }
   const split = Math.max(0, path.length - 28);
   return <dialog ref={dialog} aria-labelledby={title} onCancel={(event) => { event.preventDefault(); onClose(); }}
-    className="m-auto max-h-[calc(100%-48px)] w-128 max-w-[calc(100%-48px)] overflow-y-auto rounded-card border border-line bg-surface p-6 text-ink backdrop:bg-ink/20">
+    className="m-auto max-h-[calc(100%-48px)] w-128 max-w-[calc(100%-48px)] overflow-y-auto rounded-card border border-line bg-surface p-6 text-ink backdrop:bg-overlay">
     <div className="flex flex-col gap-6">
       <h2 id={title} className="text-lg font-semibold">偏好设置</h2>
       <Group title="通用">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <span id={`${title}-appearance`}>外观</span>
+          <div role="group" aria-labelledby={`${title}-appearance`} className="flex rounded-control bg-muted p-1">
+            {([['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']] as const).map(([value, label]) =>
+              <button key={value} type="button" aria-pressed={settings?.appearance === value}
+                disabled={!!busy || !settings}
+                onClick={() => void change("appearance", async () => setSettings(await ipc.setAppearance(value)))}
+                className="interactive rounded-control px-3 py-1 text-xs font-semibold aria-pressed:bg-surface hover:opacity-82 disabled:opacity-50">{label}</button>)}
+          </div>
+        </div>
         <div className="flex items-center justify-between gap-4">
           <span id={`${title}-autostart`}>开机时自动启动</span>
           <Switch aria-labelledby={`${title}-autostart`} aria-describedby={autoError ? `${title}-auto-error` : undefined}
@@ -88,7 +98,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false }: { onClos
         </label>
       </Group>
       <Group title="表情面板">
-        <div className="flex items-center justify-between gap-4"><span>呼出快捷键</span><kbd className="rounded-control bg-tile px-3 py-1 font-sans">{platform === "macos" ? "⌃⌥E" : "Ctrl+Alt+E"}</kbd></div>
+        <div className="flex items-center justify-between gap-4"><span>呼出快捷键</span><kbd className="rounded-control bg-muted px-3 py-1 font-sans">{platform === "macos" ? "⌃⌥E" : "Ctrl+Alt+E"}</kbd></div>
         <p className="text-xs text-ink-secondary">暂不支持修改</p>
         {shortcutError && <p role="alert" className="text-xs text-accent">{shortcutError}</p>}
       </Group>

@@ -154,7 +154,7 @@ export function Panel() {
   const problem = error ?? actions.error ?? eventError ?? [overview, recentQuery, sidebar, tagged, search].find((result) => result.error)?.error;
 
   return (
-    <main className="relative grid h-full w-full grid-rows-[36px_minmax(0,1fr)_32px] gap-3 rounded-3xl bg-surface p-3 [&_button]:cursor-pointer" aria-label="表情面板"
+    <main className="relative grid h-full w-full grid-cols-1 grid-rows-[36px_minmax(0,1fr)_32px] gap-3 rounded-3xl bg-surface p-3 [&_button]:cursor-pointer" aria-label="表情面板"
       onPointerMoveCapture={preview.onPointerMove} onPointerLeave={preview.onPointerLeave}
       onPointerDownCapture={preview.reset} onKeyDownCapture={preview.reset} onScrollCapture={preview.onScroll} onKeyDown={(event) => {
       if (event.key !== "Escape" || composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -163,7 +163,7 @@ export function Panel() {
       else void run(() => ipc.hidePanel());
     }}>
       <div className="flex gap-2">
-        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-tile px-3 py-2 text-ink-secondary focus-within:shadow-[0_0_0_2px_var(--color-accent)] [&_svg]:shrink-0 [&_input]:w-full [&_input]:min-w-0 [&_input]:bg-transparent [&_input]:text-ink [&_input]:outline-none">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-muted px-3 py-2 text-ink-secondary focus-within:shadow-[0_0_0_2px_var(--color-accent)] [&_svg]:shrink-0 [&_input]:w-full [&_input]:min-w-0 [&_input]:bg-transparent [&_input]:text-ink [&_input]:outline-none">
           <MagnifyingGlassIcon size={16} aria-hidden />
           <input ref={input} role="combobox" aria-label="搜索表情" aria-autocomplete="list" aria-haspopup="listbox"
             aria-expanded={!empty} aria-controls={empty ? undefined : "panel-choices"} aria-activedescendant={activeId}
@@ -174,7 +174,7 @@ export function Panel() {
               setText(event.currentTarget.value); composingRef.current = false; setComposing(false); setSelectedId(null);
             }} onKeyDown={onKeyDown} />
         </label>
-        <button type="button" className="grid w-9 place-items-center rounded-xl bg-tile text-ink-tertiary aria-pressed:bg-ink aria-pressed:text-surface hover:opacity-82" aria-label="固定面板" aria-pressed={pinned} disabled={pinBusy}
+        <button type="button" className="grid w-9 place-items-center rounded-xl bg-muted text-ink-tertiary aria-pressed:bg-ink aria-pressed:text-surface hover:opacity-82" aria-label="固定面板" aria-pressed={pinned} disabled={pinBusy}
           onMouseDown={(event) => event.preventDefault()} onClick={() => {
             setPinBusy(true);
             void run(async () => { await ipc.setPanelPinned(!pinned); setPinned(!pinned); })
@@ -201,7 +201,7 @@ export function Panel() {
             </section>
             {sidebar.isPending ? tagsSkeleton ? <><TagSkeleton panel /><GridSkeleton panel /></> : null : tags.length > 0 && <>
               <div className="flex h-8 shrink-0 items-center gap-2 overflow-x-auto overscroll-contain [scrollbar-width:thin]" aria-label="标签">
-                {tags.map((tag) => <button key={tag.id} type="button" className="flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs font-semibold whitespace-nowrap aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-surface hover:opacity-82" aria-pressed={currentTag?.id === tag.id}
+                {tags.map((tag) => <button key={tag.id} type="button" className="flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs font-semibold whitespace-nowrap aria-pressed:border-selection-edge aria-pressed:bg-selection aria-pressed:text-on-selection hover:opacity-82" aria-pressed={currentTag?.id === tag.id}
                   onMouseDown={(event) => event.preventDefault()} onClick={() => { setTagId(tag.id); input.current?.focus(); }}>
                   <TagDot color={tag.color} />{tag.name}
                 </button>)}

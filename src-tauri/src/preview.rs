@@ -185,6 +185,7 @@ mod native {
     }
 
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
+        let theme = crate::appearance::preference(app.handle());
         PanelBuilder::<_, PreviewPanel>::new(app.handle(), "preview")
             .url(tauri::WebviewUrl::App("preview.html".into()))
             .title("表情预览")
@@ -202,8 +203,10 @@ mod native {
                     .full_screen_auxiliary()
                     .ignores_cycle(),
             )
-            .with_window(|w| {
-                w.decorations(false)
+            .with_window(move |w| {
+                w.theme(theme)
+                    .decorations(false)
+                    .transparent(true)
                     .visible(false)
                     .focused(false)
                     .focusable(false)
@@ -285,6 +288,7 @@ mod native {
             "preview",
             tauri::WebviewUrl::App("preview.html".into()),
         )
+        .theme(crate::appearance::preference(app.handle()))
         .title("表情预览")
         .inner_size(WIDTH, HEIGHT)
         .decorations(false)

@@ -55,7 +55,7 @@ export function TagCreateDialog({ creation, groups, onClose, onCreated }: {
       ref={dialog}
       aria-labelledby={titleId}
       onCancel={(event) => { event.preventDefault(); if (!working.current) onClose(); }}
-      className="m-auto w-80 max-w-full rounded-card border border-line bg-surface p-6 text-ink backdrop:bg-ink/20"
+      className="m-auto w-80 max-w-full rounded-card border border-line bg-surface p-6 text-ink backdrop:bg-overlay"
     >
       <form
         className="flex flex-col gap-4"

@@ -201,6 +201,72 @@ fn purging_cascades_metadata_and_removes_both_files() {
 }
 
 #[test]
+fn bulk_purge_uses_confirmed_ids_skips_restored_and_cascades_metadata_and_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    add_metadata(&mut library, "one");
+    let purged = library.sticker("one").unwrap();
+    library.delete_sticker("one").unwrap();
+    library.delete_sticker("two").unwrap();
+    let confirmed = vec!["one".into(), "two".into(), "one".into(), "missing".into()];
+    library.restore_sticker("two").unwrap();
+    library.delete_sticker("three").unwrap();
+    assert_eq!(library.purge_deleted_stickers(&confirmed).unwrap(), 1);
+    assert!(library.sticker("one").is_err());
+    assert!(library.sticker("two").unwrap().deleted_at.is_none());
+    assert!(library.sticker("three").unwrap().deleted_at.is_some());
+    for table in ["sticker_tags", "usages", "sync_usage_offsets"] {
+        let count: i64 = library
+            .conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE sticker_id='one'"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+    assert!(!purged.object_path.exists() && !purged.thumbnail_path.exists());
+    assert!(library.sticker("two").unwrap().object_path.exists());
+    assert!(library.sticker("three").unwrap().thumbnail_path.exists());
+    assert_eq!(library.purge_deleted_stickers(&confirmed).unwrap(), 0);
+    assert_eq!(library.purge_deleted_stickers(&[]).unwrap(), 0);
+    let purges: i64 = library
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM sync_outbox WHERE json_extract(action,'$.type')='purge'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(purges, 1);
+}
+
+#[test]
+fn bulk_purge_commit_failure_keeps_every_sticker_and_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    for id in ["one", "two"] {
+        library.delete_sticker(id).unwrap();
+    }
+    library.conn.execute_batch(
+        "CREATE TABLE retained (sticker_id TEXT REFERENCES stickers(id) DEFERRABLE INITIALLY DEFERRED);
+         CREATE TRIGGER fail_bulk AFTER DELETE ON stickers WHEN OLD.id='two'
+         BEGIN INSERT INTO retained VALUES (OLD.id); END;"
+    ).unwrap();
+    assert!(
+        library
+            .purge_deleted_stickers(&["one".into(), "two".into()])
+            .is_err()
+    );
+    for id in ["one", "two"] {
+        let s = library.sticker(id).unwrap();
+        assert!(s.deleted_at.is_some());
+        assert!(s.object_path.is_file() && s.thumbnail_path.is_file());
+    }
+}
+
+#[test]
 fn missing_original_and_file_cleanup_failure_do_not_fail_purging() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = library(dir.path());

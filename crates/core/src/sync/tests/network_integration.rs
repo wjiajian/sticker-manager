@@ -150,3 +150,46 @@ fn webdav_disconnect_resumes_without_local_damage() {
 fn s3_disconnect_resumes_without_local_damage() {
     outage("s3");
 }
+
+fn log_compaction_roundtrip(kind: &str) {
+    let storage = storage(kind);
+    let manifest = Manifest::create(&storage).unwrap();
+    let a = Site::new();
+    let b = Site::new();
+    let id = a.import(223);
+    for i in 0..32 {
+        a.lib
+            .lock()
+            .unwrap()
+            .set_sticker_caption(&id, &format!("合并第 {i} 轮"))
+            .unwrap();
+        a.sync(&storage, &manifest);
+    }
+    let device = a.lib.lock().unwrap().device.id.clone();
+    let files = storage.list(&format!("ops/{device}/")).unwrap();
+    assert_eq!(files.len(), 1);
+    assert!(files[0].key.ends_with("000000000001-000000000032.jsonl"));
+    b.sync(&storage, &manifest);
+    assert_eq!(a.state(), b.state());
+    a.lib
+        .lock()
+        .unwrap()
+        .set_sticker_caption(&id, "合并之后继续推送")
+        .unwrap();
+    a.sync(&storage, &manifest);
+    b.sync(&storage, &manifest);
+    assert_eq!(a.state(), b.state());
+    for file in storage.list("").unwrap() {
+        storage.delete(&file.key).unwrap();
+    }
+}
+#[test]
+#[ignore = "需要 SYNC_WEBDAV_* 环境变量和本地 WebDAV 容器"]
+fn webdav_log_compaction_roundtrip() {
+    log_compaction_roundtrip("webdav");
+}
+#[test]
+#[ignore = "需要 SYNC_S3_* 环境变量和本地 MinIO 容器"]
+fn s3_log_compaction_roundtrip() {
+    log_compaction_roundtrip("s3");
+}

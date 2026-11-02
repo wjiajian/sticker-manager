@@ -108,6 +108,9 @@ impl PausePolicy {
             None
         }
     }
+    fn compaction_allowed(self, network: bool, metered: bool) -> bool {
+        !self.manual && (!network || !metered)
+    }
     fn for_config(config: Option<&SyncSettings>, metered: bool) -> Self {
         config
             .map(|s| Self {
@@ -314,7 +317,7 @@ pub fn start(app: AppHandle) {
                             state: &state,
                             generation,
                         };
-                        core::synchronize_with_events(
+                        core::synchronize_with_maintenance(
                             &app.state::<Mutex<Library>>(),
                             &storage,
                             &config.library_id,
@@ -345,6 +348,14 @@ pub fn start(app: AppHandle) {
                                 let status = runtime.status.clone();
                                 drop(runtime);
                                 let _ = app.emit("sync-status-changed", status);
+                            },
+                            &|| {
+                                let runtime = state.inner.lock().unwrap();
+                                runtime.generation == generation
+                                    && runtime.policy.compaction_allowed(
+                                        config.target.is_network(),
+                                        runtime.metered,
+                                    )
                             },
                         )
                     });
@@ -379,6 +390,14 @@ pub fn start(app: AppHandle) {
                     ),
                 }
             } else {
+                if let Err(error) = app
+                    .state::<Mutex<Library>>()
+                    .lock()
+                    .unwrap()
+                    .maintain_sync(None)
+                {
+                    eprintln!("清理未开启同步的本地日志失败：{error}");
+                }
                 publish(&app, &state, generation, Phase::Unconfigured, None, None);
             }
             // 同步 I/O 自己耗时很长不当作一次唤醒；运行中收到的 requested/dirty 保留。
@@ -1113,6 +1132,23 @@ mod pause_tests {
             cancelled_connection: None,
             progress_event: Instant::now(),
         }
+    }
+    #[test]
+    fn compaction_respects_metered_even_when_automatic_pause_is_disabled() {
+        let policy = PausePolicy {
+            manual: false,
+            metered: false,
+        };
+        assert!(!policy.compaction_allowed(true, true));
+        assert!(policy.compaction_allowed(false, true));
+        assert!(policy.compaction_allowed(true, false));
+        assert!(
+            !PausePolicy {
+                manual: true,
+                metered: false
+            }
+            .compaction_allowed(false, false)
+        );
     }
     #[test]
     fn manual_metered_overlap_and_manual_one_round() {

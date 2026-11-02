@@ -2,7 +2,7 @@
 @import "@fontsource-variable/manrope";
 
 /* 取值见 design/README.md 的视觉规范 */
-@theme {
+@theme static {
   --font-sans: "Manrope Variable", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
 
   /* 字号只用这六档 */
@@ -21,26 +21,86 @@
   --text-3xl--line-height: 36px;
 
   --color-ink: #1f1f1f;
-  --color-ink-secondary: #6b6a66;
+  --color-ink-secondary: #686762;
   --color-ink-tertiary: #4a4945;
   --color-surface: #ffffff;
   --color-chrome: #f5f4f0; /* 侧栏、标题栏 */
   --color-detail: #fafaf8;
-  --color-tile: #f3f2ee; /* 表情格子、分段控件底色 */
+  --color-tile: #f3f2ee; /* 只用于表情图片区 */
+  --color-muted: #f3f2ee; /* 控件与骨架 */
   --color-line: #e2e0d9;
   --color-tag-add: #b9b7b0;
   --color-hover: #eae8e1;
   --color-brand: #ffc94a;
+  --color-brand-ink: #1f1f1f;
+  --color-overlay: rgb(31 31 31 / 0.2); /* 模态遮罩 */
+  --color-ball-track: #e2e0d9;
+  --color-switch-off: #686762;
   --shadow-ball: 0 8px 24px rgb(31 31 31 / 0.2);
   --shadow-preview: 0 16px 40px rgb(31 31 31 / 0.16), 0 0 0 1px rgb(31 31 31 / 0.06);
   --color-accent: #c2410c;
+  --color-accent-fill: #c2410c;
+  --color-on-accent: #ffffff;
+  --color-selection: #1f1f1f; /* 面板选中的标签 */
+  --color-on-selection: #ffffff;
+  --color-selection-edge: #1f1f1f;
   --color-synced: #1e8a4c;
+  --color-tag-yellow: #f2b705;
+  --color-tag-gray: #8a8a8a;
+  --color-tag-red: #e5484d;
+  --color-tag-blue: #3e7bfa;
+  --color-tag-green: #2ba471;
+  --color-tag-purple: #7a5af8;
+  --color-tag-orange: #e8572a;
+  --color-tag-brown: #a0662f;
 
   /* Windows 版收小圆角，见下方 data-platform 覆盖 */
   --radius-card: 12px;
   --radius-control: 8px;
 
   --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root { color-scheme: light; }
+
+/* 原生窗口决定媒体查询；不另设 data-theme 或前端主题状态。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --color-ink: #f4f3ef;
+    --color-ink-secondary: #bdbbb4;
+    --color-ink-tertiary: #d3d1c9;
+    --color-surface: #181818;
+    --color-chrome: #1f1f1f;
+    --color-detail: #272727;
+    --color-tile: #74736e;
+    --color-muted: #313131;
+    --color-line: #85837b;
+    --color-tag-add: #85837b;
+    --color-hover: #313131;
+    --color-brand: #ffc94a;
+    --color-brand-ink: #1f1f1f;
+    --color-overlay: rgb(0 0 0 / 0.4);
+    --color-ball-track: #85837b;
+    --color-switch-off: #85837b;
+    --shadow-ball: 0 8px 24px rgb(0 0 0 / 0.55), 0 0 0 1px var(--color-line);
+    --shadow-preview: 0 16px 40px rgb(0 0 0 / 0.55), 0 0 0 1px var(--color-line);
+    --color-accent: #ffccad;
+    --color-accent-fill: #c2410c;
+    --color-on-accent: #ffffff;
+    --color-selection: #313131;
+    --color-on-selection: #f4f3ef;
+    --color-selection-edge: #ffccad;
+    --color-synced: #67cc8d;
+    --color-tag-yellow: #f2b705;
+    --color-tag-gray: #a6a6a6;
+    --color-tag-red: #f16c70;
+    --color-tag-blue: #709fff;
+    --color-tag-green: #4fbe8d;
+    --color-tag-purple: #a28aff;
+    --color-tag-orange: #f28461;
+    --color-tag-brown: #c38b55;
+  }
 }
 
 :root[data-window="preview"], :root[data-window="preview"] body {
@@ -57,12 +117,12 @@
 }
 
 /*
- * 可交互元素的统一动效：位移 500ms，颜色和透明度 300ms；减少动态效果时只保留透明度变化。
+ * 可交互元素只过渡位移和透明度；外观切换立即重绘，隐藏 WebView 不等待颜色动画。
  * Tailwind v4 的 scale-* / translate-* 写的是独立的 scale、translate 属性，不是 transform。
  */
 @utility interactive {
-  transition-property: transform, translate, scale, opacity, background-color, border-color;
-  transition-duration: 500ms, 500ms, 500ms, 300ms, 300ms, 300ms;
+  transition-property: transform, translate, scale, opacity;
+  transition-duration: 500ms, 500ms, 500ms, 300ms;
   transition-timing-function: var(--ease-standard);
 
   @media (prefers-reduced-motion: reduce) {

@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes } from "react";
 
 const variants = {
   primary: "bg-ink text-surface",
-  accent: "bg-accent text-surface",
+  accent: "bg-accent-fill text-on-accent",
   secondary: "border border-line bg-surface text-ink",
 };
 

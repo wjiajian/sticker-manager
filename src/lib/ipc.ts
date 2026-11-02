@@ -115,6 +115,7 @@ export const ipc = {
   updateSyncCredentials: (connectionId: string, credentials: SyncCredentials) => invoke<void>("update_sync_credentials", { connectionId, credentials }),
   setDeviceName: (name: string) => invoke<void>("set_device_name", { name }),
   getSettings: () => invoke<Settings>("get_settings"),
+  setAppearance: (appearance: Settings["appearance"]) => invoke<Settings>("set_appearance", { appearance }),
   setBallVisible: (visible: boolean) => invoke<Settings>("set_ball_visible", { visible }),
   setBallAutoHide: (seconds: 3 | 10 | null) => invoke<Settings>("set_ball_auto_hide", { seconds }),
   getAutostart: () => invoke<boolean>("get_autostart"),
@@ -141,6 +142,7 @@ export const ipc = {
   deleteSticker: (id: string) => invoke<void>("delete_sticker", { id }),
   restoreSticker: (id: string) => invoke<void>("restore_sticker", { id }),
   purgeSticker: (id: string) => invoke<void>("purge_sticker", { id }),
+  purgeDeletedStickers: (ids: string[]) => invoke<number>("purge_deleted_stickers", { ids }),
   createTag: (name: string, color: string | null = null, groupId: string | null = null) => invoke<Tag>("create_tag", { name, color, groupId }),
   renameTag: (id: string, name: string) => invoke<void>("rename_tag", { id, name }),
   setTagColor: (id: string, color: string) => invoke<void>("set_tag_color", { id, color }),
@@ -163,6 +165,7 @@ export const ipc = {
 
 export interface Settings {
   version: number;
+  appearance: "system" | "light" | "dark";
   ballVisible: boolean;
   ballAutoHideSeconds: 3 | 10 | null;
   ballPosition: { display: string; edge: "left" | "right"; y: number };

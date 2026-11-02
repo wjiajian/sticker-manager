@@ -41,6 +41,14 @@ impl Library {
         Ok(())
     }
 
+    /// 只处理确认时的列表。期间恢复的表情、新进入最近删除的表情都不受影响。
+    pub fn purge_deleted_stickers(&mut self, ids: &[String]) -> Result<usize> {
+        self.purge_matching(
+            "deleted_at IS NOT NULL AND id IN (SELECT value FROM json_each(?1))",
+            [serde_json::to_string(ids)?],
+        )
+    }
+
     pub fn purge_expired(&mut self) -> Result<usize> {
         self.purge_expired_at(unix_millis()?)
     }

@@ -102,6 +102,15 @@ pub async fn purge_sticker(app: AppHandle, id: String) -> CommandResult<()> {
 }
 
 #[tauri::command]
+pub async fn purge_deleted_stickers(app: AppHandle, ids: Vec<String>) -> CommandResult<usize> {
+    with_library(
+        app,
+        move |library| Ok(library.purge_deleted_stickers(&ids)?),
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn tag_sidebar(app: AppHandle) -> CommandResult<TagSidebar> {
     with_library(app, |library| Ok(library.tag_sidebar()?)).await
 }

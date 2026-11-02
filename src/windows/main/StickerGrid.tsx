@@ -1,4 +1,6 @@
 import { ArrowsDownUpIcon } from "@phosphor-icons/react";
+import { useIsMutating } from "@tanstack/react-query";
+import { Button } from "../../components/Button";
 import { useEffect, useRef } from "react";
 import type { Sticker, SyncStatus } from "../../lib/ipc";
 import { type useStickers, useTagSidebar, useLibraryOverview } from "../../lib/queries";
@@ -38,6 +40,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const resultFocusRequested = useUiStore((s) => s.resultFocusRequested);
   const requestResultFocus = useUiStore((s) => s.requestResultFocus);
   const firstTile = useRef<HTMLButtonElement>(null);
+  const mutating = useIsMutating() > 0;
   const { data: source, error, isPending } = listing;
   const skeleton = useDelayedLoading(isPending, searchQuery || (typeof view === "string" ? view : view.tag));
   const overview = useLibraryOverview();
@@ -73,13 +76,20 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 max-w-full flex-col gap-1">
           <div className="flex items-baseline gap-3">
-            <h1 title={label} className="min-w-0 truncate text-2xl font-semibold">{label}</h1>
+            <h1 id="sticker-grid-title" tabIndex={-1} title={label} className="min-w-0 truncate text-2xl font-semibold">{label}</h1>
             {source && <span className="shrink-0 text-ink-secondary">{stickers.length} 张</span>}
           </div>
           {recentlyDeleted && <p className="text-xs text-ink-secondary">表情会在删除 30 天后彻底删除</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div role="group" aria-label="类型" className="flex gap-0.5 rounded-control bg-tile p-0.5">
+          {/* 清空整个最近删除，不受类型筛选影响；确认框写明张数。 */}
+          {recentlyDeleted && !!source?.length && <Button
+            disabled={busy || actions.busy || mutating || listing.isFetching}
+            className="disabled:pointer-events-none disabled:opacity-50"
+            onClick={() => void actions.purgeDeletedStickers(source.map((sticker) => sticker.id))}>
+            清空最近删除…
+          </Button>}
+          <div role="group" aria-label="类型" className="flex gap-0.5 rounded-control bg-muted p-0.5">
             {TYPE_FILTERS.map(({ value, label: filterLabel }) => (
               <button
                 key={value}

@@ -29,6 +29,7 @@ pub struct BallPosition {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub version: u32,
+    pub appearance: crate::appearance::Appearance,
     pub ball_visible: bool,
     pub ball_auto_hide_seconds: Option<u32>,
     pub ball_position: BallPosition,
@@ -65,6 +66,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             version: 1,
+            appearance: Default::default(),
             ball_visible: true,
             ball_auto_hide_seconds: Some(3),
             ball_position: BallPosition {
@@ -151,6 +153,7 @@ pub fn update(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<Set
         || current.ball_auto_hide_seconds != next.ball_auto_hide_seconds
         || current.ball_position != next.ball_position;
     let visibility_changed = current.ball_visible != next.ball_visible;
+    let appearance_changed = current.appearance != next.appearance;
     next.save(&state.root)?;
     *current = next.clone();
     drop(current);
@@ -169,13 +172,25 @@ pub fn update(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<Set
     let event = app
         .emit("settings-changed", &next)
         .map_err(|e| e.to_string());
-    ball.and(tray).and(event)?;
+    let appearance = if appearance_changed {
+        crate::appearance::apply(app, next.appearance).map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    };
+    ball.and(tray).and(appearance).and(event)?;
     Ok(next)
 }
 
 #[tauri::command]
 pub fn get_settings(state: tauri::State<SettingsState>) -> Settings {
     state.get()
+}
+#[tauri::command]
+pub fn set_appearance(
+    app: AppHandle,
+    appearance: crate::appearance::Appearance,
+) -> Result<Settings, String> {
+    update(&app, |s| s.appearance = appearance)
 }
 #[tauri::command]
 pub fn set_ball_visible(app: AppHandle, visible: bool) -> Result<Settings, String> {
@@ -321,6 +336,7 @@ mod tests {
     fn round_trip_and_atomic_replacement_leave_no_temp_file() {
         let root = tempfile::tempdir().unwrap();
         let mut settings = Settings {
+            appearance: crate::appearance::Appearance::Dark,
             ball_visible: false,
             ball_auto_hide_seconds: None,
             ..Settings::default()
