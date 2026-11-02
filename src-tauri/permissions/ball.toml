@@ -1,0 +1,7 @@
+[[permission]]
+identifier = "ball-commands"
+description = "悬浮球只读取自身状态、移动和切换面板、打开固定原生菜单及导入图片。"
+commands.allow = [
+  "ball_state", "ball_pointer_down", "set_ball_drop", "ball_message",
+  "show_ball_menu", "import_stickers",
+]

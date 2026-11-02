@@ -135,14 +135,14 @@ export function Panel() {
   const problem = error ?? actions.error ?? eventError ?? [overview, recentQuery, sidebar, tagged, search].find((result) => result.error)?.error;
 
   return (
-    <main className="panel" aria-label="表情面板" onKeyDown={(event) => {
+    <main className="relative grid h-full w-full grid-rows-[36px_minmax(0,1fr)_32px] gap-3 rounded-3xl bg-surface p-3 [&_button]:cursor-pointer" aria-label="表情面板" onKeyDown={(event) => {
       if (event.key !== "Escape" || composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       if (text) { clearSearch(); input.current?.focus(); }
       else void run(() => ipc.hidePanel());
     }}>
-      <div className="panel-toolbar">
-        <label className="panel-search">
+      <div className="flex gap-2">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-tile px-3 py-2 text-ink-secondary focus-within:shadow-[0_0_0_2px_var(--color-accent)] [&_svg]:shrink-0 [&_input]:w-full [&_input]:min-w-0 [&_input]:bg-transparent [&_input]:text-ink [&_input]:outline-none">
           <MagnifyingGlassIcon size={16} aria-hidden />
           <input ref={input} role="combobox" aria-label="搜索表情" aria-autocomplete="list" aria-haspopup="listbox"
             aria-expanded={!empty} aria-controls={empty ? undefined : "panel-choices"} aria-activedescendant={activeId}
@@ -153,7 +153,7 @@ export function Panel() {
               setText(event.currentTarget.value); composingRef.current = false; setComposing(false); setSelectedId(null);
             }} onKeyDown={onKeyDown} />
         </label>
-        <button type="button" className="panel-pin" aria-label="固定面板" aria-pressed={pinned} disabled={pinBusy}
+        <button type="button" className="grid w-9 place-items-center rounded-xl bg-tile text-ink-tertiary aria-pressed:bg-ink aria-pressed:text-surface hover:opacity-82" aria-label="固定面板" aria-pressed={pinned} disabled={pinBusy}
           onMouseDown={(event) => event.preventDefault()} onClick={() => {
             setPinBusy(true);
             void run(async () => { await ipc.setPanelPinned(!pinned); setPinned(!pinned); })
@@ -161,35 +161,35 @@ export function Panel() {
           }}><PushPinIcon size={16} weight={pinned ? "fill" : "regular"} aria-hidden /></button>
       </div>
 
-      <div className="panel-content">
-        {empty ? <div className="panel-empty"><p>还没有表情</p><button onClick={() => void run(ipc.showMainWindow)}>打开主窗口导入</button></div>
-          : searching ? <div id="panel-choices" className="panel-results" role="listbox" aria-label="搜索结果" aria-busy={!composing && !searchReady && !!text.trim()}>
-            {choices.length ? <div className="panel-grid">{choices.map((sticker) => tile(sticker, "search"))}</div>
-              : <div className="panel-empty"><p>{composing ? "输入完成后搜索" : !searchReady && text.trim() ? "正在搜索…" : "没有找到相关表情"}</p></div>}
+      <div className="flex min-h-0 flex-col gap-3">
+        {empty ? <div className="flex h-full flex-1 flex-col items-center justify-center gap-2 text-ink-secondary [&_button]:text-xs [&_button]:leading-5 [&_button]:underline [&_button]:underline-offset-4"><p>还没有表情</p><button onClick={() => void run(ipc.showMainWindow)}>打开主窗口导入</button></div>
+          : searching ? <div id="panel-choices" className="h-full overflow-y-auto overscroll-contain" role="listbox" aria-label="搜索结果" aria-busy={!composing && !searchReady && !!text.trim()}>
+            {choices.length ? <div className="grid grid-cols-4 gap-2">{choices.map((sticker) => tile(sticker, "search"))}</div>
+              : <div className="flex h-full flex-1 flex-col items-center justify-center gap-2 text-ink-secondary [&_button]:text-xs [&_button]:leading-5 [&_button]:underline [&_button]:underline-offset-4"><p>{composing ? "输入完成后搜索" : !searchReady && text.trim() ? "正在搜索…" : "没有找到相关表情"}</p></div>}
           </div>
           : <>
-            <section className="panel-recent" aria-labelledby="recent-heading">
-              <div className="panel-heading"><h2 id="recent-heading">最近使用</h2><span>按数字键直接复制</span></div>
-              <div id="panel-choices" role="listbox" aria-label="最近使用" className="panel-recent-grid">
-                {recent.length ? <div className="panel-grid">{recent.map((sticker, index) => tile(sticker, "recent", index))}</div>
-                  : <div className="panel-empty"><p>{recentQuery.isPending ? "正在读取表情…" : "用过的表情会出现在这里"}</p></div>}
+            <section className="shrink-0" aria-labelledby="recent-heading">
+              <div className="mb-2 flex justify-between px-1 text-xs text-ink-secondary [&_h2]:font-semibold [&_h2]:text-ink-tertiary"><h2 id="recent-heading">最近使用</h2><span>按数字键直接复制</span></div>
+              <div id="panel-choices" role="listbox" aria-label="最近使用" className="h-41 shrink-0">
+                {recent.length ? <div className="grid grid-cols-4 gap-2">{recent.map((sticker, index) => tile(sticker, "recent", index))}</div>
+                  : <div className="flex h-full flex-1 flex-col items-center justify-center gap-2 text-ink-secondary [&_button]:text-xs [&_button]:leading-5 [&_button]:underline [&_button]:underline-offset-4"><p>{recentQuery.isPending ? "正在读取表情…" : "用过的表情会出现在这里"}</p></div>}
               </div>
             </section>
             {tags.length > 0 && <>
-              <div className="panel-tags" aria-label="标签">
-                {tags.map((tag) => <button key={tag.id} type="button" className="panel-tag" aria-pressed={currentTag?.id === tag.id}
+              <div className="flex h-8 shrink-0 items-center gap-2 overflow-x-auto overscroll-contain [scrollbar-width:thin]" aria-label="标签">
+                {tags.map((tag) => <button key={tag.id} type="button" className="flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs font-semibold whitespace-nowrap aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-surface hover:opacity-82" aria-pressed={currentTag?.id === tag.id}
                   onMouseDown={(event) => event.preventDefault()} onClick={() => { setTagId(tag.id); input.current?.focus(); }}>
                   <TagDot color={tag.color} />{tag.name}
                 </button>)}
               </div>
-              <section className="panel-tag-grid" aria-label={`${currentTag?.name}的表情`}>
-                <div className="panel-grid">{tagStickers.map((sticker) => tile(sticker, "tag"))}</div>
+              <section className="h-41 shrink-0 overflow-y-auto overscroll-contain" aria-label={`${currentTag?.name}的表情`}>
+                <div className="grid grid-cols-4 gap-2">{tagStickers.map((sticker) => tile(sticker, "tag"))}</div>
               </section>
             </>}
           </>}
       </div>
-      {problem && <p role="alert" className="panel-error">{String(problem)}</p>}
-      <footer className="panel-footer"><span>单击复制 · 拖出发送 · Esc 收起</span>
+      {problem && <p role="alert" className="absolute right-3 bottom-14 left-3 max-h-24 overflow-y-auto rounded-lg border border-accent bg-surface px-3 py-2 text-xs leading-5 text-accent">{String(problem)}</p>}
+      <footer className="flex items-center justify-between gap-2 rounded-xl bg-chrome px-3 py-2 text-xs whitespace-nowrap text-ink-tertiary [&_button]:font-semibold [&_button:hover]:opacity-82"><span>单击复制 · 拖出发送 · Esc 收起</span>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void run(ipc.showMainWindow)}>主窗口</button>
       </footer>
     </main>
@@ -201,12 +201,12 @@ function PanelTile({ sticker, id, number, selectable, selected, copied, busy, on
   onCopy: () => void; onDrag: (isPressed: () => boolean) => Promise<void>;
 }) {
   const drag = useDragOut(onDrag, busy);
-  return <button id={id} type="button" className="panel-tile" role={selectable ? "option" : undefined}
+  return <button id={id} type="button" className="relative flex aspect-square min-h-0 w-full touch-none items-center justify-center rounded-lg bg-tile p-3 [transition:transform_500ms_var(--ease-standard),opacity_300ms_var(--ease-standard)] data-[selected=true]:shadow-[inset_0_0_0_2px_var(--color-accent),inset_0_0_0_4px_var(--color-surface)] hover:[transform:translateY(-2px)] active:[transform:scale(.98)] motion-reduce:transition-opacity motion-reduce:duration-300 motion-reduce:hover:transform-none motion-reduce:active:transform-none" role={selectable ? "option" : undefined}
     aria-label={sticker.name} aria-selected={selectable ? selected : undefined} aria-disabled={busy}
     tabIndex={-1} data-selected={selected} onMouseDown={(event) => event.preventDefault()} onClick={onCopy} {...drag}>
     <StickerImage path={sticker.thumbnailPath} name={sticker.name} lazy />
-    {number !== undefined && <span className="panel-number" aria-hidden>{number}</span>}
-    {sticker.animated && <span className="panel-gif" aria-label="动图">GIF</span>}
-    {copied && <span role="status" className="panel-copied">已复制</span>}
+    {number !== undefined && <span className="absolute top-1 left-1 min-w-4 rounded-sm bg-surface px-1 text-xs font-semibold text-ink-tertiary" aria-hidden>{number}</span>}
+    {sticker.animated && <span className="absolute top-1 right-1 min-w-4 rounded-sm bg-surface px-1 text-xs font-semibold text-ink-tertiary" aria-label="动图">GIF</span>}
+    {copied && <span role="status" className="absolute right-1 bottom-1 left-1 rounded-sm bg-ink p-0.5 text-xs text-surface">已复制</span>}
   </button>;
 }

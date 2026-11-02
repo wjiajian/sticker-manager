@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ball",
+  "description": "不能获得焦点的悬浮球的最小权限",
+  "windows": ["ball"],
+  "permissions": ["ball-commands", "core:event:allow-listen", "core:event:allow-unlisten"]
+}

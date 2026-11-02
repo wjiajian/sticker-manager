@@ -3,7 +3,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
-import type { ImportReport } from "../../lib/ipc";
+import { formatReport } from "../../lib/importReport";
 import { useImportStickers } from "../../lib/queries";
 
 export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
@@ -65,12 +65,4 @@ export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
     busy: choosing || isPending,
     message: dragging ? "松开以导入表情" : isPending ? "正在导入表情…" : [result, dropError].filter(Boolean).join("\n"),
   };
-}
-
-function formatReport(report: ImportReport) {
-  let summary = `新增 ${report.added} 张，${report.existing} 张已存在`;
-  if (report.restored) summary += `（其中恢复 ${report.restored} 张）`;
-  if (report.skipped) summary += `，跳过 ${report.skipped} 项`;
-  if (report.failures.length) summary += `，${report.failures.length} 项导入失败`;
-  return [summary, ...report.failures.map(({ path, message }) => `${path}：${message}`)].join("\n");
 }

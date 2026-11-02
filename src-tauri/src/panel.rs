@@ -58,11 +58,11 @@ fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
         .ok_or_else(|| "表情面板不可用".into())
 }
 
-fn toggle(app: &AppHandle) -> Result<(), String> {
+pub fn toggle(app: &AppHandle) -> Result<(), String> {
     let window = window(app)?;
     if native::visible(app)? {
         if native::focused(app)? {
-            native::hide(app)?;
+            hide(app)?;
         } else {
             native::focus(app)?;
             window.emit("panel-focus", ()).map_err(|e| e.to_string())?;
@@ -72,7 +72,46 @@ fn toggle(app: &AppHandle) -> Result<(), String> {
         native::focus(app)?;
         window.emit("panel-shown", ()).map_err(|e| e.to_string())?;
     }
+    broadcast_visibility(app)?;
     Ok(())
+}
+
+pub fn is_visible(app: &AppHandle) -> Result<bool, String> {
+    native::visible(app)
+}
+
+fn broadcast_visibility(app: &AppHandle) -> Result<(), String> {
+    app.emit("panel-visibility", native::visible(app)?)
+        .map_err(|e| e.to_string())
+}
+
+fn hide(app: &AppHandle) -> Result<(), String> {
+    native::hide(app)?;
+    broadcast_visibility(app)
+}
+
+pub fn show_beside_ball(
+    app: &AppHandle,
+    display: &crate::geometry::Display,
+    center: crate::geometry::Point,
+    edge: crate::settings::Edge,
+) -> Result<(), String> {
+    let p = crate::geometry::beside_ball(display, center, edge, WIDTH, HEIGHT);
+    crate::desktop::set_frame(
+        app,
+        "panel",
+        crate::geometry::Rect {
+            x: p.x,
+            y: p.y,
+            width: WIDTH * display.scale,
+            height: HEIGHT * display.scale,
+        },
+    )?;
+    native::focus(app)?;
+    window(app)?
+        .emit("panel-shown", ())
+        .map_err(|e| e.to_string())?;
+    broadcast_visibility(app)
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
@@ -91,7 +130,7 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
         let result = if window.label() == "panel" {
-            native::hide(window.app_handle())
+            hide(window.app_handle())
         } else {
             window.hide().map_err(|e| e.to_string())
         };
@@ -103,7 +142,7 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         let state = window.state::<PanelState>();
         if !state.pinned.load(Ordering::Relaxed)
             && !state.dragging.load(Ordering::Relaxed)
-            && let Err(error) = native::hide(window.app_handle())
+            && let Err(error) = hide(window.app_handle())
         {
             eprintln!("无法收起表情面板：{error}");
         }
@@ -136,7 +175,7 @@ pub fn set_panel_dragging(app: AppHandle, dragging: bool) -> Result<(), String> 
     let state = app.state::<PanelState>();
     state.dragging.store(dragging, Ordering::Relaxed);
     if !dragging && !state.pinned.load(Ordering::Relaxed) && !native::focused(&app)? {
-        native::hide(&app)?;
+        hide(&app)?;
     }
     Ok(())
 }
@@ -147,13 +186,13 @@ pub fn hide_panel(app: AppHandle, only_if_unpinned: bool) -> Result<bool, String
     if only_if_unpinned && app.state::<PanelState>().pinned.load(Ordering::Relaxed) {
         return Ok(false);
     }
-    native::hide(&app)?;
+    hide(&app)?;
     Ok(true)
 }
 
 #[tauri::command]
 pub fn show_main_window(app: AppHandle) -> Result<(), String> {
-    native::hide(&app)?;
+    hide(&app)?;
     if let Some(window) = app.get_webview_window("main") {
         window.unminimize().map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;

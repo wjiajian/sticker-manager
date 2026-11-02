@@ -63,11 +63,9 @@ export function useLibraryChangedEvents() {
 }
 
 export function useImportStickers() {
-  const client = useQueryClient();
   return useMutation({
     mutationFn: ipc.importStickers,
     // 连续拖入时按批次导入，避免覆盖尚未完成的请求。
     scope: { id: "import-stickers" },
-    onSettled: () => client.invalidateQueries({ queryKey: ["library"] }),
   });
 }

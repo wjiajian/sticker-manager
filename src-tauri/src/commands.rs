@@ -199,7 +199,9 @@ pub async fn set_sticker_caption(app: AppHandle, id: String, caption: String) ->
 
 #[tauri::command]
 pub async fn import_stickers(app: AppHandle, paths: Vec<PathBuf>) -> CommandResult<ImportReport> {
-    with_library(app, move |library| Ok(library.import_paths(&paths))).await
+    let report = with_library(app.clone(), move |library| Ok(library.import_paths(&paths))).await?;
+    notify_usage(&app);
+    Ok(report)
 }
 
 #[tauri::command]

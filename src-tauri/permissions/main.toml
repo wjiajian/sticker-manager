@@ -2,6 +2,8 @@
 identifier = "main-commands"
 description = "主窗口的仓库管理命令和快捷键注册状态。"
 commands.allow = [
+  "get_settings", "set_ball_visible", "set_ball_auto_hide", "get_autostart", "set_autostart",
+  "library_directory", "open_library_directory", "take_preferences_request",
   "library_overview", "list_stickers", "search_stickers", "sticker", "tag_sidebar",
   "delete_sticker", "restore_sticker", "purge_sticker", "create_tag", "rename_tag",
   "set_tag_color", "move_tag", "delete_tag", "create_tag_group", "rename_tag_group",

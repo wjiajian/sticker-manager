@@ -1,4 +1,4 @@
-import { CaretDownIcon, CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
+import { GearIcon, CaretDownIcon, CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { TagDot } from "../../components/TagDot";
 import { ipc, type TagGroup, type TagSummary } from "../../lib/ipc";
@@ -11,7 +11,7 @@ import { useTagMenu, type RenameTarget } from "./useTagMenu";
 const navigation = "interactive relative flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover active:scale-98";
 const selectedNavigation = "bg-surface font-semibold windows:before:absolute windows:before:top-2 windows:before:left-0 windows:before:h-3 windows:before:w-0.75 windows:before:rounded-full windows:before:bg-accent";
 
-export function Sidebar() {
+export function Sidebar({ onPreferences }: { onPreferences: () => void }) {
   const { data: overview } = useLibraryOverview();
   const { data: sidebar, error, isPending } = useTagSidebar();
   const view = useUiStore((s) => s.view);
@@ -95,7 +95,8 @@ export function Sidebar() {
   }
 
   return (
-    <nav aria-label="仓库导航" className="flex w-54 shrink-0 flex-col gap-6 overflow-y-auto bg-chrome px-3 pt-2 pb-4">
+    <nav aria-label="仓库导航" className="flex w-54 shrink-0 flex-col bg-chrome px-3 pt-2 pb-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
       <Section title="仓库">
         {LIBRARY_VIEWS.map(({ view: id, label, icon: Icon }) => {
           const selected = !searching && id === view;
@@ -136,6 +137,8 @@ export function Sidebar() {
           </>}
         {menus.error && <p role="alert" className="px-2 py-1 text-xs text-ink-secondary">{menus.error}</p>}
       </section>
+      </div>
+      <button type="button" onClick={onPreferences} className={`${navigation} mt-4 shrink-0 text-ink-tertiary`}><GearIcon size={16} aria-hidden />偏好设置</button>
       {creation && <TagCreateDialog
         creation={creation}
         groups={sidebar?.groups ?? []}

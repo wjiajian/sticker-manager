@@ -71,6 +71,19 @@ export interface ImportReport {
 }
 
 export const ipc = {
+  getSettings: () => invoke<Settings>("get_settings"),
+  setBallVisible: (visible: boolean) => invoke<Settings>("set_ball_visible", { visible }),
+  setBallAutoHide: (seconds: 3 | 10 | null) => invoke<Settings>("set_ball_auto_hide", { seconds }),
+  getAutostart: () => invoke<boolean>("get_autostart"),
+  setAutostart: (enabled: boolean) => invoke<{ enabled: boolean | null; error: string | null }>("set_autostart", { enabled }),
+  libraryDirectory: () => invoke<string>("library_directory"),
+  openLibraryDirectory: () => invoke<void>("open_library_directory"),
+  takePreferencesRequest: () => invoke<boolean>("take_preferences_request"),
+  ballState: () => invoke<BallSnapshot>("ball_state"),
+  ballPointerDown: () => invoke<void>("ball_pointer_down"),
+  setBallDrop: (paths: string[] | null) => invoke<void>("set_ball_drop", { paths }),
+  ballMessage: (message: string) => invoke<void>("ball_message", { message }),
+  showBallMenu: () => invoke<void>("show_ball_menu"),
   panelSession: () => invoke<{ pinned: boolean; visible: boolean }>("panel_session"),
   setPanelPinned: (pinned: boolean) => invoke<void>("set_panel_pinned", { pinned }),
   setPanelDragging: (dragging: boolean) => invoke<void>("set_panel_dragging", { dragging }),
@@ -104,3 +117,23 @@ export const ipc = {
   toggleStickerFavorite: (id: string) => invoke<boolean>("toggle_sticker_favorite", { id }),
   revealSticker: (id: string) => invoke<void>("reveal_sticker", { id }),
 };
+
+export interface Settings {
+  version: number;
+  ballVisible: boolean;
+  ballAutoHideSeconds: 3 | 10 | null;
+  ballPosition: { display: string; edge: "left" | "right"; y: number };
+  autostartInitialized: boolean;
+}
+export interface BallSnapshot {
+  center: { x: number; y: number };
+  edge: "left" | "right";
+  collapsed: boolean;
+  hovered: boolean;
+  pressed: boolean;
+  dragging: boolean;
+  panelVisible: boolean;
+  dropLabel: string | null;
+  message: string | null;
+  tipAbove: boolean;
+}

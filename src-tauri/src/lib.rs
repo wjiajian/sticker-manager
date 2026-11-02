@@ -1,4 +1,3 @@
-#[cfg(debug_assertions)]
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -6,23 +5,34 @@ use std::time::Duration;
 use sticker_core::Library;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod ball;
 mod clipboard;
 mod commands;
+mod desktop;
 mod export;
+mod geometry;
 mod panel;
+mod settings;
+mod tray;
 
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_nspanel::init());
 
+    let autostart = tauri_plugin_autostart::Builder::new().args(["--autostart"]);
+    #[cfg(target_os = "macos")]
+    let autostart = autostart.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
+
     builder
+        .plugin(autostart.build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            let mut library = open_library(app)?;
+            let (mut library, root) = open_library(app)?;
+            app.manage(settings::SettingsState::new(root));
             if let Err(error) = library.purge_expired() {
                 eprintln!("清理最近删除失败：{error}");
             }
@@ -35,6 +45,9 @@ pub fn run() {
             panel::create(app)?;
             panel::register_shortcut(app.handle());
             create_main_window(app)?;
+            tray::create(app)?;
+            ball::create(app)?;
+            settings::initialize_autostart(app.handle());
             start_expiry_cleanup(app.handle().clone());
             Ok(())
         })
@@ -72,6 +85,19 @@ pub fn run() {
             panel::hide_panel,
             panel::show_main_window,
             panel::global_shortcut_error,
+            settings::get_settings,
+            settings::set_ball_visible,
+            settings::set_ball_auto_hide,
+            settings::get_autostart,
+            settings::set_autostart,
+            settings::library_directory,
+            settings::open_library_directory,
+            tray::take_preferences_request,
+            tray::show_ball_menu,
+            ball::ball_state,
+            ball::ball_pointer_down,
+            ball::set_ball_drop,
+            ball::ball_message,
         ])
         .build(tauri::generate_context!())
         .expect("启动应用失败")
@@ -114,7 +140,7 @@ fn start_expiry_cleanup(app: tauri::AppHandle) {
 #[cfg(debug_assertions)]
 const LIBRARY_DIR_OVERRIDE: &str = "STICKER_LIBRARY_DIR";
 
-fn open_library(app: &tauri::App) -> Result<Library, Box<dyn std::error::Error>> {
+fn open_library(app: &tauri::App) -> Result<(Library, PathBuf), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     if let Some(root) = std::env::var_os(LIBRARY_DIR_OVERRIDE).filter(|root| !root.is_empty()) {
         let root = PathBuf::from(root);
@@ -130,16 +156,19 @@ fn open_library(app: &tauri::App) -> Result<Library, Box<dyn std::error::Error>>
         scope.allow_directory(root.join("objects"), false)?;
         scope.allow_directory(root.join("thumbs"), false)?;
         eprintln!("仓库：{}（来自 {LIBRARY_DIR_OVERRIDE}）", root.display());
-        return Ok(library);
+        return Ok((library, root));
     }
 
     // macOS：~/Library/Application Support/<identifier>/；Windows：%APPDATA%\<identifier>\
-    Ok(Library::open(&app.path().app_data_dir()?)?)
+    let root = app.path().app_data_dir()?;
+    Ok((Library::open(&root)?, root))
 }
 
 fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title("表情管理器")
+        .visible(!std::env::args().any(|arg| arg == "--autostart"))
+        .focused(!std::env::args().any(|arg| arg == "--autostart"))
         .inner_size(1280.0, 800.0)
         .min_inner_size(960.0, 600.0);
 

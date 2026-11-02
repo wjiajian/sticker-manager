@@ -8,7 +8,7 @@ export default defineConfig({
   clearScreen: false,
   build: {
     rollupOptions: {
-      input: { main: "index.html", panel: "panel.html" },
+      input: { main: "index.html", panel: "panel.html", ball: "ball.html" },
     },
   },
   server: {
