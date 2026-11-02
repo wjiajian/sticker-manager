@@ -20,6 +20,12 @@ use tauri::{AppHandle, Emitter, Manager};
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatus {
+    pub pause_reason: Option<PauseReason>,
+    pub manual_paused: bool,
+    pub pause_on_metered: bool,
+    pub devices: Vec<RemoteDevice>,
+    pub device_id: String,
+    pub unseen: usize,
     pub phase: Phase,
     pub last_sync_at: Option<i64>,
     pub error: Option<String>,
@@ -71,17 +77,75 @@ struct PendingConnection {
     target: StorageConfig,
     credentials: Credentials,
 }
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
     #[default]
     Unconfigured,
     Syncing,
     Synced,
+    Paused,
     Error,
+}
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PauseReason {
+    Manual,
+    Metered,
+}
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+struct PausePolicy {
+    manual: bool,
+    metered: bool,
+}
+impl PausePolicy {
+    fn reason(self) -> Option<PauseReason> {
+        if self.manual {
+            Some(PauseReason::Manual)
+        } else if self.metered {
+            Some(PauseReason::Metered)
+        } else {
+            None
+        }
+    }
+    fn for_config(config: Option<&SyncSettings>, metered: bool) -> Self {
+        config
+            .map(|s| Self {
+                manual: s.paused,
+                metered: s.target.is_network() && s.pause_on_metered && metered,
+            })
+            .unwrap_or_default()
+    }
+}
+#[derive(Default)]
+struct Unseen {
+    count: usize,
+    main_active: bool,
+    panel_visible: bool,
+}
+impl Unseen {
+    fn arrive(&mut self, count: usize) {
+        if !self.main_active && !self.panel_visible {
+            self.count = self.count.saturating_add(count);
+        }
+    }
+    fn visibility(&mut self, main: Option<bool>, panel: Option<bool>) {
+        if let Some(v) = main {
+            self.main_active = v;
+        }
+        if let Some(v) = panel {
+            self.panel_visible = v;
+        }
+        if self.main_active || self.panel_visible {
+            self.count = 0;
+        }
+    }
 }
 struct Runtime {
     generation: u64,
+    policy: PausePolicy,
+    metered: bool,
+    unseen: Unseen,
     schedule: Schedule,
     status: SyncStatus,
     devices: Vec<RemoteDevice>,
@@ -96,6 +160,7 @@ pub struct SyncState {
     credentials: Mutex<CredentialCache>,
 }
 struct Schedule {
+    manual: bool,
     requested: bool,
     dirty: Option<Instant>,
     periodic: Instant,
@@ -104,6 +169,7 @@ struct Schedule {
 impl Schedule {
     fn new(now: Instant, wall: SystemTime) -> Self {
         Self {
+            manual: false,
             requested: true,
             dirty: None,
             periodic: now,
@@ -112,6 +178,11 @@ impl Schedule {
     }
     fn local_change(&mut self, now: Instant) {
         self.dirty = Some(now + Duration::from_secs(10));
+    }
+    fn take_allowed(&mut self, now: Instant, wall: SystemTime, policy: PausePolicy) -> bool {
+        let manual = std::mem::take(&mut self.manual);
+        let due = self.take_due(now, wall);
+        !policy.manual && (manual || (due && !policy.metered))
     }
     fn take_due(&mut self, now: Instant, wall: SystemTime) -> bool {
         // 线程每秒醒一次；睡眠导致墙钟相邻样本超过 15 秒，即视为唤醒。
@@ -129,13 +200,71 @@ impl Schedule {
         }
     }
 }
+impl Runtime {
+    fn policy_changed(&mut self, policy: PausePolicy) {
+        if self.policy == policy {
+            return;
+        }
+        self.generation += 1;
+        self.policy = policy;
+        self.status.progress = None;
+        self.status.pause_reason = policy.reason();
+        self.status.manual_paused = policy.manual;
+        if policy.reason().is_some() {
+            self.status.phase = Phase::Paused;
+        } else {
+            self.schedule.requested = true;
+        }
+    }
+}
 pub fn start(app: AppHandle) {
+    let config = app.state::<SettingsState>().get().sync;
+    let (devices, last_sync_at, device_id, device_name) = {
+        let library = app.state::<Mutex<Library>>();
+        let library = library.lock().unwrap();
+        let (devices, time) = config
+            .as_ref()
+            .and_then(|s| library.cached_sync_devices(&s.library_id).ok())
+            .unwrap_or_default();
+        (
+            devices,
+            time,
+            library.device().id.clone(),
+            library.device().name.clone(),
+        )
+    };
+    let metered = crate::metered::forced();
+    let policy = PausePolicy::for_config(config.as_ref(), metered);
     app.manage(Arc::new(SyncState {
         inner: Mutex::new(Runtime {
             generation: 0,
+            policy,
+            metered,
+            unseen: Unseen {
+                main_active: app
+                    .get_webview_window("main")
+                    .is_some_and(|w| w.is_focused().unwrap_or(false)),
+                ..Unseen::default()
+            },
             schedule: Schedule::new(Instant::now(), SystemTime::now()),
-            status: SyncStatus::default(),
-            devices: Vec::new(),
+            status: SyncStatus {
+                phase: if policy.reason().is_some() {
+                    Phase::Paused
+                } else if config.is_some() {
+                    Phase::Syncing
+                } else {
+                    Phase::Unconfigured
+                },
+                pause_reason: policy.reason(),
+                manual_paused: policy.manual,
+                pause_on_metered: config.as_ref().is_none_or(|s| s.pause_on_metered),
+                devices: devices.clone(),
+                last_sync_at,
+                device_id,
+                device_name,
+                ..SyncStatus::default()
+            },
+            devices,
             connection: None,
             cancelled_connection: None,
             progress_event: Instant::now(),
@@ -144,12 +273,25 @@ pub fn start(app: AppHandle) {
         run: Mutex::new(()),
         credentials: Mutex::new(CredentialCache::default()),
     }));
+    // 暂停启动时 worker 不会发布一轮结果；先补齐缓存状态，避免焦点事件
+    // 把缺少 target 的初始快照覆盖到标题栏与左栏卡片。
+    let state = app.state::<Arc<SyncState>>();
+    let phase = state.inner.lock().unwrap().status.phase.clone();
+    publish(&app, &state, 0, phase, None, None);
+    crate::metered::start(app.clone());
     std::thread::spawn(move || {
         let state = app.state::<Arc<SyncState>>().inner().clone();
         loop {
             let generation = {
                 let mut runtime = state.inner.lock().unwrap();
-                while !runtime.schedule.take_due(Instant::now(), SystemTime::now()) {
+                loop {
+                    let policy = runtime.policy;
+                    if runtime
+                        .schedule
+                        .take_allowed(Instant::now(), SystemTime::now(), policy)
+                    {
+                        break;
+                    }
                     runtime = state
                         .wake
                         .wait_timeout(runtime, Duration::from_secs(1))
@@ -172,7 +314,7 @@ pub fn start(app: AppHandle) {
                             state: &state,
                             generation,
                         };
-                        core::synchronize_with_progress(
+                        core::synchronize_with_events(
                             &app.state::<Mutex<Library>>(),
                             &storage,
                             &config.library_id,
@@ -181,8 +323,9 @@ pub fn start(app: AppHandle) {
                                 if runtime.generation != generation {
                                     return;
                                 }
-                                let send = runtime.progress_event.elapsed()
-                                    >= Duration::from_millis(150)
+                                let send = runtime.status.progress.is_none()
+                                    || runtime.progress_event.elapsed()
+                                        >= Duration::from_millis(150)
                                     || progress.total == Some(progress.completed);
                                 runtime.status.progress = Some(progress);
                                 if send {
@@ -191,6 +334,17 @@ pub fn start(app: AppHandle) {
                                     drop(runtime);
                                     let _ = app.emit("sync-status-changed", status);
                                 }
+                            },
+                            &|count| {
+                                let mut runtime = state.inner.lock().unwrap();
+                                if runtime.generation != generation {
+                                    return;
+                                }
+                                runtime.unseen.arrive(count);
+                                runtime.status.unseen = runtime.unseen.count;
+                                let status = runtime.status.clone();
+                                drop(runtime);
+                                let _ = app.emit("sync-status-changed", status);
                             },
                         )
                     });
@@ -250,7 +404,17 @@ fn publish(
     if runtime.generation != generation {
         return;
     }
-    runtime.status.phase = phase;
+    let reason = runtime.policy.reason();
+    runtime.status.phase = if phase != Phase::Syncing && reason.is_some() {
+        Phase::Paused
+    } else {
+        phase
+    };
+    runtime.status.pause_reason = reason;
+    runtime.status.manual_paused = runtime.policy.manual;
+    runtime.status.pause_on_metered = config.as_ref().is_none_or(|s| s.pause_on_metered);
+    runtime.status.devices = runtime.devices.clone();
+    runtime.status.unseen = runtime.unseen.count;
     runtime.status.progress = None;
     runtime.status.error = error;
     if let Some(time) = last_sync_at {
@@ -291,22 +455,158 @@ pub fn local_changed(app: &AppHandle) {
 }
 fn configuration_changed(app: &AppHandle) {
     let state = app.state::<Arc<SyncState>>();
+    let config = app.state::<SettingsState>().get().sync;
+    let (devices, last_sync_at) = {
+        let library = app.state::<Mutex<Library>>();
+        let library = library.lock().unwrap();
+        config
+            .as_ref()
+            .and_then(|s| library.cached_sync_devices(&s.library_id).ok())
+            .unwrap_or_default()
+    };
     let mut runtime = state.inner.lock().unwrap();
     runtime.generation += 1;
     runtime.schedule.requested = true;
-    runtime.status = SyncStatus::default();
-    runtime.devices.clear();
+    let device_id = runtime.status.device_id.clone();
+    runtime.status = SyncStatus {
+        device_id,
+        last_sync_at,
+        ..SyncStatus::default()
+    };
+    runtime.devices = devices;
+    runtime.policy = PausePolicy::for_config(config.as_ref(), runtime.metered);
     runtime.connection = None;
     let generation = runtime.generation;
     drop(runtime);
     state.wake.notify_one();
-    let phase = if app.state::<SettingsState>().get().sync.is_some() {
-        Phase::Syncing
+    let phase = if config.is_some() {
+        Phase::Synced
     } else {
         Phase::Unconfigured
     };
     publish(app, &state, generation, phase, None, None);
+    crate::tray::sync_menu_changed(app);
 }
+
+pub fn network_changed(app: &AppHandle, metered: bool) {
+    let Some(state) = app.try_state::<Arc<SyncState>>() else {
+        return;
+    };
+    let config = app.state::<SettingsState>().get().sync;
+    let mut runtime = state.inner.lock().unwrap();
+    runtime.metered = metered;
+    let policy = PausePolicy::for_config(config.as_ref(), metered);
+    if runtime.policy == policy {
+        return;
+    }
+    runtime.policy_changed(policy);
+    let generation = runtime.generation;
+    drop(runtime);
+    state.wake.notify_one();
+    publish(
+        app,
+        &state,
+        generation,
+        if config.is_some() {
+            Phase::Synced
+        } else {
+            Phase::Unconfigured
+        },
+        None,
+        None,
+    );
+}
+
+// 两个设置命令都会通过 publish 等仓库锁；同步可能正在写库，不能放在主线程。
+#[tauri::command]
+pub async fn set_sync_paused(app: AppHandle, paused: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apply_paused(&app, paused))
+        .await
+        .map_err(|e| e.to_string())?
+}
+pub fn apply_paused(app: &AppHandle, paused: bool) -> Result<(), String> {
+    let settings = settings::update(app, |s| {
+        if let Some(sync) = &mut s.sync {
+            sync.paused = paused;
+        }
+    })?;
+    let state = app.state::<Arc<SyncState>>();
+    let mut runtime = state.inner.lock().unwrap();
+    let policy = PausePolicy::for_config(settings.sync.as_ref(), runtime.metered);
+    runtime.policy_changed(policy);
+    if !paused {
+        runtime.schedule.manual = true;
+    }
+    let generation = runtime.generation;
+    drop(runtime);
+    state.wake.notify_one();
+    publish(app, &state, generation, Phase::Synced, None, None);
+    crate::tray::sync_menu_changed(app);
+    Ok(())
+}
+#[tauri::command]
+pub async fn set_pause_on_metered(app: AppHandle, enabled: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        settings::update(&app, |s| {
+            if let Some(sync) = &mut s.sync {
+                sync.pause_on_metered = enabled;
+            }
+        })?;
+        let metered = app.state::<Arc<SyncState>>().inner.lock().unwrap().metered;
+        network_changed(&app, metered);
+        let state = app.state::<Arc<SyncState>>();
+        let status = {
+            let mut runtime = state.inner.lock().unwrap();
+            runtime.status.pause_on_metered = enabled;
+            runtime.status.clone()
+        };
+        let _ = app.emit("sync-status-changed", status);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+pub fn visibility_changed(app: &AppHandle, main: Option<bool>, panel: Option<bool>) {
+    let Some(state) = app.try_state::<Arc<SyncState>>() else {
+        return;
+    };
+    let mut runtime = state.inner.lock().unwrap();
+    runtime.unseen.visibility(main, panel);
+    runtime.status.unseen = runtime.unseen.count;
+    let status = runtime.status.clone();
+    drop(runtime);
+    let _ = app.emit("sync-status-changed", status);
+}
+
+#[tauri::command]
+pub async fn sticker_sync_info(
+    app: AppHandle,
+    id: String,
+) -> Result<Option<core::StickerSyncInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(config) = app.state::<SettingsState>().get().sync else {
+            return Ok(None);
+        };
+        let devices = app
+            .state::<Arc<SyncState>>()
+            .inner
+            .lock()
+            .unwrap()
+            .devices
+            .clone();
+        let library = app.state::<Mutex<Library>>();
+        library
+            .lock()
+            .map_err(|e| e.to_string())?
+            .sticker_sync_info(&id, &config.library_id, &devices)
+            .map(Some)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn cancellation(state: &Arc<SyncState>, generation: u64) -> CancelCheck {
     let state = Arc::downgrade(state);
     Arc::new(move || {
@@ -374,19 +674,25 @@ impl ActiveStorage<'_> {
 impl Storage for ActiveStorage<'_> {
     fn list(&self, p: &str) -> sticker_core::Result<Vec<FileEntry>> {
         self.check()?;
-        self.inner.list(p)
+        let result = self.inner.list(p)?;
+        self.check()?;
+        Ok(result)
     }
     fn read(&self, k: &str) -> sticker_core::Result<Option<Vec<u8>>> {
         self.check()?;
-        self.inner.read(k)
+        let result = self.inner.read(k)?;
+        self.check()?;
+        Ok(result)
     }
     fn write(&self, k: &str, b: &[u8]) -> sticker_core::Result<()> {
         self.check()?;
-        self.inner.write(k, b)
+        self.inner.write(k, b)?;
+        self.check()
     }
     fn delete(&self, k: &str) -> sticker_core::Result<()> {
         self.check()?;
-        self.inner.delete(k)
+        self.inner.delete(k)?;
+        self.check()
     }
 }
 
@@ -394,11 +700,14 @@ impl Storage for ActiveStorage<'_> {
 pub async fn sync_status(app: AppHandle) -> Result<SyncStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Arc<SyncState>>();
-        let mut status = state.inner.lock().unwrap().status.clone();
         let library = app.state::<Mutex<Library>>();
         let library = library.lock().map_err(|e| e.to_string())?;
-        status.device_name = library.device().name.clone();
-        status.storage_bytes = library.storage_bytes().map_err(|e| e.to_string())?;
+        let device_name = library.device().name.clone();
+        let storage_bytes = library.storage_bytes().map_err(|e| e.to_string())?;
+        drop(library);
+        let mut status = state.inner.lock().unwrap().status.clone();
+        status.device_name = device_name;
+        status.storage_bytes = storage_bytes;
         status.target = app
             .state::<SettingsState>()
             .get()
@@ -412,7 +721,9 @@ pub async fn sync_status(app: AppHandle) -> Result<SyncStatus, String> {
 }
 #[tauri::command]
 pub fn sync_now(app: AppHandle) {
-    request(&app, false);
+    let state = app.state::<Arc<SyncState>>();
+    state.inner.lock().unwrap().schedule.manual = true;
+    state.wake.notify_one();
 }
 #[tauri::command]
 pub async fn inspect_sync_folder(app: AppHandle, path: PathBuf) -> Result<FolderInfo, String> {
@@ -453,10 +764,10 @@ pub async fn join_sync_folder(
             core::join(&app.state::<Mutex<Library>>(), &storage, &manifest.id)
                 .map_err(|e| e.to_string())?;
             settings::update(&app, |s| {
-                s.sync = Some(SyncSettings {
-                    target: StorageConfig::Folder { folder: info.path },
-                    library_id: manifest.id,
-                })
+                s.sync = Some(SyncSettings::new(
+                    StorageConfig::Folder { folder: info.path },
+                    manifest.id,
+                ))
             })
             .map(|_| ())
         })();
@@ -618,10 +929,7 @@ pub async fn join_network_target(
                     Err("连接已取消".into())
                 } else {
                     let result = settings::update(&app, |s| {
-                        s.sync = Some(SyncSettings {
-                            target: connection.target,
-                            library_id: manifest.id,
-                        })
+                        s.sync = Some(SyncSettings::new(connection.target, manifest.id))
                     })
                     .map(|_| ());
                     if result.is_ok() {
@@ -776,5 +1084,167 @@ mod tests {
         s.requested = true;
         assert!(s.take_due(now, wall));
         assert!(!s.take_due(now, wall));
+    }
+}
+
+#[cfg(test)]
+mod pause_tests {
+    use super::*;
+    fn runtime() -> Runtime {
+        Runtime {
+            generation: 7,
+            policy: PausePolicy::default(),
+            metered: false,
+            unseen: Unseen::default(),
+            schedule: Schedule::new(Instant::now(), SystemTime::now()),
+            status: SyncStatus {
+                phase: Phase::Synced,
+                last_sync_at: Some(42),
+                ..SyncStatus::default()
+            },
+            devices: vec![RemoteDevice {
+                id: "device".into(),
+                name: "Mac".into(),
+                last_sync_at: 42,
+                platform: "macos".into(),
+                received: Default::default(),
+            }],
+            connection: None,
+            cancelled_connection: None,
+            progress_event: Instant::now(),
+        }
+    }
+    #[test]
+    fn manual_metered_overlap_and_manual_one_round() {
+        let mut r = runtime();
+        let now = Instant::now();
+        let wall = SystemTime::now();
+        r.policy_changed(PausePolicy {
+            manual: true,
+            metered: false,
+        });
+        assert!(!r.schedule.take_allowed(now, wall, r.policy)); // 启动
+        r.schedule.local_change(now - Duration::from_secs(20));
+        assert!(!r.schedule.take_allowed(
+            now + Duration::from_secs(600),
+            wall + Duration::from_secs(600),
+            r.policy
+        )); // 本地、定时和唤醒
+        r.policy_changed(PausePolicy {
+            manual: true,
+            metered: true,
+        });
+        assert_eq!(r.policy.reason(), Some(PauseReason::Manual));
+        r.policy_changed(PausePolicy {
+            manual: false,
+            metered: true,
+        });
+        assert!(!r.schedule.take_allowed(now, wall, r.policy));
+        r.schedule.manual = true;
+        assert!(r.schedule.take_allowed(now, wall, r.policy));
+        assert!(!r.schedule.take_allowed(now, wall, r.policy));
+        r.policy_changed(PausePolicy::default());
+        assert!(r.schedule.take_allowed(now, wall, r.policy)); // 网络恢复立即跑
+        assert!(!r.schedule.take_allowed(now, wall, r.policy));
+        assert_eq!(r.status.last_sync_at, Some(42));
+        assert_eq!(r.devices.len(), 1);
+    }
+    #[test]
+    fn folder_ignores_cost_and_network_setting_defaults_to_pausing() {
+        let folder = SyncSettings::new(
+            StorageConfig::Folder {
+                folder: "/tmp/shared".into(),
+            },
+            "id".into(),
+        );
+        assert_eq!(
+            PausePolicy::for_config(Some(&folder), true),
+            PausePolicy::default()
+        );
+        let mut network = SyncSettings::new(
+            StorageConfig::Webdav {
+                url: "https://example.com/".into(),
+            },
+            "id".into(),
+        );
+        assert_eq!(
+            PausePolicy::for_config(Some(&network), true).reason(),
+            Some(PauseReason::Metered)
+        );
+        network.pause_on_metered = false;
+        assert_eq!(PausePolicy::for_config(Some(&network), true).reason(), None);
+    }
+    #[test]
+    fn pausing_invalidates_in_flight_generation_without_clearing_history() {
+        struct PausingStorage {
+            state: Arc<SyncState>,
+            calls: std::sync::atomic::AtomicUsize,
+        }
+        impl Storage for PausingStorage {
+            fn list(&self, _: &str) -> sticker_core::Result<Vec<FileEntry>> {
+                unreachable!()
+            }
+            fn read(&self, _: &str) -> sticker_core::Result<Option<Vec<u8>>> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .policy_changed(PausePolicy {
+                        manual: true,
+                        metered: false,
+                    });
+                Ok(Some(vec![1]))
+            }
+            fn write(&self, _: &str, _: &[u8]) -> sticker_core::Result<()> {
+                unreachable!()
+            }
+            fn delete(&self, _: &str) -> sticker_core::Result<()> {
+                unreachable!()
+            }
+        }
+        let state = Arc::new(SyncState {
+            inner: Mutex::new(runtime()),
+            wake: Condvar::new(),
+            run: Mutex::new(()),
+            credentials: Mutex::new(CredentialCache::default()),
+        });
+        let cancelled = cancellation(&state, 7);
+        let storage = ActiveStorage {
+            inner: Box::new(PausingStorage {
+                state: state.clone(),
+                calls: Default::default(),
+            }),
+            state: &state,
+            generation: 7,
+        };
+        assert!(storage.read("test").is_err());
+        assert!(cancelled());
+        assert!(storage.read("second").is_err());
+        let r = state.inner.lock().unwrap();
+        assert_eq!(r.status.phase, Phase::Paused);
+        assert_eq!(r.status.last_sync_at, Some(42));
+        assert_eq!(r.devices.len(), 1);
+    }
+    #[test]
+    fn unseen_is_memory_only_and_clears_at_every_visible_entry() {
+        let mut unseen = Unseen::default();
+        unseen.arrive(4);
+        assert_eq!(unseen.count, 4);
+        unseen.visibility(None, Some(true));
+        assert_eq!(unseen.count, 0);
+        unseen.arrive(3);
+        assert_eq!(unseen.count, 0);
+        unseen.visibility(None, Some(false));
+        unseen.arrive(6);
+        assert_eq!(unseen.count, 6);
+        unseen.visibility(Some(true), None);
+        unseen.arrive(2);
+        assert_eq!(unseen.count, 0);
+        unseen.visibility(Some(false), None);
+        unseen.arrive(1);
+        assert_eq!(unseen.count, 1);
+        assert_eq!(Unseen::default().count, 0);
     }
 }

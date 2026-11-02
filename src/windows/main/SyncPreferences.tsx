@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { open, confirm } from "@tauri-apps/plugin-dialog";
 import { useQueryClient } from "@tanstack/react-query";
+import { Switch } from "../../components/Switch";
 import { Button } from "../../components/Button";
 import { ipc, type SyncStatus, type SyncBackend, type NetworkTarget, type SyncTargetInfo, type SyncCredentials } from "../../lib/ipc";
-import { progressLabel, syncLabel, syncTime, waitingNote } from "./useSyncStatus";
+import { progressLabel, syncStateLabel, syncTime, waitingNote } from "./useSyncStatus";
 
 const backends = { folder: "同步文件夹", webdav: "WebDAV", r2: "Cloudflare R2", s3: "S3 兼容" };
 const inputStyle = "min-w-0 w-full rounded-control border border-line bg-surface px-3 py-2 text-sm disabled:opacity-50";
@@ -131,13 +132,15 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
         <Button type="submit" disabled={busy || !name.trim() || name.trim() === status?.deviceName}>保存</Button>
       </form>
       <p role="status" className={`text-xs ${status?.phase === "synced" ? "text-synced" : "text-ink-secondary"}`}>
-        {progress ?? syncLabel(status)}{status?.lastSyncAt ? ` · 上次同步 ${syncTime(status.lastSyncAt)}` : ""}
+        {progress ?? syncStateLabel(status)}{status?.lastSyncAt ? ` · 上次同步 ${syncTime(status.lastSyncAt)}` : ""}
       </p>
       {status?.progress?.total != null && status.phase === "syncing" && <progress aria-label={progress ?? "同步进度"} max={Math.max(1, status.progress.total)} value={status.progress.completed} className="h-1 w-full accent-accent" />}
+      {target.backend !== "folder" && <label className="flex items-center justify-between gap-4 text-xs"><span>使用按流量计费的网络时暂停同步</span><Switch aria-label="使用按流量计费的网络时暂停同步" checked={status?.pauseOnMetered ?? true} disabled={busy} onClick={() => void run(() => ipc.setPauseOnMetered(!(status?.pauseOnMetered ?? true)))} /></label>}
       {waitingNote(status) && <p className="text-xs text-ink-secondary">{waitingNote(status)}</p>}
       {status?.error && <p role="alert" className="text-xs text-accent">{status.error}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button disabled={busy} onClick={() => void run(ipc.syncNow)}>立即同步</Button>
+        <Button disabled={busy} onClick={() => void run(status?.manualPaused ? () => ipc.setSyncPaused(false) : ipc.syncNow)}>{status?.manualPaused ? "继续同步" : "立即同步"}</Button>
+        {!status?.manualPaused && <Button disabled={busy} onClick={() => void run(() => ipc.setSyncPaused(true))}>暂停同步</Button>}
         {target.backend !== "folder" && !reenter && <Button disabled={busy} onClick={() => { setReenter(true); setError(null); }}>重新输入密码</Button>}
         <Button disabled={busy} onClick={() => void run(stop)}>停止同步</Button>
       </div>

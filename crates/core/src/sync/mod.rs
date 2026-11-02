@@ -1,5 +1,7 @@
 //! 阻塞文件后端与可独立测试的同步协议。I/O 在 Library 的锁外，数据库阶段单独提交。
 mod model;
+mod presence;
+pub use presence::{StickerSyncInfo, platform};
 pub mod network;
 pub mod storage;
 mod store;
@@ -68,6 +70,10 @@ pub struct RemoteDevice {
     pub id: String,
     pub name: String,
     pub last_sync_at: i64,
+    #[serde(default)]
+    pub platform: String,
+    #[serde(default)]
+    pub received: BTreeMap<String, i64>,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,6 +115,7 @@ pub struct SyncReport {
     pub last_sync_at: Option<i64>,
     pub devices: Vec<RemoteDevice>,
     pub pending: usize,
+    pub new_stickers: usize,
 }
 
 /// 验证双向路径包含关系，canonicalize 也覆盖符号链接入口。
@@ -338,12 +345,24 @@ pub fn synchronize_with_progress(
     expected_id: &str,
     progress: &dyn Fn(SyncProgress),
 ) -> Result<SyncReport> {
+    synchronize_with_events(library, storage, expected_id, progress, &|_| {})
+}
+
+/// 新表情在提交后、仓库锁外通知，外壳按到达当时的窗口可见状态决定是否累计角标。
+pub fn synchronize_with_events(
+    library: &Mutex<Library>,
+    storage: &dyn Storage,
+    expected_id: &str,
+    progress: &dyn Fn(SyncProgress),
+    arrived: &dyn Fn(usize),
+) -> Result<SyncReport> {
     let Some(manifest) = Manifest::read_complete(storage)? else {
         return Ok(SyncReport {
             changed: false,
             last_sync_at: None,
             devices: Vec::new(),
             pending: 1,
+            new_stickers: 0,
         });
     };
     if manifest.id != expected_id {
@@ -386,9 +405,17 @@ pub fn synchronize_with_progress(
     if !exists {
         lock(library)?.join_sync(expected_id)?;
     }
+    let initial_complete: bool = lock(library)?.conn.query_row(
+        "SELECT initial_pull_complete FROM sync_targets WHERE library_id=?1",
+        [expected_id],
+        |r| r.get(0),
+    )?;
+    let mut new_stickers = 0;
     let downloaded = std::cell::Cell::new(0);
-    let on_download = || {
-        downloaded.set(downloaded.get() + 1);
+    let on_download = |finished: bool| {
+        if finished {
+            downloaded.set(downloaded.get() + 1);
+        }
         progress(SyncProgress {
             stage: TransferStage::Downloading,
             completed: downloaded.get(),
@@ -427,6 +454,7 @@ pub fn synchronize_with_progress(
         let tx = lib.conn.transaction()?;
         let (mut revision, mut model) = store::load(&tx)?;
         store::flush(&tx, &mut model, &mut revision)?;
+        let known = presence::known_hashes(&model);
         for op in &ops {
             tx.execute(
                 "UPDATE sync_meta SET max_at=MAX(max_at,?1)",
@@ -436,16 +464,24 @@ pub fn synchronize_with_progress(
             for change in store::flatten(&op.change) {
                 if !model.apply(&change, &available)? {
                     waiting.push(change);
+                } else {
+                    presence::record_origin(&tx, expected_id, &s.device, op.seq, &change)?;
                 }
             }
             store::pending(&tx, expected_id, &s.device, op.seq, waiting)?;
         }
         store::retry(&tx, &mut model, &available)?;
         store::deduplicate(&tx, &mut model, &device.id)?;
+        let added = presence::new_stickers(&known, &model);
+        new_stickers += added;
         store::project(&tx, &model)?;
         store::save(&tx, revision, &model)?;
         tx.execute("INSERT INTO sync_progress VALUES(?1,?2,?3) ON CONFLICT(library_id,device) DO UPDATE SET seq=excluded.seq",params![expected_id,s.device,ops.last().unwrap().seq])?;
         tx.commit()?;
+        drop(lib);
+        if initial_complete && added > 0 {
+            arrived(added);
+        }
         changed = true;
     }
     // 日志已接收但原图或跨设备依赖晚到：即使没有新段，也要重试。
@@ -466,14 +502,21 @@ pub fn synchronize_with_progress(
         let (mut revision, mut model) = store::load(&tx)?;
         store::flush(&tx, &mut model, &mut revision)?;
         let before = model.clone();
+        let known = presence::known_hashes(&model);
         store::retry(&tx, &mut model, &available)?;
         store::deduplicate(&tx, &mut model, &device.id)?;
+        let added = presence::new_stickers(&known, &model);
+        new_stickers += added;
         if model != before {
             store::project(&tx, &model)?;
             changed = true;
         }
         store::save(&tx, revision, &model)?;
         tx.commit()?;
+        drop(lib);
+        if initial_complete && added > 0 {
+            arrived(added);
+        }
     }
     changed |= push(library, storage, expected_id, &root, &device, progress)?;
     cleanup_purged_files(library, &root, &files)?;
@@ -481,12 +524,15 @@ pub fn synchronize_with_progress(
         return Err(error);
     }
     let last_sync_at = unix_millis()?;
+    let received = presence::received(&lock(library)?.conn, expected_id)?;
     storage.write(
         &format!("devices/{}.json", device.id),
         &serde_json::to_vec(&RemoteDevice {
             id: device.id,
             name: device.name,
             last_sync_at,
+            platform: platform().into(),
+            received,
         })?,
     )?;
     let pending = lock(library)?
@@ -494,11 +540,25 @@ pub fn synchronize_with_progress(
         .query_row("SELECT COUNT(*) FROM sync_pending", [], |r| {
             r.get::<_, i64>(0)
         })? as usize;
+    let devices = read_devices(storage)?;
+    {
+        let lib = lock(library)?;
+        let tx = lib.conn.unchecked_transaction()?;
+        tx.execute("INSERT INTO sync_device_cache VALUES(?1,?2,?3) ON CONFLICT(library_id) DO UPDATE SET devices=excluded.devices,last_sync_at=excluded.last_sync_at", params![expected_id, serde_json::to_string(&devices)?, last_sync_at])?;
+        if pending == 0 {
+            tx.execute(
+                "UPDATE sync_targets SET initial_pull_complete=1 WHERE library_id=?1",
+                [expected_id],
+            )?;
+        }
+        tx.commit()?;
+    }
     Ok(SyncReport {
         changed,
         last_sync_at: Some(last_sync_at),
-        devices: read_devices(storage)?,
+        devices,
         pending,
+        new_stickers: if initial_complete { new_stickers } else { 0 },
     })
 }
 
@@ -644,7 +704,7 @@ fn download_objects(
     root: &Path,
     files: &Mutex<()>,
     objects: &BTreeMap<String, Object>,
-    downloaded: &dyn Fn(),
+    downloaded: &dyn Fn(bool),
 ) -> Result<BTreeSet<String>> {
     let mut available = BTreeSet::new();
     for (key, object) in objects {
@@ -667,7 +727,10 @@ fn download_objects(
                 }
                 (Some(b), false)
             }
-            _ => (storage.read(key)?, true),
+            _ => {
+                downloaded(false);
+                (storage.read(key)?, true)
+            }
         };
         let Some(bytes) = bytes else { continue };
         if format!("{:x}", Sha256::digest(&bytes)) != object.hash {
@@ -691,7 +754,7 @@ fn download_objects(
         thumb.persist(thumbnail).map_err(|e| e.error)?;
         available.insert(key.clone());
         if fetched {
-            downloaded();
+            downloaded(true);
         }
     }
     Ok(available)

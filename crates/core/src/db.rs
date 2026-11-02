@@ -9,6 +9,7 @@ use crate::{Error, Result};
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_init.sql"),
     include_str!("migrations/0002_sync.sql"),
+    include_str!("migrations/0003_sync_presence.sql"),
 ];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 

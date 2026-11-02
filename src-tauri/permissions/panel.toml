@@ -2,6 +2,7 @@
 identifier = "panel-commands"
 description = "表情面板只读仓库、复制和记录使用，以及控制面板和打开主窗口。"
 commands.allow = [
+  "sync_status", "show_sync_details",
   "library_overview", "list_stickers", "search_stickers", "tag_sidebar",
   "copy_sticker", "prepare_sticker_drag", "record_sticker_usage",
   "panel_session", "set_panel_pinned", "set_panel_dragging", "hide_panel", "show_main_window",

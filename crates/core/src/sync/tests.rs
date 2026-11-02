@@ -1272,8 +1272,10 @@ fn progress_is_outside_repository_lock_and_partial_object_is_repaired() {
         }
     })
     .unwrap();
-    assert_eq!(*downloads.lock().unwrap(), [(1, None)]);
+    assert_eq!(*downloads.lock().unwrap(), [(0, None), (1, None)]);
     assert_eq!(a.state(), b.state());
 }
 
 mod network_integration;
+
+mod presence;

@@ -18,6 +18,6 @@ mod usage;
 pub use device::Device;
 
 pub use error::{Error, Result};
-pub use import::{ImportFailure, ImportReport};
+pub use import::{ImportFailure, ImportProgress, ImportReport, import_paths_with_progress};
 pub use library::{Library, LibraryOverview, LibraryView, Sticker};
 pub use organization::{TAG_COLORS, Tag, TagGroup, TagSidebar, TagSummary};

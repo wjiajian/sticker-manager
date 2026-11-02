@@ -18,6 +18,7 @@ export function useSyncStatus() {
 }
 export function syncLabel(status?: SyncStatus) {
   if (status?.phase === "syncing") return "同步中";
+  if (status?.phase === "paused") return "已暂停";
   if (status?.phase === "synced") return "已同步";
   if (status?.phase === "error") return "同步出错";
   return "未设置同步";
@@ -37,9 +38,26 @@ export function storageSize(bytes: number) {
 export function progressLabel(status?: SyncStatus) {
   const progress = status?.progress;
   if (!progress || status?.phase !== "syncing") return null;
-  return progress.total === null ? `正在下载原图，已下载 ${progress.completed} 张` : `正在${progress.stage === "uploading" ? "上传" : "下载"}原图 ${progress.completed}/${progress.total}`;
+  return progress.total === null ? `本轮已下载 ${progress.completed} 张` : `正在${progress.stage === "uploading" ? "上传" : "下载"}原图 ${progress.completed}/${progress.total}`;
 }
 export function syncTooltip(status?: SyncStatus) {
-  return [status?.target && `${status.target.name} · ${status.target.shortAddress}`, progressLabel(status), status?.error ?? waitingNote(status)]
+  return [syncStateLabel(status), status?.target && `${status.target.name} · ${status.target.shortAddress}`, progressLabel(status), status?.error ?? waitingNote(status)]
     .filter(Boolean).join("\n") || "打开同步偏好设置";
+}
+
+export function syncStateLabel(status?: SyncStatus) {
+  return status?.phase === "paused" ? `已暂停 · ${status.pauseReason === "metered" ? "正在使用按流量计费的网络" : "手动暂停"}` : syncLabel(status);
+}
+export function deviceTime(value: number | null | undefined, now = Date.now()) {
+  if (!value) return "尚未同步";
+  const elapsed = Math.max(0, now - value);
+  if (elapsed < 60_000) return "刚刚";
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} 分钟前`;
+  const date = new Date(value), today = new Date(now);
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const yesterday = new Date(start); yesterday.setDate(yesterday.getDate() - 1);
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (value >= start.getTime()) return `今天 ${time}`;
+  if (value >= yesterday.getTime()) return `昨天 ${time}`;
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }

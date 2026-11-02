@@ -140,6 +140,9 @@ pub(super) fn retry(
             let mut waiting = Vec::new();
             for change in changes {
                 if model.apply(&change, available)? {
+                    if library != "local" {
+                        super::presence::record_origin(conn, &library, &device, seq, &change)?;
+                    }
                     progressed = true;
                 } else {
                     waiting.push(change);
@@ -316,7 +319,7 @@ impl Library {
             },
             action: Action::Snapshot { changes },
         };
-        tx.execute("INSERT INTO sync_targets(library_id,revision) VALUES(?1,?2) ON CONFLICT(library_id) DO UPDATE SET revision=excluded.revision",params![library_id,revision])?;
+        tx.execute("INSERT INTO sync_targets(library_id,revision,initial_pull_complete) VALUES(?1,?2,0) ON CONFLICT(library_id) DO UPDATE SET revision=excluded.revision",params![library_id,revision])?;
         enqueue(&tx, library_id, change)?;
         save(&tx, revision, &model)?;
         tx.commit()?;
@@ -330,6 +333,13 @@ pub(super) fn enqueue(conn: &Connection, library: &str, change: Change) -> Resul
         |r| r.get(0),
     )?;
     let operation = Operation { seq, change };
+    super::presence::record_origin(
+        conn,
+        library,
+        &operation.change.stamp.device,
+        seq,
+        &operation.change,
+    )?;
     conn.execute(
         "INSERT INTO sync_stream VALUES(?1,?2,?3)",
         params![library, seq, serde_json::to_string(&operation)?],

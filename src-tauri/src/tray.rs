@@ -14,6 +14,8 @@ pub struct TrayState {
     ball_item: CheckMenuItem<tauri::Wry>,
     ball_menu: Menu<tauri::Wry>,
     preferences_pending: AtomicBool,
+    sync_pending: AtomicBool,
+    sync_item: MenuItem<tauri::Wry>,
 }
 
 pub fn create(app: &tauri::App) -> tauri::Result<()> {
@@ -32,6 +34,18 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
         MenuItem::with_id(handle, "entry-preferences", "偏好设置…", true, None::<&str>)?;
     let hide = MenuItem::with_id(handle, "entry-hide-ball", "隐藏悬浮球", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(handle)?;
+    let config = app.state::<SettingsState>().get().sync;
+    let sync_item = MenuItem::with_id(
+        handle,
+        "entry-sync-pause",
+        if config.as_ref().is_some_and(|s| s.paused) {
+            "继续同步"
+        } else {
+            "暂停同步"
+        },
+        config.is_some(),
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(handle, "entry-quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(
         handle,
@@ -40,6 +54,7 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
             &main,
             &ball_item,
             &preferences,
+            &sync_item,
             &separator,
             &quit,
         ],
@@ -50,6 +65,7 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
             &main,
             &preferences,
             &hide,
+            &sync_item,
             &PredefinedMenuItem::separator(handle)?,
             &quit,
         ],
@@ -82,6 +98,8 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
         ball_item,
         ball_menu,
         preferences_pending: AtomicBool::new(false),
+        sync_pending: AtomicBool::new(false),
+        sync_item,
     });
     app.on_menu_event(|app, event| dispatch(app, event.id.as_ref()));
     Ok(())
@@ -100,6 +118,20 @@ fn dispatch(app: &AppHandle, id: &str) {
     }
     let id = id.to_string();
     let handle = app.clone();
+    if id == "entry-sync-pause" {
+        // 暂停要等仓库锁（同步可能正在写库），放到后台线程，菜单和界面不卡。
+        tauri::async_runtime::spawn_blocking(move || {
+            let paused = handle
+                .state::<SettingsState>()
+                .get()
+                .sync
+                .is_some_and(|s| s.paused);
+            if let Err(error) = crate::sync::apply_paused(&handle, !paused) {
+                eprintln!("菜单操作失败：{error}");
+            }
+        });
+        return;
+    }
     let result = app.run_on_main_thread(move || {
         let result = match id.as_str() {
             "entry-panel" => panel::toggle(&handle),
@@ -130,6 +162,34 @@ fn dispatch(app: &AppHandle, id: &str) {
     if let Err(error) = result {
         eprintln!("菜单操作失败：{error}");
     }
+}
+pub fn sync_menu_changed(app: &AppHandle) {
+    if let Some(tray) = app.try_state::<TrayState>() {
+        let config = app.state::<SettingsState>().get().sync;
+        let _ = tray.sync_item.set_enabled(config.is_some());
+        let _ = tray
+            .sync_item
+            .set_text(if config.is_some_and(|s| s.paused) {
+                "继续同步"
+            } else {
+                "暂停同步"
+            });
+    }
+}
+#[tauri::command]
+pub fn show_sync_details(app: AppHandle) -> Result<(), String> {
+    app.state::<TrayState>()
+        .sync_pending
+        .store(true, Ordering::Relaxed);
+    panel::show_main_window(app.clone())?;
+    app.emit_to("main", "open-sync-details", ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn take_sync_details_request(app: AppHandle) -> bool {
+    app.state::<TrayState>()
+        .sync_pending
+        .swap(false, Ordering::Relaxed)
 }
 fn open_preferences(app: &AppHandle) -> Result<(), String> {
     panel::show_main_window(app.clone())?;

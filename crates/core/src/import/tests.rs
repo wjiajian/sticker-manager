@@ -180,6 +180,51 @@ fn repairs_missing_files_when_importing_existing_sticker() {
 }
 
 #[test]
+fn existing_complete_sticker_skips_decoding_but_a_purge_before_commit_still_gets_a_thumbnail() {
+    // 准备阶段说“已有且文件齐全”，提交时库里却已经没有这张：要在锁内补做解码。
+    struct Stale<'a>(&'a mut Library);
+    impl Store for Stale<'_> {
+        fn has_complete_files(&mut self, _: &str, _: &str) -> Result<bool> {
+            Ok(true)
+        }
+        fn commit(&mut self, prepared: Prepared, report: &mut ImportReport) -> Result<()> {
+            assert!(prepared.thumbnail.is_none());
+            self.0.commit_import(prepared, report)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(&dir.path().join("library")).unwrap();
+    let source = dir.path().join("收到.png");
+    png_file(&source, [9, 9, 9, 255]);
+    let root = library.root.clone();
+    let report = run(
+        &root,
+        std::slice::from_ref(&source),
+        &|| false,
+        &mut |_| {},
+        &mut Stale(&mut library),
+    );
+    assert_eq!((report.added, report.failures.len()), (1, 0), "{report:?}");
+    let sticker = library.list_stickers(LibraryView::All).unwrap().remove(0);
+    assert_eq!((sticker.width, sticker.height), (400, 200));
+    assert!(sticker.thumbnail_path.is_file());
+
+    struct Counting<'a>(&'a mut Library, usize);
+    impl Store for Counting<'_> {
+        fn has_complete_files(&mut self, hash: &str, ext: &str) -> Result<bool> {
+            self.0.has_complete_files(hash, ext)
+        }
+        fn commit(&mut self, prepared: Prepared, report: &mut ImportReport) -> Result<()> {
+            self.1 += usize::from(prepared.thumbnail.is_some());
+            self.0.commit_import(prepared, report)
+        }
+    }
+    let mut store = Counting(&mut library, 0);
+    let report = run(&root, &[source], &|| false, &mut |_| {}, &mut store);
+    assert_eq!((report.existing, store.1), (1, 0));
+}
+
+#[test]
 fn file_write_failure_does_not_leave_a_record_or_original() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = Library::open(&dir.path().join("library")).unwrap();
@@ -255,4 +300,235 @@ fn skips_symlink_cycles_and_the_library_itself() {
     let report = library.import_paths(&[dir.path().to_path_buf()]);
     assert_eq!((report.added, report.skipped), (1, 2));
     assert!(report.failures.is_empty());
+}
+
+pub(super) fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
+    let mut writer = zip::ZipWriter::new(File::create(path).unwrap());
+    for (name, bytes) in entries {
+        writer
+            .start_file(
+                *name,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        writer.write_all(bytes).unwrap();
+    }
+    writer.finish().unwrap();
+}
+fn patch_zip_headers(path: &Path, local: usize, central: usize, value: u16) {
+    let mut bytes = fs::read(path).unwrap();
+    for i in 0..bytes.len().saturating_sub(46) {
+        let offset = if bytes[i..].starts_with(b"PK\x03\x04") {
+            Some(local)
+        } else if bytes[i..].starts_with(b"PK\x01\x02") {
+            Some(central)
+        } else {
+            None
+        };
+        if let Some(offset) = offset {
+            bytes[i + offset..i + offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+    fs::write(path, bytes).unwrap();
+}
+#[test]
+fn zip_recurses_ignores_hidden_and_nested_archives_and_deduplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = Mutex::new(Library::open(&dir.path().join("library")).unwrap());
+    let image = dir.path().join("原图.png");
+    png_file(&image, [9, 8, 7, 255]);
+    let bytes = fs::read(&image).unwrap();
+    let archive = dir.path().join("表情包.zip");
+    make_zip(
+        &archive,
+        &[
+            ("子目录/中文.png", &bytes),
+            ("重复.png", &bytes),
+            ("__MACOSX/a.png", &bytes),
+            ("deep/.隐藏/x.png", &bytes),
+            ("deep/Thumbs.db", &bytes),
+            ("deep/desktop.ini", &bytes),
+            ("deep/nested.zip", &bytes),
+            ("说明.txt", b"text"),
+            ("目录/", b""),
+        ],
+    );
+    let mut updates = Vec::new();
+    let report = import_paths_with_progress(
+        &library,
+        std::slice::from_ref(&archive),
+        &|| false,
+        &mut |p| updates.push(p),
+    )
+    .unwrap();
+    assert_eq!((report.added, report.existing, report.skipped), (1, 1, 2));
+    assert_eq!(report.sticker_ids.len(), 1);
+    assert!(report.failures.is_empty(), "{report:?}");
+    assert_eq!(updates.last().map(|p| (p.processed, p.total)), Some((9, 9)));
+    assert!(updates.windows(2).all(|w| w[0].processed <= w[1].processed));
+    assert_eq!(
+        library
+            .lock()
+            .unwrap()
+            .sticker(&report.sticker_ids[0])
+            .unwrap()
+            .name,
+        "中文"
+    );
+    let again = import_paths_with_progress(&library, &[archive], &|| false, &mut |_| {}).unwrap();
+    assert_eq!((again.added, again.existing), (0, 2));
+}
+#[test]
+fn zip_gbk_and_unflagged_utf8_names_are_decoded() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(&dir.path().join("library")).unwrap();
+    let image = dir.path().join("image.png");
+    png_file(&image, [6, 5, 4, 255]);
+    let data = fs::read(image).unwrap();
+    let gbk = dir.path().join("gbk.zip");
+    make_zip(&gbk, &[("1234.png", &data)]);
+    let mut bytes = fs::read(&gbk).unwrap();
+    let (name, _, _) = encoding_rs::GB18030.encode("中文.png");
+    let positions: Vec<_> = bytes
+        .windows(8)
+        .enumerate()
+        .filter(|(_, w)| *w == b"1234.png")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(positions.len(), 2);
+    for i in positions {
+        bytes[i..i + 8].copy_from_slice(&name);
+    }
+    fs::write(&gbk, bytes).unwrap();
+    let report = library.import_paths(&[gbk]);
+    assert_eq!(report.added, 1, "{report:?}");
+    assert_eq!(
+        library.sticker(&report.sticker_ids[0]).unwrap().name,
+        "中文"
+    );
+    let utf8 = dir.path().join("utf8.zip");
+    make_zip(&utf8, &[("路径/表情.png", &data)]);
+    patch_zip_headers(&utf8, 6, 8, 0);
+    assert_eq!(library.import_paths(&[utf8]).existing, 1);
+}
+#[test]
+fn encrypted_unsupported_and_corrupt_archives_do_not_abort_other_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(&dir.path().join("library")).unwrap();
+    let image = dir.path().join("good.png");
+    png_file(&image, [5, 6, 7, 255]);
+    let data = fs::read(&image).unwrap();
+    let encrypted = dir.path().join("加密.zip");
+    make_zip(&encrypted, &[("子目录/a.png", &data)]);
+    patch_zip_headers(&encrypted, 6, 8, 1);
+    let unsupported = dir.path().join("不支持.zip");
+    make_zip(&unsupported, &[("b.png", &data)]);
+    patch_zip_headers(&unsupported, 8, 10, 12);
+    let broken = dir.path().join("损坏.zip");
+    fs::write(&broken, b"PKtruncated").unwrap();
+    let report = library.import_paths(&[encrypted, unsupported, broken, image]);
+    assert_eq!((report.added, report.failures.len()), (1, 3), "{report:?}");
+    assert_eq!(report.failures[0].message, "不支持加密的压缩包");
+    assert!(
+        report.failures[0]
+            .path
+            .to_string_lossy()
+            .ends_with("加密.zip › 子目录/a.png")
+    );
+    assert!(report.failures[1].message.contains("不支持的压缩方式"));
+    assert!(report.failures[2].message.contains("压缩包损坏"));
+    assert_eq!(
+        fs::read_dir(library.root.join("objects")).unwrap().count(),
+        1
+    );
+}
+
+#[test]
+fn corrupt_zip_entry_fails_alone_and_leaves_no_temporary_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(&dir.path().join("library")).unwrap();
+    let image = dir.path().join("other.png");
+    png_file(&image, [3, 2, 1, 255]);
+    let first = dir.path().join("first.png");
+    png_file(&first, [4, 5, 6, 255]);
+    let last = dir.path().join("last.png");
+    png_file(&last, [7, 8, 9, 255]);
+    let path = dir.path().join("broken.zip");
+    make_zip(
+        &path,
+        &[
+            ("first.png", &fs::read(&first).unwrap()),
+            ("last.png", &fs::read(&last).unwrap()),
+        ],
+    );
+    let mut bytes = fs::read(&path).unwrap();
+    let headers: Vec<_> = bytes
+        .windows(4)
+        .enumerate()
+        .filter(|(_, w)| *w == b"PK\x01\x02")
+        .map(|(i, _)| i)
+        .collect();
+    bytes[headers[1] + 16] ^= 1; // 最后一项 CRC 不匹配，目录与第一项仍然可读。
+    fs::write(&path, bytes).unwrap();
+    let report = library.import_paths(&[path, image]);
+    assert_eq!(
+        (report.added, report.existing, report.failures.len()),
+        (2, 0, 1),
+        "{report:?}"
+    );
+    assert!(report.failures[0].message.contains("条目损坏"));
+    assert!(
+        report.failures[0]
+            .path
+            .to_string_lossy()
+            .ends_with("broken.zip › last.png")
+    );
+    let names: Vec<_> = report
+        .sticker_ids
+        .iter()
+        .map(|id| library.sticker(id).unwrap().name)
+        .collect();
+    assert_eq!(names, ["first", "other"]);
+    assert_eq!(
+        fs::read_dir(library.root.join("objects")).unwrap().count(),
+        2
+    );
+}
+#[test]
+fn cancel_keeps_committed_files_and_import_releases_lock_between_images() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let library = Arc::new(Mutex::new(
+        Library::open(&dir.path().join("library")).unwrap(),
+    ));
+    let paths: Vec<_> = (0..4)
+        .map(|n| {
+            let p = dir.path().join(format!("{n}.png"));
+            png_file(&p, [n, 2, 3, 255]);
+            p
+        })
+        .collect();
+    let cancelled = AtomicBool::new(false);
+    let report = import_paths_with_progress(
+        &library,
+        &paths,
+        &|| cancelled.load(Ordering::Relaxed),
+        &mut |p| {
+            let other = library.clone();
+            std::thread::spawn(move || assert!(other.try_lock().is_ok()))
+                .join()
+                .unwrap();
+            if p.processed == 2 {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+        },
+    )
+    .unwrap();
+    assert!(report.cancelled);
+    assert_eq!((report.added, report.sticker_ids.len()), (2, 2));
+    assert_eq!(library.lock().unwrap().overview().unwrap().all, 2);
 }

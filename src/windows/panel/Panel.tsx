@@ -3,6 +3,8 @@ import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useSyncStatus, syncLabel, deviceTime, syncStateLabel } from "../main/useSyncStatus";
+import { SyncIcon } from "../main/SyncIcon";
 import { TagDot } from "../../components/TagDot";
 import { ipc, type Sticker } from "../../lib/ipc";
 import { useLibraryChangedEvents, useLibraryOverview, useStickers, useTagSidebar } from "../../lib/queries";
@@ -14,6 +16,8 @@ import { usePanelActions } from "./usePanelActions";
 const EMPTY: Sticker[] = [];
 
 export function Panel() {
+  const sync = useSyncStatus();
+  const syncTitle = sync.data?.phase === "synced" ? `${syncLabel(sync.data)} · ${deviceTime(sync.data.lastSyncAt)}` : syncStateLabel(sync.data);
   const client = useQueryClient();
   const input = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
@@ -189,7 +193,7 @@ export function Panel() {
           </>}
       </div>
       {problem && <p role="alert" className="absolute right-3 bottom-14 left-3 max-h-24 overflow-y-auto rounded-lg border border-accent bg-surface px-3 py-2 text-xs leading-5 text-accent">{String(problem)}</p>}
-      <footer className="flex items-center justify-between gap-2 rounded-xl bg-chrome px-3 py-2 text-xs whitespace-nowrap text-ink-tertiary [&_button]:font-semibold [&_button:hover]:opacity-82"><span>单击复制 · 拖出发送 · Esc 收起</span>
+      <footer className="flex items-center justify-between gap-2 rounded-xl bg-chrome px-3 py-2 text-xs whitespace-nowrap text-ink-tertiary [&_button]:font-semibold [&_button:hover]:opacity-82"><span className="flex items-center gap-1">{sync.data?.target && <button type="button" title={syncTitle} aria-label={syncTitle} className="shrink-0 rounded-sm" onClick={() => void run(ipc.showSyncDetails)}><SyncIcon status={sync.data} /></button>}<span>单击复制 · 拖出发送 · Esc 收起</span></span>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void run(ipc.showMainWindow)}>主窗口</button>
       </footer>
     </main>

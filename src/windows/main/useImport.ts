@@ -1,13 +1,25 @@
 import { isTauri } from "@tauri-apps/api/core";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
-import { formatReport } from "../../lib/importReport";
+import { ipc, type ImportStatus } from "../../lib/ipc";
 import { useImportStickers } from "../../lib/queries";
 
 export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
-  const { mutate, data, error, isPending } = useImportStickers();
+  const { mutate, error, reset } = useImportStickers();
+  const [status, setStatus] = useState<ImportStatus | null>(null);
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let seenEvent = false;
+    const listening = listen<ImportStatus>("import-status-changed", ({ payload }) => {
+      seenEvent = true;
+      if (!disposed) { setStatus(payload); if (payload.running && payload.progress.processed === 0) reset(); }
+    });
+    void listening.then(() => ipc.importStatus()).then((value) => { if (!disposed && !seenEvent) setStatus(value); }).catch((reason: unknown) => { if (!disposed) setDialogError(String(reason)); });
+    return () => { disposed = true; void listening.then((cleanup) => cleanup(), () => {}); };
+  }, [reset]);
   const [choosing, setChoosing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -48,7 +60,7 @@ export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
         title: directory ? "导入文件夹" : "导入表情",
         multiple: true,
         directory,
-        filters: directory ? undefined : [{ name: "表情", extensions: ["png", "jpg", "jpeg", "webp", "gif", "apng"] }],
+        filters: directory ? undefined : [{ name: "表情", extensions: ["png", "jpg", "jpeg", "webp", "gif", "apng", "zip"] }],
       });
       if (paths && paths.length > 0) mutate(paths);
     } catch (reason) {
@@ -58,11 +70,13 @@ export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
     }
   }
 
-  const result = dialogError ?? (error ? `导入未完成：${String(error)}` : data ? formatReport(data) : "");
   return {
     choose,
     dragging,
-    busy: choosing || isPending,
-    message: dragging ? "松开以导入表情" : isPending ? "正在导入表情…" : [result, dropError].filter(Boolean).join("\n"),
+    busy: choosing || !!status?.running,
+    status,
+    error: dialogError ?? (error ? String(error) : null),
+    clearError: () => { setDialogError(null); reset(); },
+    message: [dragging ? "松开以导入表情" : "", dropError].filter(Boolean).join("\n"),
   };
 }

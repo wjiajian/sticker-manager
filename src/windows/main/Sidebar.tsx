@@ -12,7 +12,7 @@ import { SyncCard } from "./SyncCard";
 const navigation = "interactive relative flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover active:scale-98";
 const selectedNavigation = "bg-surface font-semibold windows:before:absolute windows:before:top-2 windows:before:left-0 windows:before:h-3 windows:before:w-0.75 windows:before:rounded-full windows:before:bg-accent";
 
-export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => void; onSync: () => void; sync?: SyncStatus }) {
+export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => void; onSync: (button: HTMLButtonElement) => void; sync?: SyncStatus }) {
   const { data: overview } = useLibraryOverview();
   const { data: sidebar, error, isPending } = useTagSidebar();
   const view = useUiStore((s) => s.view);

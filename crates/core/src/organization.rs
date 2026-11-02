@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Row, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -57,6 +57,37 @@ impl Tag {
 }
 
 impl Library {
+    pub fn add_tag_to_stickers(&mut self, ids: &[String], tag_id: &str) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        require_tag(&tx, tag_id)?;
+        let count = batch_add(&tx, ids, tag_id)?;
+        tx.commit()?;
+        Ok(count)
+    }
+
+    /// 重试同名标签时复用它；新建和整批关联在同一个事务内。
+    pub fn create_tag_and_add_to_stickers(
+        &mut self,
+        ids: &[String],
+        name: &str,
+    ) -> Result<(Tag, usize)> {
+        let tx = self.conn.transaction()?;
+        let tag = tx
+            .query_row(
+                "SELECT id,name,color,group_id,position FROM tags WHERE name=?1 COLLATE NOCASE",
+                [name.trim()],
+                Tag::from_row,
+            )
+            .optional()?;
+        let tag = match tag {
+            Some(tag) => tag,
+            None => insert_tag(&tx, name, None, None)?,
+        };
+        let count = batch_add(&tx, ids, &tag.id)?;
+        tx.commit()?;
+        Ok((tag, count))
+    }
+
     pub fn create_tag(
         &mut self,
         name: &str,
@@ -275,6 +306,17 @@ impl Library {
         }
         Ok(sidebar)
     }
+}
+
+fn batch_add(conn: &Connection, ids: &[String], tag: &str) -> Result<usize> {
+    let mut count = 0;
+    for id in ids.iter().collect::<std::collections::BTreeSet<_>>() {
+        count += conn.execute(
+            "INSERT OR IGNORE INTO sticker_tags(sticker_id,tag_id) SELECT id,?2 FROM stickers WHERE id=?1 AND deleted_at IS NULL",
+            params![id, tag],
+        )?;
+    }
+    Ok(count)
 }
 
 fn insert_tag(

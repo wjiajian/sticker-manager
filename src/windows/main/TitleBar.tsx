@@ -1,14 +1,14 @@
-import { CloudSlashIcon, CloudCheckIcon, ArrowsClockwiseIcon, WarningCircleIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button";
 import { platform } from "../../lib/platform";
 import { useUiStore } from "../../stores/ui";
 import { ImportButton } from "./ImportButton";
 import type { SyncStatus } from "../../lib/ipc";
+import { SyncIcon } from "./SyncIcon";
 import { progressLabel, syncLabel, syncTooltip } from "./useSyncStatus";
 
-export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onChoose: (directory: boolean) => void; sync?: SyncStatus; onSync: () => void }) {
-  const SyncIcon = sync?.phase === "synced" ? CloudCheckIcon : sync?.phase === "syncing" ? ArrowsClockwiseIcon : sync?.phase === "error" ? WarningCircleIcon : CloudSlashIcon;
+export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onChoose: (directory: boolean) => void; sync?: SyncStatus; onSync: (button: HTMLButtonElement) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const searchText = useUiStore((s) => s.searchText);
   const setSearchText = useUiStore((s) => s.setSearchText);
@@ -71,8 +71,8 @@ export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onCh
       </label>
 
       <div className="flex items-center gap-2">
-        <Button onClick={onSync} title={syncTooltip(sync)}>
-          <SyncIcon size={16} className={sync?.phase === "synced" ? "text-synced" : sync?.phase === "error" ? "text-accent" : "text-ink-secondary"} />
+        <Button id="title-sync" aria-haspopup="dialog" onClick={(event) => onSync(event.currentTarget)} title={syncTooltip(sync)}>
+          <SyncIcon status={sync} />
           <span className="max-w-48 truncate">{progressLabel(sync) ?? syncLabel(sync)}</span>
         </Button>
         <ImportButton disabled={busy} onChoose={onChoose} />

@@ -50,6 +50,7 @@ export interface Sticker {
   deletedAt: number | null;
   purgeAt: number | null;
   usageCount: number;
+  usageDevices: number;
   lastUsedAt: number | null;
   caption: string | null;
   tags: Tag[];
@@ -68,9 +69,24 @@ export interface ImportReport {
   restored: number;
   skipped: number;
   failures: ImportFailure[];
+  stickerIds: string[];
+  cancelled: boolean;
 }
 
+export interface ImportStatus { batch: number; running: boolean; progress: { processed: number; total: number }; report: ImportReport | null; error: string | null }
+export interface RemoteDevice { id: string; name: string; platform: string; lastSyncAt: number; received: Record<string, number> }
+export interface StickerSyncInfo { waitingUpload: boolean; deviceCount: number | null }
+
 export const ipc = {
+  importStatus: () => invoke<ImportStatus>("import_status"),
+  cancelImport: () => invoke<void>("cancel_import"),
+  addTagToStickers: (ids: string[], tagId: string) => invoke<number>("add_tag_to_stickers", { ids, tagId }),
+  createTagAndAddToStickers: (ids: string[], name: string) => invoke<[Tag, number]>("create_tag_and_add_to_stickers", { ids, name }),
+  setSyncPaused: (paused: boolean) => invoke<void>("set_sync_paused", { paused }),
+  setPauseOnMetered: (enabled: boolean) => invoke<void>("set_pause_on_metered", { enabled }),
+  stickerSyncInfo: (id: string) => invoke<StickerSyncInfo | null>("sticker_sync_info", { id }),
+  showSyncDetails: () => invoke<void>("show_sync_details"),
+  takeSyncDetailsRequest: () => invoke<boolean>("take_sync_details_request"),
   syncStatus: () => invoke<SyncStatus>("sync_status"),
   syncNow: () => invoke<void>("sync_now"),
   inspectSyncFolder: (path: string) => invoke<SyncFolderInfo>("inspect_sync_folder", { path }),
@@ -134,10 +150,16 @@ export interface Settings {
   ballAutoHideSeconds: 3 | 10 | null;
   ballPosition: { display: string; edge: "left" | "right"; y: number };
   autostartInitialized: boolean;
-  sync: (({ backend: "folder"; folder: string } | NetworkTarget) & { libraryId: string }) | null;
+  sync: (({ backend: "folder"; folder: string } | NetworkTarget) & { libraryId: string; paused: boolean; pauseOnMetered: boolean }) | null;
 }
 export interface SyncStatus {
-  phase: "unconfigured" | "syncing" | "synced" | "error";
+  phase: "unconfigured" | "syncing" | "synced" | "paused" | "error";
+  pauseReason: "manual" | "metered" | null;
+  manualPaused: boolean;
+  pauseOnMetered: boolean;
+  devices: RemoteDevice[];
+  deviceId: string;
+  unseen: number;
   lastSyncAt: number | null;
   error: string | null;
   target: { backend: SyncBackend; name: string; address: string; shortAddress: string; credentialsSaved: boolean } | null;

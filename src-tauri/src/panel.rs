@@ -81,6 +81,7 @@ pub fn is_visible(app: &AppHandle) -> Result<bool, String> {
 }
 
 fn broadcast_visibility(app: &AppHandle) -> Result<(), String> {
+    crate::sync::visibility_changed(app, None, Some(native::visible(app)?));
     app.emit("panel-visibility", native::visible(app)?)
         .map_err(|e| e.to_string())
 }
@@ -137,6 +138,11 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         if let Err(error) = result {
             eprintln!("无法隐藏窗口：{error}");
         }
+    }
+    if window.label() == "main"
+        && let WindowEvent::Focused(active) = event
+    {
+        crate::sync::visibility_changed(window.app_handle(), Some(*active), None);
     }
     if window.label() == "panel" && matches!(event, WindowEvent::Focused(false)) {
         let state = window.state::<PanelState>();

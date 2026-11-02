@@ -11,7 +11,8 @@ use crate::{Device, Error, Result, Tag, db, deletion::RETENTION_MS};
 const STICKER_COLUMNS: &str = "s.id, s.name, s.width, s.height, s.byte_size, s.animated,
     s.added_at, s.hash, s.ext, s.favorite, s.deleted_at,
     COALESCE((SELECT SUM(u.count) FROM usages u WHERE u.sticker_id = s.id), 0),
-    (SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id), s.caption";
+    (SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id), s.caption,
+    (SELECT COUNT(*) FROM usages u WHERE u.sticker_id = s.id AND u.count > 0)";
 
 /// 仓库：应用托管的、存放全部表情的唯一位置（ADR 0002）。
 ///
@@ -52,6 +53,7 @@ pub struct Sticker {
     pub deleted_at: Option<i64>,
     pub purge_at: Option<i64>,
     pub usage_count: i64,
+    pub usage_devices: usize,
     pub last_used_at: Option<i64>,
     pub caption: Option<String>,
     pub tags: Vec<Tag>,
@@ -212,6 +214,7 @@ impl Sticker {
             deleted_at,
             purge_at: deleted_at.map(|time| time + RETENTION_MS),
             usage_count: row.get(11)?,
+            usage_devices: row.get::<_, u32>(14)? as usize,
             last_used_at: row.get(12)?,
             caption: row.get(13)?,
             tags: Vec::new(),

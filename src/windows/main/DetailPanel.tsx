@@ -1,4 +1,7 @@
 import { ArrowCounterClockwiseIcon, CheckIcon, CopyIcon, FolderOpenIcon, StarIcon, TrashIcon } from "@phosphor-icons/react";
+import { useQuery, skipToken } from "@tanstack/react-query";
+import { ipc, type SyncStatus } from "../../lib/ipc";
+import { SyncDevices } from "./SyncDevices";
 import { Button } from "../../components/Button";
 import { platform } from "../../lib/platform";
 import { useSticker } from "../../lib/queries";
@@ -10,9 +13,10 @@ import { useDragOut } from "./useDragOut";
 import { usePurgeDays } from "./usePurgeDays";
 import type { StickerActions } from "./useStickerActions";
 
-export function DetailPanel({ actions }: { actions: StickerActions }) {
+export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?: SyncStatus }) {
   const selectedId = useUiStore((s) => s.selectedStickerId);
   const { data: sticker, error, isPending } = useSticker(selectedId);
+  const presence = useQuery({ queryKey: ["library", "sticker-sync", selectedId, sync?.lastSyncAt, sync?.target?.address], queryFn: selectedId && sync?.target && sticker?.deletedAt === null ? () => ipc.stickerSyncInfo(selectedId) : skipToken });
   const unavailable = !sticker || sticker.deletedAt !== null;
   const drag = useDragOut((isPressed) => sticker ? actions.drag(sticker, isPressed) : Promise.resolve(), unavailable || actions.busy);
   const revealLabel = platform === "windows" ? "在资源管理器中显示" : "在访达中显示";
@@ -76,14 +80,16 @@ export function DetailPanel({ actions }: { actions: StickerActions }) {
           <CaptionEditor key={`caption-${sticker.id}`} sticker={sticker} />
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
             <dt className="text-ink-secondary">使用次数</dt>
-            <dd>{sticker.usageCount.toLocaleString("zh-CN")} 次</dd>
+            <dd>{sticker.usageCount.toLocaleString("zh-CN")} 次{sticker.usageDevices > 1 ? ` · ${sticker.usageDevices} 台设备合计` : ""}</dd>
             <dt className="text-ink-secondary">上次使用</dt>
             <dd>{sticker.lastUsedAt === null ? "尚未使用" : new Date(sticker.lastUsedAt).toLocaleString("zh-CN", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</dd>
+            {sticker.deletedAt === null && <><dt className="text-ink-secondary">同步</dt><dd>{!sync?.target ? "未开启同步" : presence.data?.waitingUpload ? "等待上传" : presence.data?.deviceCount != null ? `已在 ${presence.data.deviceCount} 台设备上` : presence.isPending ? "正在读取…" : presence.error ? "无法读取同步情况" : "已同步"}</dd></>}
             {platform === "windows" && sticker.deletedAt === null && <>
               <dt className="text-ink-secondary">快捷键</dt>
               <dd>Ctrl+C 复制<br />Ctrl+Shift+C 复制为文件<br />Delete 删除</dd>
             </>}
           </dl>
+          {sticker.deletedAt === null && sync?.target && <SyncDevices status={sync} />}
           {sticker.deletedAt === null && <Button
             disabled={actions.busy}
             onClick={() => void actions.deleteSticker(sticker)}

@@ -206,8 +206,42 @@ pub async fn set_sticker_caption(app: AppHandle, id: String, caption: String) ->
 }
 
 #[tauri::command]
-pub async fn import_stickers(app: AppHandle, paths: Vec<PathBuf>) -> CommandResult<ImportReport> {
-    with_library(app, move |library| Ok(library.import_paths(&paths))).await
+pub async fn import_stickers(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    paths: Vec<PathBuf>,
+) -> Result<ImportReport, String> {
+    crate::imports::run(app, paths, window.label() == "ball").await
+}
+#[tauri::command]
+pub fn import_status(app: AppHandle) -> crate::imports::ImportStatus {
+    crate::imports::status(&app)
+}
+#[tauri::command]
+pub fn cancel_import(app: AppHandle) {
+    crate::imports::cancel(&app);
+}
+#[tauri::command]
+pub async fn add_tag_to_stickers(
+    app: AppHandle,
+    ids: Vec<String>,
+    tag_id: String,
+) -> CommandResult<usize> {
+    with_library(app, move |library| {
+        Ok(library.add_tag_to_stickers(&ids, &tag_id)?)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn create_tag_and_add_to_stickers(
+    app: AppHandle,
+    ids: Vec<String>,
+    name: String,
+) -> CommandResult<(Tag, usize)> {
+    with_library(app, move |library| {
+        Ok(library.create_tag_and_add_to_stickers(&ids, &name)?)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -256,7 +290,7 @@ pub async fn record_sticker_usage(app: AppHandle, id: String) -> CommandResult<(
     .await
 }
 
-fn notify_library_changed(app: &AppHandle) {
+pub(crate) fn notify_library_changed(app: &AppHandle) {
     if let Err(error) = app.emit("library-changed", ()) {
         eprintln!("通知仓库更新失败：{error}");
     }

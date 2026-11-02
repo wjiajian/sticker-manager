@@ -464,3 +464,36 @@ fn library_view_wire_format_preserves_fixed_views_and_accepts_tag_ids() {
     assert!(matches!(view, LibraryView::Tag(id) if id == "chosen-id"));
     assert!(serde_json::from_value::<LibraryView>(serde_json::json!({ "tag": 42 })).is_err());
 }
+
+#[test]
+fn batch_tags_are_atomic_idempotent_skip_deleted_and_record_operations() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    library.delete_sticker("deleted").unwrap();
+    let ids = ["one", "two", "one", "deleted", "missing"].map(String::from);
+    let before = library.local_revision().unwrap();
+    let (tag, count) = library
+        .create_tag_and_add_to_stickers(&ids, " 猫猫 ")
+        .unwrap();
+    assert_eq!(count, 2);
+    assert_eq!(library.local_revision().unwrap(), before + 3); // 标签 create + 两条 link
+    let revision = library.local_revision().unwrap();
+    assert_eq!(library.add_tag_to_stickers(&ids, &tag.id).unwrap(), 0);
+    let (same, count) = library
+        .create_tag_and_add_to_stickers(&ids, "猫猫")
+        .unwrap();
+    assert_eq!((same.id, count), (tag.id.clone(), 0));
+    assert_eq!(library.local_revision().unwrap(), revision);
+    assert!(library.sticker("deleted").unwrap().tags.is_empty());
+    assert!(library.add_tag_to_stickers(&ids, "missing").is_err());
+    assert!(library.create_tag_and_add_to_stickers(&ids, " ").is_err());
+    assert_eq!(library.local_revision().unwrap(), revision);
+    library.conn.execute_batch("CREATE TRIGGER reject_second BEFORE INSERT ON sticker_tags WHEN NEW.sticker_id='two' BEGIN SELECT RAISE(ABORT,'test rollback'); END;").unwrap();
+    assert!(
+        library
+            .create_tag_and_add_to_stickers(&ids, "回滚")
+            .is_err()
+    );
+    assert_eq!(library.tag_sidebar().unwrap().ungrouped.len(), 1);
+    assert_eq!(library.local_revision().unwrap(), revision);
+}

@@ -42,6 +42,23 @@ pub struct SyncSettings {
     #[serde(flatten)]
     pub target: StorageConfig,
     pub library_id: String,
+    #[serde(default)]
+    pub paused: bool,
+    #[serde(default = "enabled")]
+    pub pause_on_metered: bool,
+}
+fn enabled() -> bool {
+    true
+}
+impl SyncSettings {
+    pub fn new(target: StorageConfig, library_id: String) -> Self {
+        Self {
+            target,
+            library_id,
+            paused: false,
+            pause_on_metered: true,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -236,6 +253,8 @@ mod tests {
                     folder: root.path().join("shared"),
                 },
                 library_id: "library-id".into(),
+                paused: true,
+                pause_on_metered: false,
             }),
             ..Settings::default()
         };
@@ -259,6 +278,8 @@ mod tests {
             }
         );
         assert_eq!(config.library_id, "id");
+        assert!(!config.paused);
+        assert!(config.pause_on_metered);
         let root = tempfile::tempdir().unwrap();
         let settings = Settings {
             sync: Some(SyncSettings {
@@ -268,6 +289,8 @@ mod tests {
                     path: "one".into(),
                 },
                 library_id: "library-id".into(),
+                paused: true,
+                pause_on_metered: false,
             }),
             ..Settings::default()
         };

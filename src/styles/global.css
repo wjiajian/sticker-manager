@@ -93,3 +93,10 @@
     outline-offset: 2px;
   }
 }
+
+@keyframes sync-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+@keyframes sync-pulse { from { opacity: .35; } to { opacity: 1; } }
+.sync-download-arc { animation: sync-turn 1.5s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .sync-download-arc { animation: sync-pulse 1s ease-in-out infinite alternate; }
+}

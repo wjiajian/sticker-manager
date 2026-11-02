@@ -2,6 +2,7 @@
 identifier = "main-commands"
 description = "主窗口的仓库管理命令和快捷键注册状态。"
 commands.allow = [
+  "set_sync_paused", "set_pause_on_metered", "sticker_sync_info", "take_sync_details_request", "import_status", "cancel_import", "add_tag_to_stickers", "create_tag_and_add_to_stickers",
   "sync_status", "sync_now", "inspect_sync_folder", "join_sync_folder", "stop_sync", "set_device_name",
   "inspect_network_target", "join_network_target", "cancel_sync_connection", "update_sync_credentials",
   "get_settings", "set_ball_visible", "set_ball_auto_hide", "get_autostart", "set_autostart",

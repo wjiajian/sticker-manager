@@ -146,7 +146,8 @@ fn render(app: &AppHandle, r: &mut Runtime) -> Result<BallSnapshot, String> {
         dragging: r.dragging,
         panel_visible,
         drop_label: r.drop_label.clone(),
-        message: r.message.as_ref().map(|m| m.0.clone()),
+        message: crate::imports::ball_progress(app)
+            .or_else(|| r.message.as_ref().map(|m| m.0.clone())),
         tip_above: frame.tip_above,
     };
     if r.last_snapshot.as_ref() != Some(&snapshot) {
@@ -227,6 +228,10 @@ fn tick(app: &AppHandle) -> Result<(), String> {
         r.press.is_some() || r.drop_label.is_some() || distance <= 160.0 * r.display.scale,
         Ordering::Relaxed,
     );
+    let import_progress = crate::imports::ball_progress(app).is_some();
+    if import_progress {
+        r.collapsed = false;
+    }
     let panel_open = panel::is_visible(app)?;
     if r.hovered
         || r.press.is_some()
@@ -234,6 +239,7 @@ fn tick(app: &AppHandle) -> Result<(), String> {
         || r.drop_label.is_some()
         || r.menu_open
         || r.message.is_some()
+        || import_progress
     {
         r.collapsed = false;
         r.idle_since = Instant::now();

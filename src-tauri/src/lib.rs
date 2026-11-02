@@ -12,6 +12,8 @@ mod credentials;
 mod desktop;
 mod export;
 mod geometry;
+mod imports;
+mod metered;
 mod panel;
 mod settings;
 mod sync;
@@ -39,6 +41,7 @@ pub fn run() {
                 eprintln!("清理最近删除失败：{error}");
             }
             app.manage(Mutex::new(library));
+            app.manage(imports::ImportState::default());
             app.manage(export::ExportDirectory::new(
                 std::env::temp_dir()
                     .join(app.config().identifier.clone())
@@ -77,6 +80,10 @@ pub fn run() {
             commands::create_tag_and_add,
             commands::set_sticker_caption,
             commands::import_stickers,
+            commands::import_status,
+            commands::cancel_import,
+            commands::add_tag_to_stickers,
+            commands::create_tag_and_add_to_stickers,
             commands::copy_sticker,
             commands::prepare_sticker_drag,
             commands::record_sticker_usage,
@@ -103,6 +110,11 @@ pub fn run() {
             ball::ball_message,
             sync::sync_status,
             sync::sync_now,
+            sync::set_sync_paused,
+            sync::set_pause_on_metered,
+            sync::sticker_sync_info,
+            tray::show_sync_details,
+            tray::take_sync_details_request,
             sync::inspect_sync_folder,
             sync::join_sync_folder,
             sync::stop_sync,
