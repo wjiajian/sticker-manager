@@ -1,5 +1,6 @@
 //! 阻塞文件后端与可独立测试的同步协议。I/O 在 Library 的锁外，数据库阶段单独提交。
 mod model;
+pub mod network;
 pub mod storage;
 mod store;
 
@@ -28,7 +29,7 @@ pub struct Manifest {
 impl Manifest {
     pub fn create(storage: &dyn Storage) -> Result<Self> {
         if storage.list("")?.iter().any(|f| !system_file(&f.key)) {
-            return Err(Error::Sync("请选择空文件夹，或已有的同步文件夹".into()));
+            return Err(Error::Sync("请选择空路径，或已有的同步仓库".into()));
         }
         let manifest = Self {
             format: 1,
@@ -39,17 +40,26 @@ impl Manifest {
         Ok(manifest)
     }
     pub fn read(storage: &dyn Storage) -> Result<Self> {
-        let bytes = storage
-            .read("library.json")?
-            .ok_or_else(|| Error::Sync("library.json 尚未送达或已被移走，请稍后重试".into()))?;
-        let manifest: Self = serde_json::from_slice(&bytes)?;
+        Self::read_complete(storage)?
+            .ok_or_else(|| Error::Sync("library.json 尚未完整送达，请稍后重试".into()))
+    }
+    /// 读到半截返回 None，等下一轮；文件不存在则报错，否则仓库被删后会一直显示已同步、改动却推不出去。
+    fn read_complete(storage: &dyn Storage) -> Result<Option<Self>> {
+        let Some(bytes) = storage.read("library.json")? else {
+            return Err(Error::Sync(
+                "存储目标里找不到 library.json：可能还没送达，或仓库已被删除或移走".into(),
+            ));
+        };
+        let Ok(manifest) = serde_json::from_slice::<Self>(&bytes) else {
+            return Ok(None);
+        };
         if manifest.format > 1 {
             return Err(Error::SyncUpgrade(format!("同步格式 {}", manifest.format)));
         }
         if manifest.format != 1 || !valid_device(&manifest.id) {
             return Err(Error::Sync("无效的 library.json".into()));
         }
-        Ok(manifest)
+        Ok(Some(manifest))
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,16 +71,42 @@ pub struct RemoteDevice {
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FolderInfo {
-    pub path: PathBuf,
+pub struct TargetInfo {
     pub manifest: Option<Manifest>,
     pub devices: usize,
     pub stickers: usize,
 }
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderInfo {
+    pub path: PathBuf,
+    #[serde(flatten)]
+    pub target: TargetInfo,
+}
+impl std::ops::Deref for FolderInfo {
+    type Target = TargetInfo;
+    fn deref(&self) -> &TargetInfo {
+        &self.target
+    }
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgress {
+    pub stage: TransferStage,
+    pub completed: usize,
+    /// 下载没有总数：原图按日志段分批出现，读完全部段之前不知道一共要下多少张。
+    pub total: Option<usize>,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransferStage {
+    Uploading,
+    Downloading,
+}
 #[derive(Debug)]
 pub struct SyncReport {
     pub changed: bool,
-    pub last_sync_at: i64,
+    pub last_sync_at: Option<i64>,
     pub devices: Vec<RemoteDevice>,
     pub pending: usize,
 }
@@ -84,38 +120,37 @@ pub fn inspect_folder(path: &Path, local_root: &Path) -> Result<FolderInfo> {
             "同步文件夹不能是本机仓库、仓库里的文件夹，或包含仓库的文件夹".into(),
         ));
     }
+    Ok(FolderInfo {
+        path: storage.root().to_owned(),
+        target: inspect(&storage)?,
+    })
+}
+
+/// 所有后端共用的目标检查；系统文件和探测文件不算用户内容。
+pub fn inspect(storage: &dyn Storage) -> Result<TargetInfo> {
     if storage.read("library.json")?.is_none() {
-        let mut has_content = false;
-        for entry in fs::read_dir(storage.root())? {
-            if !system_file(&entry?.file_name().to_string_lossy()) {
-                has_content = true;
-                break;
-            }
-        }
-        if has_content {
+        if storage.list("")?.iter().any(|f| !system_file(&f.key)) {
             return Err(Error::Sync(
-                "这个文件夹不是空文件夹，也没有 library.json；请选择空文件夹或已有的同步文件夹"
-                    .into(),
+                "这个路径非空且没有 library.json；请选择空路径或已有的同步仓库".into(),
             ));
         }
-        return Ok(FolderInfo {
-            path: storage.root().to_owned(),
+        return Ok(TargetInfo {
             manifest: None,
             devices: 0,
             stickers: 0,
         });
     }
-    let manifest = Manifest::read(&storage)?;
+    let manifest = Manifest::read(storage)?;
     let mut model = Model::default();
     let mut waiting = Vec::new();
     let mut available = BTreeSet::new();
     let mut progress = BTreeMap::<String, i64>::new();
-    for segment in segments(&storage)? {
+    for segment in segments(storage)? {
         let cursor = *progress.get(&segment.device).unwrap_or(&0);
         if segment.first > cursor + 1 || segment.last <= cursor {
             continue;
         }
-        let Some(ops) = read_segment(&storage, &segment)? else {
+        let Some(ops) = read_segment(storage, &segment)? else {
             continue;
         };
         for op in ops.into_iter().filter(|o| o.seq > cursor) {
@@ -150,10 +185,9 @@ pub fn inspect_folder(path: &Path, local_root: &Path) -> Result<FolderInfo> {
         .filter_map(|e| e.data.as_ref().map(|d| d.hash.clone()))
         .collect::<BTreeSet<_>>()
         .len();
-    Ok(FolderInfo {
-        path: storage.root().to_owned(),
+    Ok(TargetInfo {
         manifest: Some(manifest),
-        devices: read_devices(&storage)?.len(),
+        devices: read_devices(storage)?.len(),
         stickers,
     })
 }
@@ -295,10 +329,26 @@ pub fn synchronize(
     storage: &dyn Storage,
     expected_id: &str,
 ) -> Result<SyncReport> {
-    let manifest = Manifest::read(storage)?;
+    synchronize_with_progress(library, storage, expected_id, &|_| {})
+}
+
+pub fn synchronize_with_progress(
+    library: &Mutex<Library>,
+    storage: &dyn Storage,
+    expected_id: &str,
+    progress: &dyn Fn(SyncProgress),
+) -> Result<SyncReport> {
+    let Some(manifest) = Manifest::read_complete(storage)? else {
+        return Ok(SyncReport {
+            changed: false,
+            last_sync_at: None,
+            devices: Vec::new(),
+            pending: 1,
+        });
+    };
     if manifest.id != expected_id {
         return Err(Error::Sync(
-            "同步文件夹中的仓库已更换，请重新选择同步文件夹并确认加入".into(),
+            "目标中的仓库已更换，请重新选择存储目标并确认加入".into(),
         ));
     }
     let remote = segments(storage)?;
@@ -336,7 +386,16 @@ pub fn synchronize(
     if !exists {
         lock(library)?.join_sync(expected_id)?;
     }
-    let mut changed = push(library, storage, expected_id, &root, &device)?;
+    let downloaded = std::cell::Cell::new(0);
+    let on_download = || {
+        downloaded.set(downloaded.get() + 1);
+        progress(SyncProgress {
+            stage: TransferStage::Downloading,
+            completed: downloaded.get(),
+            total: None,
+        });
+    };
+    let mut changed = push(library, storage, expected_id, &root, &device, progress)?;
     let mut first_error = None;
     let mut blocked = BTreeSet::new();
     for s in remote {
@@ -363,7 +422,7 @@ pub fn synchronize(
         for op in &ops {
             op.change.objects(&mut objects);
         }
-        let available = download_objects(storage, &root, &files, &objects)?;
+        let available = download_objects(storage, &root, &files, &objects, &on_download)?;
         let mut lib = lock(library)?;
         let tx = lib.conn.transaction()?;
         let (mut revision, mut model) = store::load(&tx)?;
@@ -400,7 +459,7 @@ pub fn synchronize(
         }
         result
     };
-    let available = download_objects(storage, &root, &files, &objects)?;
+    let available = download_objects(storage, &root, &files, &objects, &on_download)?;
     {
         let mut lib = lock(library)?;
         let tx = lib.conn.transaction()?;
@@ -416,7 +475,7 @@ pub fn synchronize(
         store::save(&tx, revision, &model)?;
         tx.commit()?;
     }
-    changed |= push(library, storage, expected_id, &root, &device)?;
+    changed |= push(library, storage, expected_id, &root, &device, progress)?;
     cleanup_purged_files(library, &root, &files)?;
     if let Some(error) = first_error {
         return Err(error);
@@ -437,7 +496,7 @@ pub fn synchronize(
         })? as usize;
     Ok(SyncReport {
         changed,
-        last_sync_at,
+        last_sync_at: Some(last_sync_at),
         devices: read_devices(storage)?,
         pending,
     })
@@ -449,6 +508,7 @@ fn push(
     id: &str,
     root: &Path,
     device: &Device,
+    progress: &dyn Fn(SyncProgress),
 ) -> Result<bool> {
     let (ops, live, deleted, changed) = {
         let mut lib = lock(library)?;
@@ -528,17 +588,31 @@ fn push(
     let existing = storage
         .list("objects/")?
         .into_iter()
-        .map(|f| f.key)
-        .collect::<BTreeSet<_>>();
-    for key in objects.keys() {
-        if existing.contains(key) {
-            continue;
-        }
+        .map(|f| (f.key, f.size))
+        .collect::<BTreeMap<_, _>>();
+    let missing = objects
+        .keys()
+        .filter(|key| {
+            fs::metadata(root.join(key)).map_or(true, |m| existing.get(*key) != Some(&m.len()))
+        })
+        .collect::<Vec<_>>();
+    let total = missing.len();
+    for (index, key) in missing.into_iter().enumerate() {
+        progress(SyncProgress {
+            stage: TransferStage::Uploading,
+            completed: index,
+            total: Some(total),
+        });
         match fs::read(root.join(key)) {
             Ok(bytes) => storage.write(key, &bytes)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && !live.contains_key(key) => {} // 已彻底删除，后续 purge 会终止等待。
             Err(e) => return Err(e.into()),
         }
+        progress(SyncProgress {
+            stage: TransferStage::Uploading,
+            completed: index + 1,
+            total: Some(total),
+        });
     }
     for batch in ops.chunks(128) {
         let first = batch.first().unwrap().seq;
@@ -570,6 +644,7 @@ fn download_objects(
     root: &Path,
     files: &Mutex<()>,
     objects: &BTreeMap<String, Object>,
+    downloaded: &dyn Fn(),
 ) -> Result<BTreeSet<String>> {
     let mut available = BTreeSet::new();
     for (key, object) in objects {
@@ -583,16 +658,16 @@ fn download_objects(
             Err(e) => return Err(e.into()),
         };
         let thumbnail = root.join("thumbs").join(format!("{}.png", object.hash));
-        let bytes = match local {
+        let (bytes, fetched) = match local {
             Some(b) if format!("{:x}", Sha256::digest(&b)) == object.hash => {
                 // 本机已有这张原图（比如两边导入过同一张），缩略图也在，就不用重新解码。
                 if thumbnail.is_file() {
                     available.insert(key.clone());
                     continue;
                 }
-                Some(b)
+                (Some(b), false)
             }
-            _ => storage.read(key)?,
+            _ => (storage.read(key)?, true),
         };
         let Some(bytes) = bytes else { continue };
         if format!("{:x}", Sha256::digest(&bytes)) != object.hash {
@@ -615,6 +690,9 @@ fn download_objects(
         file.persist(path).map_err(|e| e.error)?;
         thumb.persist(thumbnail).map_err(|e| e.error)?;
         available.insert(key.clone());
+        if fetched {
+            downloaded();
+        }
     }
     Ok(available)
 }

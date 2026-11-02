@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
+use sticker_core::sync::network::StorageConfig;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
@@ -38,16 +39,11 @@ pub struct Settings {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSettings {
-    pub backend: SyncBackend,
-    pub folder: PathBuf,
+    #[serde(flatten)]
+    pub target: StorageConfig,
     pub library_id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum SyncBackend {
-    Folder,
-}
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -69,12 +65,11 @@ impl Settings {
         if self.version != 1 {
             return Err(format!("不支持的设置版本 {}", self.version));
         }
-        if self
-            .sync
-            .as_ref()
-            .is_some_and(|s| !s.folder.is_absolute() || s.library_id.is_empty())
-        {
-            return Err("同步设置中的文件夹或仓库 ID 无效".into());
+        if let Some(sync) = &self.sync {
+            sync.target.normalized().map_err(|e| e.to_string())?;
+            if sync.library_id.is_empty() {
+                return Err("同步仓库 ID 无效".into());
+            }
         }
         if !matches!(self.ball_auto_hide_seconds, None | Some(3 | 10)) {
             return Err("收起时间必须是 3 秒、10 秒或不收起".into());
@@ -237,8 +232,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let settings = Settings {
             sync: Some(SyncSettings {
-                backend: SyncBackend::Folder,
-                folder: root.path().join("shared"),
+                target: StorageConfig::Folder {
+                    folder: root.path().join("shared"),
+                },
                 library_id: "library-id".into(),
             }),
             ..Settings::default()
@@ -251,6 +247,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(Settings::load(root.path()), Settings::default());
+    }
+    #[test]
+    fn legacy_folder_json_and_network_settings_contain_no_credentials() {
+        let old = r#"{"backend":"folder","folder":"/tmp/shared","libraryId":"id"}"#;
+        let config: SyncSettings = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            config.target,
+            StorageConfig::Folder {
+                folder: "/tmp/shared".into()
+            }
+        );
+        assert_eq!(config.library_id, "id");
+        let root = tempfile::tempdir().unwrap();
+        let settings = Settings {
+            sync: Some(SyncSettings {
+                target: StorageConfig::R2 {
+                    account_id: "0123456789abcdef0123456789abcdef".into(),
+                    bucket: "stickers".into(),
+                    path: "one".into(),
+                },
+                library_id: "library-id".into(),
+            }),
+            ..Settings::default()
+        };
+        settings.save(root.path()).unwrap();
+        assert_eq!(Settings::load(root.path()), settings);
+        let bytes = fs::read_to_string(root.path().join("local/settings.json")).unwrap();
+        for forbidden in ["password", "secret", "accessKey", "username"] {
+            assert!(!bytes.contains(forbidden));
+        }
     }
     #[test]
     fn missing_file_uses_defaults_without_writing() {

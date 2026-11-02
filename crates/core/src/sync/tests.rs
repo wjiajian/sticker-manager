@@ -144,7 +144,10 @@ fn remote_tag(device: &str, id: &str, at: i64, name: &str) -> Change {
 fn actual_folder_two_library_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
     let s = FolderStorage::new(dir.path()).unwrap();
-    let m = Manifest::create(&s).unwrap();
+    two_library_end_to_end(&s);
+}
+fn two_library_end_to_end(s: &dyn Storage) {
+    let m = Manifest::create(s).unwrap();
     let a = Site::new();
     let b = Site::new();
     let x = a.import(10);
@@ -155,10 +158,10 @@ fn actual_folder_two_library_end_to_end() {
         l.set_sticker_caption(&x, "收到").unwrap();
         t.id
     };
-    a.sync(&s, &m);
-    let info = inspect_folder(dir.path(), &b.lib.lock().unwrap().root).unwrap();
+    a.sync(s, &m);
+    let info = inspect(s).unwrap();
     assert_eq!((info.devices, info.stickers), (1, 2));
-    b.sync(&s, &m);
+    b.sync(s, &m);
     assert_eq!(a.state(), b.state());
     {
         let l = b.lib.lock().unwrap();
@@ -167,12 +170,12 @@ fn actual_folder_two_library_end_to_end() {
         l.delete_sticker(&y).unwrap();
         assert!(l.sticker(&x).unwrap().thumbnail_path.is_file());
     }
-    b.sync(&s, &m);
-    a.sync(&s, &m);
+    b.sync(s, &m);
+    a.sync(s, &m);
     assert_eq!(a.state(), b.state());
     a.lib.lock().unwrap().restore_sticker(&y).unwrap();
-    a.sync(&s, &m);
-    b.sync(&s, &m);
+    a.sync(s, &m);
+    b.sync(s, &m);
     let t1 = a
         .lib
         .lock()
@@ -188,8 +191,8 @@ fn actual_folder_two_library_end_to_end() {
         .unwrap()
         .id;
     for _ in 0..3 {
-        a.sync(&s, &m);
-        b.sync(&s, &m);
+        a.sync(s, &m);
+        b.sync(s, &m);
     }
     assert_eq!(a.state(), b.state());
     let l = a.lib.lock().unwrap();
@@ -197,6 +200,26 @@ fn actual_folder_two_library_end_to_end() {
     assert_eq!(sidebar.ungrouped.len(), 2);
     assert_eq!(l.sticker(&y).unwrap().tags[0].id, t1.min(t2));
     assert!(l.sticker(&x).unwrap().tags.iter().any(|t| t.id == tag));
+    let key = format!(
+        "objects/{}",
+        l.sticker(&y)
+            .unwrap()
+            .object_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+    );
+    drop(l);
+    {
+        let mut l = a.lib.lock().unwrap();
+        l.delete_sticker(&y).unwrap();
+        l.purge_sticker(&y).unwrap();
+    }
+    a.sync(s, &m);
+    b.sync(s, &m);
+    a.sync(s, &m);
+    assert_eq!(a.state(), b.state());
+    assert!(s.read(&key).unwrap().is_none(), "彻底删除应移除远端原图");
 }
 
 #[test]
@@ -1181,3 +1204,76 @@ fn purging_a_merged_sticker_lists_and_removes_every_known_copy() {
         json!(both)
     );
 }
+
+#[test]
+fn incomplete_manifest_and_device_wait_without_applying_partial_data() {
+    let (storage, manifest) = backend();
+    let site = Site::new();
+    site.import(81);
+    storage
+        .write("library.json", br#"{"format":1,"id":"#)
+        .unwrap();
+    let report = synchronize(&site.lib, &storage, &manifest.id).unwrap();
+    assert_eq!(report.last_sync_at, None);
+    assert_eq!(report.pending, 1);
+    assert!(storage.list("ops/").unwrap().is_empty());
+    storage
+        .write("library.json", &serde_json::to_vec(&manifest).unwrap())
+        .unwrap();
+    storage
+        .write(&format!("devices/{}.json", Uuid::new_v4()), b"{")
+        .unwrap();
+    site.sync(&storage, &manifest);
+    assert_eq!(inspect(&storage).unwrap().devices, 1);
+}
+#[test]
+fn missing_manifest_is_an_error_not_a_quiet_wait() {
+    let (storage, manifest) = backend();
+    let site = Site::new();
+    site.sync(&storage, &manifest);
+    let segments = storage.list("ops/").unwrap();
+    storage.delete("library.json").unwrap();
+    site.import(83);
+    let error = synchronize(&site.lib, &storage, &manifest.id).unwrap_err();
+    assert!(error.to_string().contains("找不到 library.json"), "{error}");
+    assert_eq!(storage.list("ops/").unwrap(), segments);
+}
+#[test]
+fn progress_is_outside_repository_lock_and_partial_object_is_repaired() {
+    let (storage, manifest) = backend();
+    let a = Site::new();
+    let b = Site::new();
+    a.import(82);
+    a.sync(&storage, &manifest);
+    let object = storage.list("objects/").unwrap().pop().unwrap();
+    storage.write(&object.key, b"partial").unwrap();
+    let updates = Mutex::new(Vec::new());
+    synchronize_with_progress(&a.lib, &storage, &manifest.id, &|p| {
+        assert!(a.lib.try_lock().is_ok());
+        updates.lock().unwrap().push(p);
+    })
+    .unwrap();
+    assert_eq!(
+        storage.read(&object.key).unwrap().unwrap().len() as u64,
+        object.size
+    );
+    assert!(
+        updates
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| matches!(p.stage, TransferStage::Uploading) && p.total == Some(p.completed))
+    );
+    let downloads = Mutex::new(Vec::new());
+    synchronize_with_progress(&b.lib, &storage, &manifest.id, &|p| {
+        assert!(b.lib.try_lock().is_ok());
+        if matches!(p.stage, TransferStage::Downloading) {
+            downloads.lock().unwrap().push((p.completed, p.total));
+        }
+    })
+    .unwrap();
+    assert_eq!(*downloads.lock().unwrap(), [(1, None)]);
+    assert_eq!(a.state(), b.state());
+}
+
+mod network_integration;

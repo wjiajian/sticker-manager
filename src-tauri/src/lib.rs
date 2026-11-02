@@ -8,6 +8,7 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 mod ball;
 mod clipboard;
 mod commands;
+mod credentials;
 mod desktop;
 mod export;
 mod geometry;
@@ -105,6 +106,10 @@ pub fn run() {
             sync::inspect_sync_folder,
             sync::join_sync_folder,
             sync::stop_sync,
+            sync::inspect_network_target,
+            sync::join_network_target,
+            sync::cancel_sync_connection,
+            sync::update_sync_credentials,
             sync::set_device_name,
         ])
         .build(tauri::generate_context!())

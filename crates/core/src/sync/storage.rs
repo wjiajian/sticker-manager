@@ -13,12 +13,25 @@ pub struct FileEntry {
     pub size: u64,
 }
 
-/// 后端只中转文件。write 必须原子发布，NotFound 通过 Ok(None) 表达。
+/// 后端只中转文件。写入可被读到一部分，读取方须校验完整性后再应用。
+/// read 的 NotFound 通过 Ok(None) 表达；delete 不存在的文件应成功。
 pub trait Storage: Send + Sync {
     fn list(&self, prefix: &str) -> Result<Vec<FileEntry>>;
     fn read(&self, key: &str) -> Result<Option<Vec<u8>>>;
     fn write(&self, key: &str, bytes: &[u8]) -> Result<()>;
     fn delete(&self, key: &str) -> Result<()>;
+}
+
+pub fn validate_key(key: &str) -> Result<()> {
+    if key.is_empty()
+        || key.contains('\\')
+        || Path::new(key)
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(Error::Sync("无效的存储文件名".into()));
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -38,14 +51,7 @@ impl FolderStorage {
         &self.root
     }
     fn path(&self, key: &str) -> Result<PathBuf> {
-        if key.is_empty()
-            || key.contains('\\')
-            || Path::new(key)
-                .components()
-                .any(|c| !matches!(c, Component::Normal(_)))
-        {
-            return Err(Error::Sync("无效的存储文件名".into()));
-        }
+        validate_key(key)?;
         let mut path = self.root.clone();
         for part in Path::new(key).components() {
             path.push(part);

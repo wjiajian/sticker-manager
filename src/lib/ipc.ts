@@ -76,6 +76,10 @@ export const ipc = {
   inspectSyncFolder: (path: string) => invoke<SyncFolderInfo>("inspect_sync_folder", { path }),
   joinSyncFolder: (path: string, expectedId: string | null) => invoke<void>("join_sync_folder", { path, expectedId }),
   stopSync: () => invoke<void>("stop_sync"),
+  inspectNetworkTarget: (connectionId: string, target: NetworkTarget, credentials: SyncCredentials) => invoke<SyncTargetInfo>("inspect_network_target", { connectionId, target, credentials }),
+  joinNetworkTarget: (connectionId: string, expectedId: string | null) => invoke<void>("join_network_target", { connectionId, expectedId }),
+  cancelSyncConnection: (connectionId: string) => invoke<void>("cancel_sync_connection", { connectionId }),
+  updateSyncCredentials: (connectionId: string, credentials: SyncCredentials) => invoke<void>("update_sync_credentials", { connectionId, credentials }),
   setDeviceName: (name: string) => invoke<void>("set_device_name", { name }),
   getSettings: () => invoke<Settings>("get_settings"),
   setBallVisible: (visible: boolean) => invoke<Settings>("set_ball_visible", { visible }),
@@ -130,20 +134,27 @@ export interface Settings {
   ballAutoHideSeconds: 3 | 10 | null;
   ballPosition: { display: string; edge: "left" | "right"; y: number };
   autostartInitialized: boolean;
-  sync: { backend: "folder"; folder: string; libraryId: string } | null;
+  sync: (({ backend: "folder"; folder: string } | NetworkTarget) & { libraryId: string }) | null;
 }
 export interface SyncStatus {
   phase: "unconfigured" | "syncing" | "synced" | "error";
   lastSyncAt: number | null;
   error: string | null;
-  folder: string | null;
+  target: { backend: SyncBackend; name: string; address: string; shortAddress: string; credentialsSaved: boolean } | null;
+  progress: { stage: "uploading" | "downloading"; completed: number; total: number | null } | null;
   deviceName: string;
   storageBytes: number;
   onlineDevices: number;
   waiting: number;
 }
-export interface SyncFolderInfo {
-  path: string;
+export type SyncBackend = "folder" | "webdav" | "r2" | "s3";
+export type NetworkTarget =
+  | { backend: "webdav"; url: string }
+  | { backend: "r2"; accountId: string; bucket: string; path: string }
+  | { backend: "s3"; endpoint: string; region: string; bucket: string; path: string };
+export interface SyncCredentials { username: string; password: string; accessKeyId: string; secretAccessKey: string }
+export interface SyncFolderInfo extends SyncTargetInfo { path: string }
+export interface SyncTargetInfo {
   manifest: { format: number; id: string; createdAt: number } | null;
   devices: number;
   stickers: number;

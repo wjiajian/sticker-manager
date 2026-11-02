@@ -5,7 +5,7 @@ import { platform } from "../../lib/platform";
 import { useUiStore } from "../../stores/ui";
 import { ImportButton } from "./ImportButton";
 import type { SyncStatus } from "../../lib/ipc";
-import { syncLabel, waitingNote } from "./useSyncStatus";
+import { progressLabel, syncLabel, syncTooltip } from "./useSyncStatus";
 
 export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onChoose: (directory: boolean) => void; sync?: SyncStatus; onSync: () => void }) {
   const SyncIcon = sync?.phase === "synced" ? CloudCheckIcon : sync?.phase === "syncing" ? ArrowsClockwiseIcon : sync?.phase === "error" ? WarningCircleIcon : CloudSlashIcon;
@@ -71,9 +71,9 @@ export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onCh
       </label>
 
       <div className="flex items-center gap-2">
-        <Button onClick={onSync} title={sync?.error ?? waitingNote(sync) ?? "打开同步偏好设置"}>
+        <Button onClick={onSync} title={syncTooltip(sync)}>
           <SyncIcon size={16} className={sync?.phase === "synced" ? "text-synced" : sync?.phase === "error" ? "text-accent" : "text-ink-secondary"} />
-          {syncLabel(sync)}
+          <span className="max-w-48 truncate">{progressLabel(sync) ?? syncLabel(sync)}</span>
         </Button>
         <ImportButton disabled={busy} onChoose={onChoose} />
       </div>

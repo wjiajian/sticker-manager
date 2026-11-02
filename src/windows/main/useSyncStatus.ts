@@ -23,7 +23,7 @@ export function syncLabel(status?: SyncStatus) {
   return "未设置同步";
 }
 export function waitingNote(status?: SyncStatus) {
-  return status?.waiting ? `还有 ${status.waiting} 项改动在等同步盘送达原图或其他电脑的记录，到了会自动应用。` : null;
+  return status?.waiting ? `还有 ${status.waiting} 项改动在等原图或其他电脑的记录送达，到了会自动应用。` : null;
 }
 export function syncTime(value: number | null | undefined) {
   return value ? new Date(value).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "尚未同步";
@@ -32,4 +32,14 @@ export function storageSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function progressLabel(status?: SyncStatus) {
+  const progress = status?.progress;
+  if (!progress || status?.phase !== "syncing") return null;
+  return progress.total === null ? `正在下载原图，已下载 ${progress.completed} 张` : `正在${progress.stage === "uploading" ? "上传" : "下载"}原图 ${progress.completed}/${progress.total}`;
+}
+export function syncTooltip(status?: SyncStatus) {
+  return [status?.target && `${status.target.name} · ${status.target.shortAddress}`, progressLabel(status), status?.error ?? waitingNote(status)]
+    .filter(Boolean).join("\n") || "打开同步偏好设置";
 }
