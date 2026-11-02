@@ -303,9 +303,12 @@ pub async fn toggle_sticker_favorite(app: AppHandle, id: String) -> CommandResul
 
 #[tauri::command]
 pub async fn reveal_sticker(app: AppHandle, id: String) -> CommandResult<()> {
+    let handle = app.clone();
     with_library(app, move |library| {
-        let sticker = library.sticker(&id)?;
-        tauri_plugin_opener::reveal_item_in_dir(sticker.object_path)?;
+        let sticker = library.sticker_for_use(&id)?;
+        // 显示按表情名命名的副本：仓库里的原文件按哈希命名，用户改名或删掉会损坏仓库。
+        let path = handle.state::<ExportDirectory>().prepare(&sticker)?;
+        tauri_plugin_opener::reveal_item_in_dir(path)?;
         Ok(())
     })
     .await

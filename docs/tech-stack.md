@@ -19,7 +19,7 @@
 | 拖出发送 | `tauri-plugin-drag` |
 | 全局快捷键 | `tauri-plugin-global-shortcut` |
 | 开机自启 | `tauri-plugin-autostart` |
-| 自动更新 | `tauri-plugin-updater`，从 GitHub Releases 拉取 |
+| 自动更新 | `tauri-plugin-updater`，从 GitHub Releases 拉取（尚未实现，见 [TODO.md](../TODO.md)） |
 | 包管理 | pnpm；Rust workspace |
 
 ## 代码结构
@@ -67,20 +67,23 @@
 
 ## 仓库与数据
 
-- 仓库位置固定：macOS `~/Library/Application Support/<应用名>/`，Windows `%APPDATA%\<应用名>\`（[ADR 0002](adr/0002-managed-library.md)）。
+- 仓库位置固定：macOS `~/Library/Application Support/com.shaojian.sticker-manager/`，Windows `%APPDATA%\com.shaojian.sticker-manager\`，文件夹名是应用标识符（[ADR 0002](adr/0002-managed-library.md)）。
 - 表情文件按内容哈希存放；导入已有的图会合并，提示"新增 N 张，M 张已存在"。
 - 第一版支持的格式：PNG、JPG、WebP（含动图）、GIF、APNG；不支持视频。
 - 支持直接选中或拖入 `.zip`（zip 9.2.2，关闭默认 features、仅 `deflate`，纯 Rust）。包内递归识别图片，隐藏 / 系统文件和 `__MACOSX/` 忽略；嵌套压缩包及其他格式跳过，文件夹中的 `.zip` 不展开。文件名优先 UTF-8，非 UTF-8 用 GB18030 解码（encoding_rs）。不支持加密及 Deflate / Stored 以外的压缩方式；实际解压量限制为单条目 100 MB、整包 2 GB、10000 条目。
 - 压缩包逐条解压到 `objects/` 里的临时文件后立即导入，同一时间只有一个临时文件（macOS 图形应用默认只能同时打开 256 个文件）。条目读完时校验 CRC，损坏的条目只算它自己失败，其余照常导入；目录区读不出来时整包失败。取消在条目之间生效，已导入的保留。
 - 导入在锁外读取、哈希、解码和生成缩略图，逐张在短事务内重新查重并提交；准备阶段先短暂持锁查重，已有同图且原图和缩略图都在时跳过解码；原图发布仍按 Library → files 加锁，与同步清理协调。全窗口单批互斥，约 150ms 推送进度、每秒通知仓库变化，支持取消和对整批结果添加标签。
 - 缩略图在每台设备上各自生成，不同步。
+- 启动时和每小时清理一次没有表情记录的原图、缩略图，以及中断留下的 `.tmp` 临时文件（例如彻底删除时删文件失败留下的）。文件超过 24 小时没改动才清理，给同步“先下载原图、再合并日志写记录”留出时间；只认按哈希命名的文件，其他文件不动。
 - 搜索：对表情名、标签、配文做模糊匹配，不用全文索引；仓库超过 1 万张时再考虑接入中文分词。
 
 ## 剪贴板
 
 - **复制**：同时写入位图数据（动图取第一帧）和文件引用（macOS 用文件 URL，Windows 用 CF_HDROP），由目标应用挑能用的那份。
 - **复制为文件**（Ctrl+Shift+C / ⌘⇧C）：只写文件引用。如果某个应用粘贴不出动图，就用这个。
-- **拖出发送**：在系统层发起拖拽，交出仓库里的原文件。
+- **拖出发送**：在系统层发起拖拽，交出副本。
+- **在访达 / 资源管理器中显示**：显示副本。
+- 以上交出的文件引用都指向临时目录里按表情名命名的副本，保留 7 天，不把仓库里按哈希命名的原文件交给其他应用或用户改动。
 
 ## 同步
 

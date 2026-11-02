@@ -48,6 +48,9 @@ pub fn run() {
             if let Err(error) = library.purge_expired() {
                 eprintln!("清理最近删除失败：{error}");
             }
+            if let Err(error) = library.sweep_orphan_files() {
+                eprintln!("清理残留文件失败：{error}");
+            }
             app.manage(Mutex::new(library));
             app.manage(imports::ImportState::default());
             app.manage(export::ExportDirectory::new(
@@ -158,7 +161,13 @@ fn start_expiry_cleanup(app: tauri::AppHandle) {
             std::thread::sleep(Duration::from_secs(60 * 60));
             let state = app.state::<Mutex<Library>>();
             let result = match state.lock() {
-                Ok(mut library) => library.purge_expired(),
+                Ok(mut library) => {
+                    let result = library.purge_expired();
+                    if let Err(error) = library.sweep_orphan_files() {
+                        eprintln!("清理残留文件失败：{error}");
+                    }
+                    result
+                }
                 Err(error) => {
                     eprintln!("清理最近删除失败：{error}");
                     continue;

@@ -1,10 +1,15 @@
+use std::collections::HashSet;
 use std::fs;
+use std::time::{Duration, SystemTime};
 
 use rusqlite::{Params, params};
 
 use crate::{Error, Library, Result, time::unix_millis};
 
 pub(crate) const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
+/// 没有表情记录的文件放这么久才清理：同步先下载原图，合并完日志才写表情记录，中间可能隔很久。
+const ORPHAN_GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl Library {
     pub fn delete_sticker(&self, id: &str) -> Result<()> {
@@ -44,6 +49,48 @@ impl Library {
         self.purge_matching("deleted_at <= ?1", [now - RETENTION_MS])
     }
 
+    /// 清理没有表情记录的原图和缩略图（彻底删除时没删掉的），以及中断留下的临时文件。
+    /// 只认按哈希命名的文件和 `.tmp` 开头的临时文件，其他文件不动。
+    pub fn sweep_orphan_files(&self) -> Result<usize> {
+        self.sweep_orphan_files_at(SystemTime::now())
+    }
+
+    fn sweep_orphan_files_at(&self, now: SystemTime) -> Result<usize> {
+        // Library -> files，与导入提交、同步下载的发布互斥。
+        let files = self.files.clone();
+        let _files = files.lock().unwrap();
+        let known = self
+            .conn
+            .prepare("SELECT hash FROM stickers")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<HashSet<_>>>()?;
+        let mut removed = 0;
+        for directory in ["objects", "thumbs"] {
+            for entry in fs::read_dir(self.root.join(directory))? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else { continue };
+                let orphan = name.starts_with(".tmp")
+                    || name
+                        .split_once('.')
+                        .is_some_and(|(hash, _)| is_hash(hash) && !known.contains(hash));
+                let stale = || {
+                    entry.metadata().is_ok_and(|metadata| {
+                        metadata.is_file()
+                            && metadata.modified().is_ok_and(|modified| {
+                                now.duration_since(modified).unwrap_or_default() >= ORPHAN_GRACE
+                            })
+                    })
+                };
+                // 删不掉的（比如被其他程序占用）留到下次。
+                if orphan && stale() && fs::remove_file(entry.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        Ok(removed)
+    }
+
     fn purge_matching(&mut self, filter: &str, parameters: impl Params) -> Result<usize> {
         let tx = self.conn.transaction()?;
         let files = {
@@ -65,6 +112,10 @@ impl Library {
         }
         Ok(files.len())
     }
+}
+
+fn is_hash(name: &str) -> bool {
+    name.len() == 64 && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 #[cfg(test)]

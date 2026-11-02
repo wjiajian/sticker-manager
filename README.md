@@ -5,6 +5,7 @@
 - 术语：[GLOSSARY.md](GLOSSARY.md)
 - 技术栈与代码结构：[docs/tech-stack.md](docs/tech-stack.md)，关键取舍见 [docs/adr/](docs/adr/)
 - 界面设计：[design/README.md](design/README.md)
+- 待办：[TODO.md](TODO.md)
 
 ## 开发
 

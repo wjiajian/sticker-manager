@@ -320,3 +320,74 @@ fn recently_deleted_orders_by_deletion_time_and_exposes_purge_time() {
         );
     }
 }
+
+#[test]
+fn sweeping_removes_only_old_unreferenced_hash_files_and_temporary_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = library(dir.path());
+    let hash = |c: char| c.to_string().repeat(64);
+    let live = hash('a');
+    let deleted = hash('b');
+    let orphan = hash('c');
+    library
+        .conn
+        .execute_batch(&format!(
+            "INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at, deleted_at) VALUES
+            ('live', '{live}', 'gif', '在用', 1, 1, 1, 4, NULL),
+            ('deleted', '{deleted}', 'png', '已删除', 1, 1, 1, 5, 6);"
+        ))
+        .unwrap();
+    let objects = dir.path().join("objects");
+    let thumbs = dir.path().join("thumbs");
+    let kept = [
+        objects.join(format!("{live}.gif")),
+        thumbs.join(format!("{live}.png")),
+        objects.join(format!("{deleted}.png")),
+        thumbs.join(format!("{deleted}.png")),
+        objects.join(".DS_Store"),
+        objects.join("说明.txt"),
+        objects.join(format!("{}.png", "C".repeat(64))),
+    ];
+    let removed = [
+        objects.join(format!("{orphan}.webp")),
+        thumbs.join(format!("{orphan}.png")),
+        objects.join(".tmpAbC123"),
+        thumbs.join(".tmpXyZ789"),
+    ];
+    for path in kept.iter().chain(&removed) {
+        fs::write(path, b"file").unwrap();
+    }
+
+    // 刚写下的孤立文件可能是同步刚下载、还没合并日志的原图，不能立刻清理。
+    assert_eq!(library.sweep_orphan_files().unwrap(), 0);
+    assert!(removed.iter().all(|path| path.is_file()));
+
+    let later = SystemTime::now() + ORPHAN_GRACE + Duration::from_secs(60);
+    assert_eq!(library.sweep_orphan_files_at(later).unwrap(), removed.len());
+    assert!(removed.iter().all(|path| !path.exists()));
+    assert!(kept.iter().all(|path| path.is_file()));
+    for sticker in library.list_stickers(LibraryView::All).unwrap() {
+        assert!(sticker.object_path.is_file() && sticker.thumbnail_path.is_file());
+    }
+}
+
+#[test]
+fn sweeping_cleans_up_files_a_failed_purge_left_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(&dir.path().join("library")).unwrap();
+    let source = dir.path().join("收到.png");
+    image::RgbaImage::new(2, 2).save(&source).unwrap();
+    assert_eq!(library.import_paths(&[source]).added, 1);
+    let sticker = library.list_stickers(LibraryView::All).unwrap().remove(0);
+    library.delete_sticker(&sticker.id).unwrap();
+    // 模拟彻底删除时删文件失败：元数据已删，文件还在。
+    library
+        .conn
+        .execute("DELETE FROM stickers WHERE id = ?1", [&sticker.id])
+        .unwrap();
+    assert!(sticker.object_path.is_file() && sticker.thumbnail_path.is_file());
+
+    let later = SystemTime::now() + ORPHAN_GRACE + Duration::from_secs(60);
+    assert_eq!(library.sweep_orphan_files_at(later).unwrap(), 2);
+    assert!(!sticker.object_path.exists() && !sticker.thumbnail_path.exists());
+}
