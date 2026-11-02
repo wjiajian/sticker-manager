@@ -15,7 +15,9 @@ mod geometry;
 mod imports;
 mod metered;
 mod panel;
+mod preview;
 mod settings;
+mod startup;
 mod sync;
 mod tray;
 
@@ -35,7 +37,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            let (mut library, root) = open_library(app)?;
+            let (mut library, root) = match open_library(app) {
+                Ok(library) => library,
+                Err((path, reason)) => {
+                    app.manage(startup::StartupFailure(Mutex::new(Some((path, reason)))));
+                    return Ok(());
+                }
+            };
             app.manage(settings::SettingsState::new(root));
             if let Err(error) = library.purge_expired() {
                 eprintln!("清理最近删除失败：{error}");
@@ -48,6 +56,7 @@ pub fn run() {
                     .join("exports"),
             ));
             panel::create(app)?;
+            preview::create(app)?;
             panel::register_shortcut(app.handle());
             create_main_window(app)?;
             tray::create(app)?;
@@ -95,6 +104,10 @@ pub fn run() {
             panel::hide_panel,
             panel::show_main_window,
             panel::global_shortcut_error,
+            preview::show_preview,
+            preview::hide_preview,
+            preview::preview_session,
+            preview::preview_ready,
             settings::get_settings,
             settings::set_ball_visible,
             settings::set_ball_auto_hide,
@@ -127,6 +140,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("启动应用失败")
         .run(|_app, _event| {
+            if matches!(_event, tauri::RunEvent::Ready) {
+                startup::show_pending(_app);
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event
                 && let Err(error) = panel::show_main_window(_app.clone())
@@ -166,28 +182,38 @@ fn start_expiry_cleanup(app: tauri::AppHandle) {
 #[cfg(debug_assertions)]
 const LIBRARY_DIR_OVERRIDE: &str = "STICKER_LIBRARY_DIR";
 
-fn open_library(app: &tauri::App) -> Result<(Library, PathBuf), Box<dyn std::error::Error>> {
+fn open_library(app: &tauri::App) -> Result<(Library, PathBuf), (PathBuf, String)> {
     #[cfg(debug_assertions)]
     if let Some(root) = std::env::var_os(LIBRARY_DIR_OVERRIDE).filter(|root| !root.is_empty()) {
         let root = PathBuf::from(root);
         // 相对路径会落在 src-tauri/ 下，写入的文件又会触发 tauri dev 重新编译
         if !root.is_absolute() {
-            return Err(
-                format!("{LIBRARY_DIR_OVERRIDE} 必须是绝对路径：{}", root.display()).into(),
-            );
+            let reason = format!("{LIBRARY_DIR_OVERRIDE} 必须是绝对路径：{}", root.display());
+            return Err((root, reason));
         }
-        let library = Library::open(&root)?;
+        let library =
+            Library::open(&root).map_err(|error| (root.clone(), startup::reason(error)))?;
         // tauri.conf.json 里的 asset 协议范围只覆盖默认仓库，换了位置要把新目录也放进去
         let scope = app.asset_protocol_scope();
-        scope.allow_directory(root.join("objects"), false)?;
-        scope.allow_directory(root.join("thumbs"), false)?;
+        scope
+            .allow_directory(root.join("objects"), false)
+            .map_err(|error| (root.clone(), error.to_string()))?;
+        scope
+            .allow_directory(root.join("thumbs"), false)
+            .map_err(|error| (root.clone(), error.to_string()))?;
         eprintln!("仓库：{}（来自 {LIBRARY_DIR_OVERRIDE}）", root.display());
         return Ok((library, root));
     }
 
     // macOS：~/Library/Application Support/<identifier>/；Windows：%APPDATA%\<identifier>\
-    let root = app.path().app_data_dir()?;
-    Ok((Library::open(&root)?, root))
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| (PathBuf::from("（无法确定仓库路径）"), error.to_string()))?;
+    Ok((
+        Library::open(&root).map_err(|error| (root.clone(), startup::reason(error)))?,
+        root,
+    ))
 }
 
 fn create_main_window(app: &tauri::App) -> tauri::Result<()> {

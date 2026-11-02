@@ -40,6 +40,10 @@ export function progressLabel(status?: SyncStatus) {
   if (!progress || status?.phase !== "syncing") return null;
   return progress.total === null ? `本轮已下载 ${progress.completed} 张` : `正在${progress.stage === "uploading" ? "上传" : "下载"}原图 ${progress.completed}/${progress.total}`;
 }
+// 只在真的在同步时显示“正在取回”；第一次同步出错或暂停时回到导入说明，不把空仓库卡在等待里。
+export function restoringLibrary(status?: SyncStatus) {
+  return !!status?.target && status.phase === "syncing" && (status.lastSyncAt === null || status.progress?.stage === "downloading");
+}
 export function syncTooltip(status?: SyncStatus) {
   return [syncStateLabel(status), status?.target && `${status.target.name} · ${status.target.shortAddress}`, progressLabel(status), status?.error ?? waitingNote(status)]
     .filter(Boolean).join("\n") || "打开同步偏好设置";

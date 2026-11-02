@@ -8,13 +8,16 @@ import { LIBRARY_VIEWS } from "./libraryViews";
 import { TagCreateDialog, type TagCreation } from "./TagCreateDialog";
 import { useTagMenu, type RenameTarget } from "./useTagMenu";
 import { SyncCard } from "./SyncCard";
+import { TagSkeleton, useDelayedLoading } from "../../components/Skeleton";
 
 const navigation = "interactive relative flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover active:scale-98";
 const selectedNavigation = "bg-surface font-semibold windows:before:absolute windows:before:top-2 windows:before:left-0 windows:before:h-3 windows:before:w-0.75 windows:before:rounded-full windows:before:bg-accent";
 
 export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => void; onSync: (button: HTMLButtonElement) => void; sync?: SyncStatus }) {
   const { data: overview } = useLibraryOverview();
-  const { data: sidebar, error, isPending } = useTagSidebar();
+  const tags = useTagSidebar();
+  const { data: sidebar, error, isPending } = tags;
+  const skeleton = useDelayedLoading(isPending);
   const view = useUiStore((s) => s.view);
   const searching = useUiStore((s) => !!s.searchQuery);
   const setView = useUiStore((s) => s.setView);
@@ -129,8 +132,8 @@ export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => 
             <PlusIcon size={16} aria-hidden />
           </button>
         </div>
-        {error ? <p role="alert" className="px-2 py-1 text-xs text-ink-secondary">{String(error)}</p>
-          : isPending ? <p role="status" className="px-2 py-1 text-xs text-ink-secondary">正在读取标签…</p>
+        {error ? <p role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-ink-secondary">读取标签失败<button type="button" disabled={tags.isFetching} onClick={() => { void tags.refetch(); }} className="rounded-sm underline underline-offset-4 hover:opacity-82 disabled:opacity-50">重试</button></p>
+          : isPending ? skeleton ? <TagSkeleton /> : null
           : <>
             {sidebar.groups.length === 0 && sidebar.ungrouped.length === 0 && <p className="px-2 py-1 text-xs text-ink-secondary">还没有标签</p>}
             {sidebar.groups.map((group) => groupSection(group, group.tags))}

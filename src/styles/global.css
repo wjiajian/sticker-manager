@@ -32,6 +32,7 @@
   --color-hover: #eae8e1;
   --color-brand: #ffc94a;
   --shadow-ball: 0 8px 24px rgb(31 31 31 / 0.2);
+  --shadow-preview: 0 16px 40px rgb(31 31 31 / 0.16), 0 0 0 1px rgb(31 31 31 / 0.06);
   --color-accent: #c2410c;
   --color-synced: #1e8a4c;
 
@@ -40,6 +41,12 @@
   --radius-control: 8px;
 
   --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root[data-window="preview"], :root[data-window="preview"] body {
+  background: transparent;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 @custom-variant windows (&:where([data-platform="windows"], [data-platform="windows"] *));
@@ -95,6 +102,11 @@
 }
 
 @keyframes sync-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+.skeleton-pulse { animation: skeleton-pulse 1.2s var(--ease-standard) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-pulse { animation: none; }
+}
 @keyframes sync-pulse { from { opacity: .35; } to { opacity: 1; } }
 .sync-download-arc { animation: sync-turn 1.5s linear infinite; }
 @media (prefers-reduced-motion: reduce) {

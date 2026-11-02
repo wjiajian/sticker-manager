@@ -75,10 +75,11 @@ pub struct LibraryOverview {
 impl Library {
     /// 打开 `root` 下的仓库，不存在就新建。
     pub fn open(root: &Path) -> Result<Self> {
+        fs::create_dir_all(root)?;
+        let conn = db::open(&root.join("library.db"))?;
         fs::create_dir_all(root.join("objects"))?;
         fs::create_dir_all(root.join("thumbs"))?;
         let device = Device::load_or_create(root)?;
-        let conn = db::open(&root.join("library.db"))?;
         let library = Self {
             conn,
             root: root.canonicalize()?,
@@ -246,6 +247,22 @@ mod tests {
         assert!(dir.path().join("objects").is_dir());
         assert!(dir.path().join("thumbs").is_dir());
         assert_eq!(library.overview().unwrap(), LibraryOverview::default());
+    }
+
+    #[test]
+    fn invalid_database_does_not_create_device_or_object_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 10000).unwrap();
+        drop(conn);
+        assert!(matches!(
+            Library::open(dir.path()),
+            Err(Error::SchemaTooNew { .. })
+        ));
+        assert!(!dir.path().join("local").exists());
+        assert!(!dir.path().join("objects").exists());
+        assert!(!dir.path().join("thumbs").exists());
     }
 
     #[test]

@@ -31,7 +31,7 @@ sha2 = "0.10"
 tauri-nspanel = "=2.1.1"
 objc2 = "0.6"
 block2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem", "NSEvent", "NSScreen", "NSWindow", "NSGraphics"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem", "NSEvent", "NSScreen", "NSWindow", "NSGraphics", "NSAlert", "NSButton", "NSApplication"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSString", "NSURL"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

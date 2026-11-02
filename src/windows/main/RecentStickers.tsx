@@ -3,11 +3,12 @@ import type { Sticker } from "../../lib/ipc";
 import { useStickers } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { StickerTile } from "./StickerTile";
-import { filterStickers } from "./stickerList";
+import { filterStickers, sortStickers, type Usage } from "./stickerList";
 import type { StickerActions } from "./useStickerActions";
 
-export function RecentStickers({ actions, onMenu }: {
+export function RecentStickers({ actions, usage, onMenu }: {
   actions: StickerActions;
+  usage: (sticker: Sticker) => Usage;
   onMenu: (sticker: Sticker, x: number, y: number) => Promise<void>;
 }) {
   const { data } = useStickers("recent");
@@ -15,7 +16,7 @@ export function RecentStickers({ actions, onMenu }: {
   const selectedId = useUiStore((s) => s.selectedStickerId);
   const selectSticker = useUiStore((s) => s.selectSticker);
   const setView = useUiStore((s) => s.setView);
-  const stickers = useMemo(() => filterStickers(data ?? [], typeFilter), [data, typeFilter]);
+  const stickers = useMemo(() => sortStickers(filterStickers(data ?? [], typeFilter), "recent", usage), [data, typeFilter, usage]);
   const row = useRef<HTMLDivElement>(null);
   const [capacity, setCapacity] = useState(0);
   const hasStickers = stickers.length > 0;

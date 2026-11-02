@@ -16,6 +16,7 @@ pub struct PanelState {
     pinned: AtomicBool,
     dragging: AtomicBool,
     shortcut_error: Mutex<Option<String>>,
+    origin: Mutex<crate::geometry::PanelOrigin>,
 }
 
 pub fn create(app: &tauri::App) -> tauri::Result<()> {
@@ -68,6 +69,8 @@ pub fn toggle(app: &AppHandle) -> Result<(), String> {
             window.emit("panel-focus", ()).map_err(|e| e.to_string())?;
         }
     } else {
+        crate::preview::reset(app)?;
+        *app.state::<PanelState>().origin.lock().unwrap() = crate::geometry::PanelOrigin::Centered;
         native::center_at_pointer(app)?;
         native::focus(app)?;
         window.emit("panel-shown", ()).map_err(|e| e.to_string())?;
@@ -87,6 +90,7 @@ fn broadcast_visibility(app: &AppHandle) -> Result<(), String> {
 }
 
 fn hide(app: &AppHandle) -> Result<(), String> {
+    crate::preview::reset(app)?;
     native::hide(app)?;
     broadcast_visibility(app)
 }
@@ -97,6 +101,8 @@ pub fn show_beside_ball(
     center: crate::geometry::Point,
     edge: crate::settings::Edge,
 ) -> Result<(), String> {
+    crate::preview::reset(app)?;
+    *app.state::<PanelState>().origin.lock().unwrap() = crate::geometry::PanelOrigin::Ball(edge);
     let p = crate::geometry::beside_ball(display, center, edge, WIDTH, HEIGHT);
     crate::desktop::set_frame(
         app,
@@ -128,6 +134,17 @@ fn centered_position(
 }
 
 pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
+    if window.label() == "panel"
+        && matches!(
+            event,
+            WindowEvent::Moved(_)
+                | WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+        )
+        && let Err(error) = crate::preview::reset(window.app_handle())
+    {
+        eprintln!("无法收起表情预览：{error}");
+    }
     if let WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
         let result = if window.label() == "panel" {
@@ -180,10 +197,21 @@ pub fn set_panel_pinned(app: AppHandle, pinned: bool) {
 pub fn set_panel_dragging(app: AppHandle, dragging: bool) -> Result<(), String> {
     let state = app.state::<PanelState>();
     state.dragging.store(dragging, Ordering::Relaxed);
+    if dragging {
+        crate::preview::reset(&app)?;
+    }
     if !dragging && !state.pinned.load(Ordering::Relaxed) && !native::focused(&app)? {
         hide(&app)?;
     }
     Ok(())
+}
+
+pub fn origin(app: &AppHandle) -> crate::geometry::PanelOrigin {
+    *app.state::<PanelState>().origin.lock().unwrap()
+}
+
+pub fn can_preview(app: &AppHandle) -> Result<bool, String> {
+    Ok(native::visible(app)? && !app.state::<PanelState>().dragging.load(Ordering::Relaxed))
 }
 
 /// 返回是否已收起。复制成功时由 Rust 判断固定状态，避免界面状态更新的竞态。
@@ -200,9 +228,17 @@ pub fn hide_panel(app: AppHandle, only_if_unpinned: bool) -> Result<bool, String
 pub fn show_main_window(app: AppHandle) -> Result<(), String> {
     hide(&app)?;
     if let Some(window) = app.get_webview_window("main") {
+        // 主窗口从隐藏或最小化回来算重新打开，界面借此按实际使用数据重排。
+        let reopened = !window.is_visible().map_err(|e| e.to_string())?
+            || window.is_minimized().map_err(|e| e.to_string())?;
         window.unminimize().map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
+        if reopened {
+            window
+                .emit("main-window-reopened", ())
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -240,6 +276,7 @@ mod native {
             .corner_radius(24.0)
             .transparent(true)
             .hides_on_deactivate(false)
+            .accepts_mouse_moved_events(true)
             .becomes_key_only_if_needed(false)
             .add_style_mask(StyleMask::empty().nonactivating_panel())
             .collection_behavior(

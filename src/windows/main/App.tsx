@@ -10,7 +10,7 @@ import { useUiStore } from "../../stores/ui";
 import { DetailPanel } from "./DetailPanel";
 import { Sidebar } from "./Sidebar";
 import { StickerGrid } from "./StickerGrid";
-import { filterStickers, sortStickers } from "./stickerList";
+import { filterStickers, sortStickers, useUsageSnapshot } from "./stickerList";
 import { TitleBar } from "./TitleBar";
 import { useImport } from "./useImport";
 import { PreferencesDialog } from "./PreferencesDialog";
@@ -42,6 +42,12 @@ export function App() {
     void listening.then(() => ipc.takeSyncDetailsRequest()).then((pending) => { if (pending) show(); }).catch(() => {});
     return () => { disposed = true; void listening.then((unlisten) => unlisten(), () => {}); };
   }, []);
+  const [reopened, setReopened] = useState(0);
+  useEffect(() => {
+    if (!isTauri()) return;
+    const listening = listen("main-window-reopened", () => setReopened((count) => count + 1));
+    return () => { void listening.then((unlisten) => unlisten(), () => {}); };
+  }, []);
   const view = useUiStore((s) => s.view);
   const searchQuery = useUiStore((s) => s.searchQuery);
   const typeFilter = useUiStore((s) => s.typeFilter);
@@ -51,10 +57,15 @@ export function App() {
   const visible = searchQuery ? search : listing;
   const source = visible.data ?? NO_STICKERS;
   const sortable = !searchQuery && view !== "recent" && view !== "recentlyDeleted";
+  // 窗口重新打开、换视图、搜索、筛选或排序时才按实际使用数据重排。
+  const usage = useUsageSnapshot(`${reopened}|${typeof view === "string" ? view : view.tag}|${searchQuery}|${typeFilter}|${sortOrder}`);
+  // 当前列表先记下使用数据，复制后它们在网格和最近使用条里都不跳位。
+  source.forEach(usage);
   const stickers = useMemo(() => {
     const filtered = filterStickers(source, typeFilter);
-    return sortable ? sortStickers(filtered, sortOrder) : filtered;
-  }, [source, typeFilter, sortOrder, sortable]);
+    const sort = sortable ? sortOrder : !searchQuery && view === "recent" ? "recent" : "added";
+    return sortStickers(filtered, sort, usage);
+  }, [source, typeFilter, sortOrder, sortable, searchQuery, view, usage]);
   const actions = useStickerActions(stickers);
   const importing = useImport(actions.claimDragDrop);
   const { choose, busy, dragging, message } = importing;
@@ -73,7 +84,8 @@ export function App() {
       {anchor && sync.data?.target && !preferences.open && <SyncDetails status={sync.data} anchor={anchor.button} above={anchor.above} onClose={closeSync} onSettings={() => { closeSync(); preferences.show(true); }} />}
       <div className="flex min-h-0 flex-1">
         <Sidebar onPreferences={() => preferences.show()} sync={sync.data} onSync={(button) => openSync(button, true)} />
-        <StickerGrid actions={actions} listing={visible} stickers={stickers} sortable={sortable} />
+        <StickerGrid actions={actions} listing={visible} stickers={stickers} sortable={sortable} usage={usage}
+          sync={sync.data} busy={busy} onChoose={choose} onSyncSettings={() => preferences.show(true)} shortcutAvailable={shortcut.isSuccess && shortcut.data === null} />
         <DetailPanel actions={actions} sync={sync.data} />
       </div>
     </div>

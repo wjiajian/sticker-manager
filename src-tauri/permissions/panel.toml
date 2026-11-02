@@ -6,4 +6,5 @@ commands.allow = [
   "library_overview", "list_stickers", "search_stickers", "tag_sidebar",
   "copy_sticker", "prepare_sticker_drag", "record_sticker_usage",
   "panel_session", "set_panel_pinned", "set_panel_dragging", "hide_panel", "show_main_window",
+  "show_preview", "hide_preview",
 ]

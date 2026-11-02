@@ -26,7 +26,7 @@
 
 ```
 /
-├── src/                 React 界面（主窗口、悬浮球、展开面板）
+├── src/                 React 界面（主窗口、悬浮球、展开面板、悬停预览）
 ├── src-tauri/           Tauri 外壳：窗口、托盘、快捷键、剪贴板、拖拽，以及转发给核心库的命令
 ├── crates/
 │   └── core/            仓库、标签、导入、同步与合并规则；可单独测试
@@ -36,7 +36,11 @@
 
 同步合并规则是最容易出错的部分，放在 `crates/core/` 里，脱离界面写单元测试。
 
-`src-tauri/permissions/` 里给每个窗口列了允许调用的命令（主窗口 `main.toml`，表情面板 `panel.toml`，悬浮球 `ball.toml`）。有了这个目录，Tauri 会拒绝名单之外的命令，所以新增命令时要同时加进用到它的窗口的名单。
+`src-tauri/permissions/` 里给每个窗口列了允许调用的命令（主窗口 `main.toml`，表情面板 `panel.toml`，悬浮球 `ball.toml`，悬停预览 `preview.toml`）。有了这个目录，Tauri 会拒绝名单之外的命令，所以新增命令时要同时加进用到它的窗口的名单。
+
+表情面板的预览使用 `preview.html` 独立入口，启动时创建隐藏窗口。macOS 使用不能成为 key/main 的非激活 NSPanel，层级比表情面板高一级、跨桌面与全屏并忽略鼠标；Windows 使用不可聚焦、置顶、不进任务栏、忽略鼠标的透明窗口。窗口固定为 296×392，卡片宽 168，CSS 绘制阴影并保留透明边距；页面只接收名称、次数、按侧栏排序的标签和图片路径，不查询仓库。
+
+`capabilities/preview.json` 只授权事件监听、取消监听和 `preview_session` / `preview_ready`；面板额外允许 `show_preview` / `hide_preview`。原生层记录面板本次打开来源，在 `geometry.rs` 中计算卡片位置，macOS 全程使用 AppKit 左下原点的逻辑坐标；页面以 CSS 像素报告格子位置。单调递增的请求编号阻止旧解码回执重新显示或移动窗口。
 
 ### 代码命名
 

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "preview-commands"
+description = "预览窗口只接收显示数据，并通知原生层内容已准备好。"
+commands.allow = ["preview_session", "preview_ready"]

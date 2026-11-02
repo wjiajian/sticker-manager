@@ -77,7 +77,24 @@ export interface ImportStatus { batch: number; running: boolean; progress: { pro
 export interface RemoteDevice { id: string; name: string; platform: string; lastSyncAt: number; received: Record<string, number> }
 export interface StickerSyncInfo { waitingUpload: boolean; deviceCount: number | null }
 
+export interface PreviewSticker {
+  name: string;
+  usageCount: number;
+  tags: string[];
+  thumbnailPath: string;
+  objectPath: string;
+}
+export interface PreviewRequest {
+  requestId: number;
+  sticker: PreviewSticker;
+  fade: boolean;
+}
+
 export const ipc = {
+  showPreview: (sticker: PreviewSticker, anchor: { top: number; height: number }) => invoke<void>("show_preview", { sticker, anchor }),
+  hidePreview: () => invoke<void>("hide_preview"),
+  previewSession: () => invoke<PreviewRequest | null>("preview_session"),
+  previewReady: (requestId: number, cardHeight: number) => invoke<boolean>("preview_ready", { requestId, cardHeight }),
   importStatus: () => invoke<ImportStatus>("import_status"),
   cancelImport: () => invoke<void>("cancel_import"),
   addTagToStickers: (ids: string[], tagId: string) => invoke<number>("add_tag_to_stickers", { ids, tagId }),

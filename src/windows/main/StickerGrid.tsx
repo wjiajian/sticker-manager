@@ -1,10 +1,14 @@
 import { ArrowsDownUpIcon } from "@phosphor-icons/react";
 import { useEffect, useRef } from "react";
-import type { Sticker } from "../../lib/ipc";
-import { type useStickers, useTagSidebar } from "../../lib/queries";
+import type { Sticker, SyncStatus } from "../../lib/ipc";
+import { type useStickers, useTagSidebar, useLibraryOverview } from "../../lib/queries";
+import { GridSkeleton, useDelayedLoading } from "../../components/Skeleton";
+import { ReadError } from "../../components/ReadError";
+import { EmptyLibrary } from "./EmptyLibrary";
 import { useUiStore, type StickerTypeFilter } from "../../stores/ui";
 import { LIBRARY_VIEWS } from "./libraryViews";
 import { RecentStickers } from "./RecentStickers";
+import type { Usage } from "./stickerList";
 import { StickerTile } from "./StickerTile";
 import { STICKER_SORTS, useSortMenu } from "./useSortMenu";
 import type { StickerActions } from "./useStickerActions";
@@ -16,11 +20,13 @@ const TYPE_FILTERS: { value: StickerTypeFilter; label: string }[] = [
   { value: "animated", label: "动图" },
 ];
 
-export function StickerGrid({ actions, listing, stickers, sortable }: {
+export function StickerGrid({ actions, listing, stickers, sortable, usage, sync, busy, onChoose, onSyncSettings, shortcutAvailable }: {
   actions: StickerActions;
   listing: ReturnType<typeof useStickers>;
   stickers: Sticker[];
   sortable: boolean;
+  usage: (sticker: Sticker) => Usage;
+  sync?: SyncStatus; busy: boolean; onChoose: (directory: boolean) => void; onSyncSettings: () => void; shortcutAvailable: boolean;
 }) {
   const view = useUiStore((s) => s.view);
   const searchQuery = useUiStore((s) => s.searchQuery);
@@ -33,6 +39,8 @@ export function StickerGrid({ actions, listing, stickers, sortable }: {
   const requestResultFocus = useUiStore((s) => s.requestResultFocus);
   const firstTile = useRef<HTMLButtonElement>(null);
   const { data: source, error, isPending } = listing;
+  const skeleton = useDelayedLoading(isPending, searchQuery || (typeof view === "string" ? view : view.tag));
+  const overview = useLibraryOverview();
   const menus = useStickerMenu(actions);
   const sortMenu = useSortMenu();
   const recentlyDeleted = !searchQuery && view === "recentlyDeleted";
@@ -103,14 +111,16 @@ export function StickerGrid({ actions, listing, stickers, sortable }: {
         </div>
       </div>
 
-      {view === "all" && !searchQuery && <RecentStickers actions={actions} onMenu={menus.popup} />}
+      {view === "all" && !searchQuery && <RecentStickers actions={actions} usage={usage} onMenu={menus.popup} />}
 
       {error ? (
-        <p role="alert" className="text-ink-secondary">读取仓库失败：{String(error)}</p>
+        <ReadError error={error} icon busy={listing.isFetching} retry={() => { void listing.refetch(); }} />
       ) : isPending ? (
-        <p role="status" className="text-ink-secondary">正在读取表情…</p>
+        skeleton ? <GridSkeleton /> : <div className="flex-1" />
       ) : stickers.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-1 pb-16 text-center">
+        !searchQuery && typeFilter === "all" ? <EmptyLibrary view={view} label={label} all={overview.data?.all} sync={sync} busy={busy}
+          onChoose={onChoose} onSyncSettings={onSyncSettings} shortcutAvailable={shortcutAvailable} />
+        : <div className="flex flex-1 flex-col items-center justify-center gap-1 pb-16 text-center">
           {filteredEmpty ? <>
             <p className="text-base font-semibold">{typeFilter === "animated" ? "没有动图" : "没有静态表情"}</p>
             <p className="text-ink-secondary">切换到“全部”查看其他表情</p>

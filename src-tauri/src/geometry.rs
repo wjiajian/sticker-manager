@@ -1,4 +1,4 @@
-//! 窗口坐标：macOS 使用左上原点的逻辑坐标，Windows 使用物理坐标和目标屏缩放。
+//! 纯几何计算。调用方统一坐标系和缩放；预览在 macOS 上直接使用 AppKit 左下原点。
 use crate::settings::{BallPosition, Edge};
 use serde::Serialize;
 
@@ -111,6 +111,41 @@ pub fn beside_ball(display: &Display, center: Point, edge: Edge, width: f64, hei
         height * scale,
     )
 }
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum PanelOrigin {
+    #[default]
+    Centered,
+    Ball(Edge),
+}
+
+/// 返回卡片（不含透明阴影边距）的原点；y 轴方向由调用方决定。
+pub fn preview_position(
+    area: Rect,
+    panel: Rect,
+    origin: PanelOrigin,
+    tile_center_y: f64,
+    card_height: f64,
+) -> Option<Point> {
+    const WIDTH: f64 = 168.0;
+    const GAP: f64 = 16.0;
+    if card_height > area.height {
+        return None;
+    }
+    let left = panel.x - GAP - WIDTH;
+    let right = panel.right() + GAP;
+    let candidates = match origin {
+        PanelOrigin::Ball(Edge::Left) => [right, left],
+        PanelOrigin::Centered | PanelOrigin::Ball(Edge::Right) => [left, right],
+    };
+    let x = candidates
+        .into_iter()
+        .find(|x| *x >= area.x && *x + WIDTH <= area.right())?;
+    Some(Point {
+        x,
+        y: (tile_center_y - card_height / 2.0).clamp(area.y, area.bottom() - card_height),
+    })
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct BallFrame {
     pub rect: Rect,
@@ -188,6 +223,109 @@ pub fn collapsed(display: &Display, frame: &BallFrame, center: Point, edge: Edge
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_chooses_side_from_panel_origin() {
+        let area = Rect {
+            x: 0.0,
+            y: 24.0,
+            width: 1440.0,
+            height: 820.0,
+        };
+        let panel = Rect {
+            x: 540.0,
+            y: 150.0,
+            width: 360.0,
+            height: 524.0,
+        };
+        for (origin, x) in [
+            (PanelOrigin::Centered, 356.0),
+            (PanelOrigin::Ball(Edge::Right), 356.0),
+            (PanelOrigin::Ball(Edge::Left), 916.0),
+        ] {
+            assert_eq!(
+                preview_position(area, panel, origin, 400.0, 216.0),
+                Some(Point { x, y: 292.0 })
+            );
+        }
+    }
+
+    #[test]
+    fn preview_switches_side_or_stays_hidden_when_neither_fits() {
+        let area = Rect {
+            x: 0.0,
+            y: 24.0,
+            width: 800.0,
+            height: 820.0,
+        };
+        let panel = Rect {
+            x: 40.0,
+            y: 150.0,
+            width: 360.0,
+            height: 524.0,
+        };
+        assert_eq!(
+            preview_position(area, panel, PanelOrigin::Centered, 400.0, 216.0)
+                .unwrap()
+                .x,
+            416.0
+        );
+        let right = Rect { x: 400.0, ..panel };
+        assert_eq!(
+            preview_position(area, right, PanelOrigin::Ball(Edge::Left), 400.0, 216.0)
+                .unwrap()
+                .x,
+            216.0
+        );
+        assert_eq!(
+            preview_position(
+                Rect {
+                    width: 500.0,
+                    ..area
+                },
+                panel,
+                PanelOrigin::Centered,
+                400.0,
+                216.0
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn preview_clamps_vertically_and_supports_negative_monitor_origins() {
+        let area = Rect {
+            x: -1600.0,
+            y: -900.0,
+            width: 1600.0,
+            height: 850.0,
+        };
+        let panel = Rect {
+            x: -1000.0,
+            y: -700.0,
+            width: 360.0,
+            height: 524.0,
+        };
+        for (center, y) in [(-880.0, -900.0), (-500.0, -616.0), (-60.0, -282.0)] {
+            assert_eq!(
+                preview_position(area, panel, PanelOrigin::Centered, center, 232.0),
+                Some(Point { x: -1184.0, y })
+            );
+        }
+        assert_eq!(
+            preview_position(
+                Rect {
+                    height: 200.0,
+                    ..area
+                },
+                panel,
+                PanelOrigin::Centered,
+                -800.0,
+                232.0
+            ),
+            None
+        );
+    }
     fn display() -> Display {
         Display {
             id: "main".into(),

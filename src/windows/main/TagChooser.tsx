@@ -3,9 +3,11 @@ import { TagDot } from "../../components/TagDot";
 import type { TagSummary } from "../../lib/ipc";
 import { useLibraryMutation, useTagSidebar } from "../../lib/queries";
 import { normalizeTagName } from "../../lib/tagColors";
+import { TagSkeleton, useDelayedLoading } from "../../components/Skeleton";
 
 export function TagChooser({ exclude = [], onSelect, onClose }: { exclude?: string[]; onSelect: (tag: TagSummary | null, name: string) => Promise<unknown>; onClose: (restore?: boolean) => void }) {
   const { data: sidebar, error, isPending } = useTagSidebar();
+  const skeleton = useDelayedLoading(isPending);
   const mutation = useLibraryMutation(({ tag, name }: { tag: TagSummary | null; name: string }) => onSelect(tag, name));
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -51,7 +53,7 @@ export function TagChooser({ exclude = [], onSelect, onClose }: { exclude?: stri
         {option.tag && <TagDot color={option.tag.color} />}<span className="truncate">{option.tag ? option.name : `新建并添加“${option.name}”`}</span>
       </button>)}
     </div>
-    {isPending ? <p className="text-xs text-ink-secondary">正在读取标签…</p> : error ? <p role="alert" className="text-xs text-accent">{String(error)}</p> : !options.length && <p className="text-xs text-ink-secondary">{normalized ? "这个标签已添加" : "输入名称可新建标签"}</p>}
+    {isPending ? skeleton ? <TagSkeleton /> : null : error ? <p role="alert" className="text-xs text-accent">{String(error)}</p> : !options.length && <p className="text-xs text-ink-secondary">{normalized ? "这个标签已添加" : "输入名称可新建标签"}</p>}
     {mutation.error && <p role="alert" className="text-xs text-accent">{String(mutation.error)}</p>}
   </div>;
 }
