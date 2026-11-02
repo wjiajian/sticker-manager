@@ -6,20 +6,21 @@ import { platform } from "../../lib/platform";
 
 export function usePreferences() {
   const [open, setOpen] = useState(false);
+  const [focusSync, setFocusSync] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     function keydown(event: KeyboardEvent) {
       if (event.isComposing || event.keyCode === 229 || event.repeat || event.altKey || event.shiftKey) return;
       if (event.key === "," && (platform === "macos" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) {
         if (document.querySelector("dialog[open]")) return;
-        event.preventDefault(); setOpen(true);
+        event.preventDefault(); setFocusSync(false); setOpen(true);
       }
     }
     window.addEventListener("keydown", keydown);
     if (!isTauri()) return () => window.removeEventListener("keydown", keydown);
     let disposed = false;
     const listening = listen("open-preferences", () => {
-      if (!disposed) setOpen(true);
+      if (!disposed) { setFocusSync(false); setOpen(true); }
       void ipc.takePreferencesRequest().catch((e: unknown) => { if (!disposed) setError(String(e)); });
     });
     void listening.then(() => ipc.takePreferencesRequest()).then((pending) => {
@@ -31,5 +32,5 @@ export function usePreferences() {
       void listening.then((cleanup) => cleanup(), () => {});
     };
   }, []);
-  return { open, setOpen, error };
+  return { open, setOpen, error, focusSync, show: (sync = false) => { setFocusSync(sync); setOpen(true); } };
 }

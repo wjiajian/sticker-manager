@@ -2,10 +2,11 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "../../components/Button";
 import { Switch } from "../../components/Switch";
-import { ipc, type Settings } from "../../lib/ipc";
+import { ipc, type Settings, type SyncStatus } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
+import { SyncPreferences } from "./SyncPreferences";
 
-export function PreferencesDialog({ onClose }: { onClose: () => void }) {
+export function PreferencesDialog({ onClose, sync, focusSync = false }: { onClose: () => void; sync?: SyncStatus; focusSync?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const title = useId();
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -33,10 +34,10 @@ export function PreferencesDialog({ onClose }: { onClose: () => void }) {
     return () => { disposed = true; element.close(); void listening.then((cleanup) => cleanup(), () => {}); };
   }, []);
   useEffect(() => {
-    if (focusedInitially.current) return;
+    if (focusedInitially.current || focusSync) return;
     const firstSwitch = dialog.current?.querySelector<HTMLButtonElement>('button[role="switch"]:not(:disabled)');
     if (firstSwitch) { firstSwitch.focus(); focusedInitially.current = true; }
-  }, [settings, autostart]);
+  }, [settings, autostart, focusSync]);
 
   async function change(kind: string, operation: () => Promise<unknown>) {
     if (working.current) return;
@@ -91,6 +92,7 @@ export function PreferencesDialog({ onClose }: { onClose: () => void }) {
         <p className="text-xs text-ink-secondary">暂不支持修改</p>
         {shortcutError && <p role="alert" className="text-xs text-accent">{shortcutError}</p>}
       </Group>
+      <SyncPreferences status={sync} focus={focusSync} />
       <Group title="仓库">
         <span className="text-xs text-ink-secondary">仓库路径</span>
         <p title={path} tabIndex={0} className="flex min-w-0 select-text rounded-sm text-xs"

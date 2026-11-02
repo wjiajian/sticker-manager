@@ -13,6 +13,7 @@ mod export;
 mod geometry;
 mod panel;
 mod settings;
+mod sync;
 mod tray;
 
 pub fn run() {
@@ -48,6 +49,7 @@ pub fn run() {
             tray::create(app)?;
             ball::create(app)?;
             settings::initialize_autostart(app.handle());
+            sync::start(app.handle().clone());
             start_expiry_cleanup(app.handle().clone());
             Ok(())
         })
@@ -98,6 +100,12 @@ pub fn run() {
             ball::ball_pointer_down,
             ball::set_ball_drop,
             ball::ball_message,
+            sync::sync_status,
+            sync::sync_now,
+            sync::inspect_sync_folder,
+            sync::join_sync_folder,
+            sync::stop_sync,
+            sync::set_device_name,
         ])
         .build(tauri::generate_context!())
         .expect("启动应用失败")
@@ -125,6 +133,7 @@ fn start_expiry_cleanup(app: tauri::AppHandle) {
             };
             match result {
                 Ok(count) if count > 0 => {
+                    sync::local_changed(&app);
                     if let Err(error) = app.emit("library-changed", ()) {
                         eprintln!("通知仓库更新失败：{error}");
                     }

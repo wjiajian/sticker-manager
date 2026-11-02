@@ -1,17 +1,18 @@
 import { GearIcon, CaretDownIcon, CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { TagDot } from "../../components/TagDot";
-import { ipc, type TagGroup, type TagSummary } from "../../lib/ipc";
+import { ipc, type TagGroup, type TagSummary, type SyncStatus } from "../../lib/ipc";
 import { useLibraryMutation, useLibraryOverview, useTagSidebar } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { LIBRARY_VIEWS } from "./libraryViews";
 import { TagCreateDialog, type TagCreation } from "./TagCreateDialog";
 import { useTagMenu, type RenameTarget } from "./useTagMenu";
+import { SyncCard } from "./SyncCard";
 
 const navigation = "interactive relative flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover active:scale-98";
 const selectedNavigation = "bg-surface font-semibold windows:before:absolute windows:before:top-2 windows:before:left-0 windows:before:h-3 windows:before:w-0.75 windows:before:rounded-full windows:before:bg-accent";
 
-export function Sidebar({ onPreferences }: { onPreferences: () => void }) {
+export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => void; onSync: () => void; sync?: SyncStatus }) {
   const { data: overview } = useLibraryOverview();
   const { data: sidebar, error, isPending } = useTagSidebar();
   const view = useUiStore((s) => s.view);
@@ -138,6 +139,7 @@ export function Sidebar({ onPreferences }: { onPreferences: () => void }) {
         {menus.error && <p role="alert" className="px-2 py-1 text-xs text-ink-secondary">{menus.error}</p>}
       </section>
       </div>
+      <SyncCard status={sync} onClick={onSync} />
       <button type="button" onClick={onPreferences} className={`${navigation} mt-4 shrink-0 text-ink-tertiary`}><GearIcon size={16} aria-hidden />偏好设置</button>
       {creation && <TagCreateDialog
         creation={creation}

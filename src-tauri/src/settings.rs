@@ -32,6 +32,21 @@ pub struct Settings {
     pub ball_auto_hide_seconds: Option<u32>,
     pub ball_position: BallPosition,
     pub autostart_initialized: bool,
+    pub sync: Option<SyncSettings>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSettings {
+    pub backend: SyncBackend,
+    pub folder: PathBuf,
+    pub library_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncBackend {
+    Folder,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -45,6 +60,7 @@ impl Default for Settings {
                 y: 0.4,
             },
             autostart_initialized: false,
+            sync: None,
         }
     }
 }
@@ -52,6 +68,13 @@ impl Settings {
     fn validate(&self) -> Result<(), String> {
         if self.version != 1 {
             return Err(format!("不支持的设置版本 {}", self.version));
+        }
+        if self
+            .sync
+            .as_ref()
+            .is_some_and(|s| !s.folder.is_absolute() || s.library_id.is_empty())
+        {
+            return Err("同步设置中的文件夹或仓库 ID 无效".into());
         }
         if !matches!(self.ball_auto_hide_seconds, None | Some(3 | 10)) {
             return Err("收起时间必须是 3 秒、10 秒或不收起".into());
@@ -112,12 +135,25 @@ pub fn update(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<Set
     let mut current = state.value.lock().unwrap();
     let mut next = current.clone();
     change(&mut next);
+    let ball_changed = current.ball_visible != next.ball_visible
+        || current.ball_auto_hide_seconds != next.ball_auto_hide_seconds
+        || current.ball_position != next.ball_position;
+    let visibility_changed = current.ball_visible != next.ball_visible;
     next.save(&state.root)?;
     *current = next.clone();
     drop(current);
     // 三处入口共用这个路径。即使某个系统操作失败，其余订阅者仍收到已保存的实际值。
-    let ball = crate::ball::settings_changed(app, &next);
-    let tray = crate::tray::set_ball_checked(app, next.ball_visible);
+    // 同步设置由后台保存，不应触碰只能在主线程操作的 NSPanel。
+    let ball = if ball_changed {
+        crate::ball::settings_changed(app, &next)
+    } else {
+        Ok(())
+    };
+    let tray = if visibility_changed {
+        crate::tray::set_ball_checked(app, next.ball_visible)
+    } else {
+        Ok(())
+    };
     let event = app
         .emit("settings-changed", &next)
         .map_err(|e| e.to_string());
@@ -196,6 +232,26 @@ pub fn initialize_autostart(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sync_settings_round_trip_and_corrupt_backend_falls_back() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = Settings {
+            sync: Some(SyncSettings {
+                backend: SyncBackend::Folder,
+                folder: root.path().join("shared"),
+                library_id: "library-id".into(),
+            }),
+            ..Settings::default()
+        };
+        settings.save(root.path()).unwrap();
+        assert_eq!(Settings::load(root.path()), settings);
+        fs::write(
+            root.path().join("local/settings.json"),
+            r#"{"sync":{"backend":"unknown","folder":"/tmp","libraryId":"id"}}"#,
+        )
+        .unwrap();
+        assert_eq!(Settings::load(root.path()), Settings::default());
+    }
     #[test]
     fn missing_file_uses_defaults_without_writing() {
         let root = tempfile::tempdir().unwrap();

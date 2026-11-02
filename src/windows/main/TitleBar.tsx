@@ -1,11 +1,14 @@
-import { CloudSlashIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { CloudSlashIcon, CloudCheckIcon, ArrowsClockwiseIcon, WarningCircleIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button";
 import { platform } from "../../lib/platform";
 import { useUiStore } from "../../stores/ui";
 import { ImportButton } from "./ImportButton";
+import type { SyncStatus } from "../../lib/ipc";
+import { syncLabel, waitingNote } from "./useSyncStatus";
 
-export function TitleBar({ busy, onChoose }: { busy: boolean; onChoose: (directory: boolean) => void }) {
+export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onChoose: (directory: boolean) => void; sync?: SyncStatus; onSync: () => void }) {
+  const SyncIcon = sync?.phase === "synced" ? CloudCheckIcon : sync?.phase === "syncing" ? ArrowsClockwiseIcon : sync?.phase === "error" ? WarningCircleIcon : CloudSlashIcon;
   const input = useRef<HTMLInputElement>(null);
   const searchText = useUiStore((s) => s.searchText);
   const setSearchText = useUiStore((s) => s.setSearchText);
@@ -68,9 +71,9 @@ export function TitleBar({ busy, onChoose }: { busy: boolean; onChoose: (directo
       </label>
 
       <div className="flex items-center gap-2">
-        <Button>
-          <CloudSlashIcon size={16} className="text-ink-secondary" />
-          未设置同步
+        <Button onClick={onSync} title={sync?.error ?? waitingNote(sync) ?? "打开同步偏好设置"}>
+          <SyncIcon size={16} className={sync?.phase === "synced" ? "text-synced" : sync?.phase === "error" ? "text-accent" : "text-ink-secondary"} />
+          {syncLabel(sync)}
         </Button>
         <ImportButton disabled={busy} onChoose={onChoose} />
       </div>

@@ -6,7 +6,10 @@ use crate::{Error, Result};
 
 /// 按顺序执行的迁移，执行完第 n 条后 `user_version` 记为 n。
 /// 已经发布过的迁移不要再改，只往后追加。
-const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/0001_init.sql"),
+    include_str!("migrations/0002_sync.sql"),
+];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 
 pub fn open(path: &Path) -> Result<Connection> {

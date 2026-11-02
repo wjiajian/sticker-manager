@@ -11,6 +11,7 @@ mod import;
 mod library;
 mod organization;
 mod search;
+pub mod sync;
 mod time;
 mod usage;
 

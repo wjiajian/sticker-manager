@@ -47,7 +47,15 @@ async fn with_library<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Mutex<Library>>();
         let mut library = state.lock().map_err(|_| CommandError::Unavailable)?;
-        operation(&mut library)
+        let before = library.local_revision()?;
+        let result = operation(&mut library);
+        let changed = library.local_revision()? != before;
+        drop(library);
+        if changed {
+            crate::sync::local_changed(&app);
+            notify_library_changed(&app);
+        }
+        result
     })
     .await?
 }
@@ -199,15 +207,13 @@ pub async fn set_sticker_caption(app: AppHandle, id: String, caption: String) ->
 
 #[tauri::command]
 pub async fn import_stickers(app: AppHandle, paths: Vec<PathBuf>) -> CommandResult<ImportReport> {
-    let report = with_library(app.clone(), move |library| Ok(library.import_paths(&paths))).await?;
-    notify_usage(&app);
-    Ok(report)
+    with_library(app, move |library| Ok(library.import_paths(&paths))).await
 }
 
 #[tauri::command]
 pub async fn copy_sticker(app: AppHandle, id: String, file_only: bool) -> CommandResult<()> {
     let handle = app.clone();
-    with_library(app.clone(), move |library| {
+    with_library(app, move |library| {
         let sticker = library.sticker_for_use(&id)?;
         let image = if file_only {
             None
@@ -219,9 +225,7 @@ pub async fn copy_sticker(app: AppHandle, id: String, file_only: bool) -> Comman
             .map_err(|error| CommandError::Clipboard(error.to_string()))?;
         library.record_usage(&id).map_err(CommandError::Usage)
     })
-    .await?;
-    notify_usage(&app);
-    Ok(())
+    .await
 }
 
 #[derive(Serialize)]
@@ -246,15 +250,13 @@ pub async fn prepare_sticker_drag(app: AppHandle, id: String) -> CommandResult<P
 
 #[tauri::command]
 pub async fn record_sticker_usage(app: AppHandle, id: String) -> CommandResult<()> {
-    with_library(app.clone(), move |library| {
+    with_library(app, move |library| {
         library.record_usage(&id).map_err(CommandError::Usage)
     })
-    .await?;
-    notify_usage(&app);
-    Ok(())
+    .await
 }
 
-fn notify_usage(app: &AppHandle) {
+fn notify_library_changed(app: &AppHandle) {
     if let Err(error) = app.emit("library-changed", ()) {
         eprintln!("通知仓库更新失败：{error}");
     }

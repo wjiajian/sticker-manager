@@ -1,5 +1,16 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("同步失败：{0}")]
+    Sync(String),
+
+    #[error("需要更新应用：{0}")]
+    SyncUpgrade(String),
+
+    #[error("设备身份冲突：同步文件夹中存在本机未记录的操作。请勿在两台电脑上使用复制的仓库目录")]
+    DeviceConflict,
+
+    #[error("同步文件格式错误：{0}")]
+    Json(#[from] serde_json::Error),
     #[error("读写仓库文件失败：{0}")]
     Io(#[from] std::io::Error),
 

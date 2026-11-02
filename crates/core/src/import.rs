@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::{Error, Library, Result, time::unix_millis};
 
-const THUMBNAIL_SIZE: u32 = 256;
+pub(crate) const THUMBNAIL_SIZE: u32 = 256;
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +36,9 @@ pub struct ImportFailure {
 impl Library {
     /// 每个文件独立保存，单个文件失败不撤销已经成功的导入。
     pub fn import_paths(&mut self, paths: &[PathBuf]) -> ImportReport {
+        // 与锁外的同步文件清理协调，避免刚重新导入的同哈希原图被删掉。
+        let files = self.files.clone();
+        let _files = files.lock().unwrap();
         let mut report = ImportReport::default();
         let mut pending: Vec<_> = paths.iter().rev().cloned().collect();
         while let Some(path) = pending.pop() {

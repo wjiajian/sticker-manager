@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, Row, params_from_iter};
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,7 @@ pub struct Library {
     pub(crate) conn: Connection,
     pub(crate) root: PathBuf,
     pub(crate) device: Device,
+    pub(crate) files: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,11 +77,14 @@ impl Library {
         fs::create_dir_all(root.join("thumbs"))?;
         let device = Device::load_or_create(root)?;
         let conn = db::open(&root.join("library.db"))?;
-        Ok(Self {
+        let library = Self {
             conn,
             root: root.canonicalize()?,
             device,
-        })
+            files: Arc::new(Mutex::new(())),
+        };
+        library.initialize_sync()?;
+        Ok(library)
     }
 
     pub fn device(&self) -> &Device {

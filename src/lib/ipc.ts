@@ -71,6 +71,12 @@ export interface ImportReport {
 }
 
 export const ipc = {
+  syncStatus: () => invoke<SyncStatus>("sync_status"),
+  syncNow: () => invoke<void>("sync_now"),
+  inspectSyncFolder: (path: string) => invoke<SyncFolderInfo>("inspect_sync_folder", { path }),
+  joinSyncFolder: (path: string, expectedId: string | null) => invoke<void>("join_sync_folder", { path, expectedId }),
+  stopSync: () => invoke<void>("stop_sync"),
+  setDeviceName: (name: string) => invoke<void>("set_device_name", { name }),
   getSettings: () => invoke<Settings>("get_settings"),
   setBallVisible: (visible: boolean) => invoke<Settings>("set_ball_visible", { visible }),
   setBallAutoHide: (seconds: 3 | 10 | null) => invoke<Settings>("set_ball_auto_hide", { seconds }),
@@ -124,6 +130,23 @@ export interface Settings {
   ballAutoHideSeconds: 3 | 10 | null;
   ballPosition: { display: string; edge: "left" | "right"; y: number };
   autostartInitialized: boolean;
+  sync: { backend: "folder"; folder: string; libraryId: string } | null;
+}
+export interface SyncStatus {
+  phase: "unconfigured" | "syncing" | "synced" | "error";
+  lastSyncAt: number | null;
+  error: string | null;
+  folder: string | null;
+  deviceName: string;
+  storageBytes: number;
+  onlineDevices: number;
+  waiting: number;
+}
+export interface SyncFolderInfo {
+  path: string;
+  manifest: { format: number; id: string; createdAt: number } | null;
+  devices: number;
+  stickers: number;
 }
 export interface BallSnapshot {
   center: { x: number; y: number };

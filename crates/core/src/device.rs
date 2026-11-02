@@ -9,13 +9,30 @@ use uuid::Uuid;
 use crate::{Error, Result};
 
 /// 只存于本机的 local/device.json，不属于同步元数据。
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Device {
     pub id: String,
     pub name: String,
 }
 
 impl Device {
+    pub(crate) fn rename(&mut self, root: &Path, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::EmptyName("设备"));
+        }
+        let next = Self {
+            id: self.id.clone(),
+            name: name.into(),
+        };
+        let mut file = NamedTempFile::new_in(root.join("local"))?;
+        file.write_all(&serde_json::to_vec(&next)?)?;
+        file.as_file().sync_all()?;
+        file.persist(root.join("local/device.json"))
+            .map_err(|e| e.error)?;
+        *self = next;
+        Ok(())
+    }
     pub(crate) fn load_or_create(root: &Path) -> Result<Self> {
         let directory = root.join("local");
         fs::create_dir_all(&directory)?;
