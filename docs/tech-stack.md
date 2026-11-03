@@ -89,15 +89,15 @@
 
 - **复制**：macOS 统一只写一个含 `public.file-url` 的剪贴板条目，指向按表情名命名的原文件副本。不解码、不取动图首帧、不附 PNG，保留源文件的格式、透明通道和动画数据；目标应用可能呈现为图片或文件卡片，发送后是否播放仍由目标应用决定。主窗口按钮、⌘C 和悬浮面板单击使用同一策略。
 - **复制为文件**：macOS 已合并进“复制”，不再单列菜单项；⌘⇧C 保留为同一操作的快捷键。Windows 的 Ctrl+Shift+C 仍只写文件引用。
-- **Windows 尚未对齐**：本轮未改、未编译验证；“复制”仍同时写 CF_DIB、PNG、CF_HDROP，“复制为文件”只写 CF_HDROP。需单独验证后对齐格式策略。
+- **Windows 尚未对齐**：未编译验证；“复制”仍同时写 CF_DIB、PNG、CF_HDROP，“复制为文件”只写 CF_HDROP。需单独验证后对齐格式策略。
 - **拖出发送**：在系统层发起拖拽，交出副本。
 - **在访达 / 资源管理器中显示**：显示副本。
 - 以上交出的文件引用都指向临时目录里按表情名命名的副本，保留 7 天，不把仓库里按哈希命名的原文件交给其他应用或用户改动。
-- 依据：2026-11-03 在 QQ 和飞书自己的会话里，文件 URL + PNG、只有 PNG、只有文件 URL 都能粘成图片缩略图，去掉 PNG 没有损失；飞书只有带文件 URL 时才引用原 GIF。代价是 Safari、文本编辑粘不出来（[旧应用实测](reports/2026-11-02-appearance-purge-compaction.md#剪贴板探索)），接受这项取舍，不按前台应用分流。实测记录见 [docs/reports/2026-11-03-clipboard.md](reports/2026-11-03-clipboard.md)；微信的外观、飞书的透明度和发送后的动画还要人工确认（见 [TODO.md](../TODO.md)）。
+- 依据：2026-11-03 在 QQ 和飞书自己的会话里，文件 URL + PNG、只有 PNG、只有文件 URL 都能粘成图片缩略图，去掉 PNG 没有损失；飞书只有带文件 URL 时才引用原 GIF。代价是 Safari、文本编辑粘不出来（旧应用实测），接受这项取舍，不按前台应用分流。微信的外观、飞书的透明度和发送后的动画还要人工确认（见 [TODO.md](../TODO.md)）。
 
 ## 同步
 
-方案见 [ADR 0003](adr/0003-serverless-sync.md)，删除规则见 [ADR 0004](adr/0004-soft-delete-30-days.md)，文件格式和合并细节见 [ADR 0005](adr/0005-sync-format-and-merge.md)。
+方案见 [ADR 0003](adr/0003-serverless-sync.md)，删除规则见 [ADR 0004](adr/0004-soft-delete-30-days.md)，文件格式和合并细节见 [ADR 0005](adr/0005-sync-format-and-merge.md)。网络后端的容器集成测试怎么跑见 [testing.md](testing.md)。
 
 - **已实现**：同步文件夹、通用 WebDAV、Cloudflare R2 和 S3 兼容后端，共用 `crates/core/src/sync/` 的阻塞 `Storage` 接口及原有同步调度。网络层采用 OpenDAL 0.59.5、reqwest + rustls，不依赖 OpenSSL；连接与请求有按传输量放宽的超时、指数退避、Retry-After（超过 60 秒结束本轮）及取消。WebDAV 直接 PUT，父目录缺失时才建目录，读取方校验半截文件；内存后端用于逐文件延迟和收敛测试。
 - **持久化**：SQLite 0002 迁移为所有本机改动记录操作，即使未开启同步也生效；按字段时钟合并，保留永久删除标记和合并映射。加入或切换仓库先推完整快照。

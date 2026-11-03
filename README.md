@@ -2,8 +2,12 @@
 
 跨 macOS 与 Windows 的个人表情管理工具：把表情集中收进一个仓库，打标签、快速取用，并在自己的设备之间同步。
 
+当前版本 0.1.0，只在 macOS 14 及以上验证过，Windows 还没有编译和运行过。
+
+- 更新记录：[CHANGELOG.md](CHANGELOG.md)
 - 术语：[GLOSSARY.md](GLOSSARY.md)
 - 技术栈与代码结构：[docs/tech-stack.md](docs/tech-stack.md)，关键取舍见 [docs/adr/](docs/adr/)
+- 测试：[docs/testing.md](docs/testing.md)
 - 界面设计：[design/README.md](design/README.md)
 - 待办：[TODO.md](TODO.md)
 
