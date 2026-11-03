@@ -36,7 +36,7 @@
   --color-overlay: rgb(31 31 31 / 0.2); /* 模态遮罩 */
   --color-ball-track: #e2e0d9;
   --color-switch-off: #686762;
-  --shadow-ball: 0 8px 24px rgb(31 31 31 / 0.2);
+  --shadow-ball: 0 1px 2px rgb(31 31 31 / 0.18), 0 4px 8px rgb(31 31 31 / 0.12), 0 10px 22px rgb(31 31 31 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -2px 3px rgb(31 31 31 / 0.08);
   --shadow-preview: 0 16px 40px rgb(31 31 31 / 0.16), 0 0 0 1px rgb(31 31 31 / 0.06);
   --color-accent: #c2410c;
   --color-accent-fill: #c2410c;
@@ -83,7 +83,7 @@
     --color-overlay: rgb(0 0 0 / 0.4);
     --color-ball-track: #85837b;
     --color-switch-off: #85837b;
-    --shadow-ball: 0 8px 24px rgb(0 0 0 / 0.55), 0 0 0 1px var(--color-line);
+    --shadow-ball: 0 1px 2px rgb(0 0 0 / 0.5), 0 4px 8px rgb(0 0 0 / 0.35), 0 10px 22px rgb(0 0 0 / 0.5), 0 0 0 1px var(--color-line), inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 -2px 3px rgb(0 0 0 / 0.4);
     --shadow-preview: 0 16px 40px rgb(0 0 0 / 0.55), 0 0 0 1px var(--color-line);
     --color-accent: #ffccad;
     --color-accent-fill: #c2410c;

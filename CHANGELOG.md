@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- **悬浮球质感**：球体改为渐变并加了高光，阴影分层，外圈白环带微渐变。
 - **GitHub Actions**：新增手动触发的 macOS（arm64）DMG 构建，说明见 [docs/packaging.md](docs/packaging.md)。
 
 ## 0.1.1

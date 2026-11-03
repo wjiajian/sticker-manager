@@ -63,9 +63,9 @@ export function Ball() {
   const mouth = state.collapsed ? "M27 43h10" : dropping ? "M26 40q6 10 12 0Z" : "M24 41q8 8 16 0";
   return <main aria-label="悬浮球" className="relative h-full w-full overflow-hidden">
     <button type="button" tabIndex={-1} aria-label={state.panelVisible ? "收起表情面板" : "展开表情面板"} aria-expanded={state.panelVisible}
-      className="interactive absolute touch-none rounded-full bg-surface p-2 outline-none"
+      className="interactive absolute touch-none rounded-full p-2 outline-none"
       style={{ left: state.center.x - size / 2, top: state.center.y - size / 2, width: size, height: size,
-        opacity: state.collapsed ? 0.7 : 1, transform: `scale(${state.pressed ? 0.96 : state.hovered && !dropping ? 1.1 : 1})`,
+        opacity: state.collapsed ? 0.7 : 1, backgroundImage: "linear-gradient(to bottom, var(--color-surface), color-mix(in srgb, var(--color-surface) 90%, var(--color-line)))", transform: `scale(${state.pressed ? 0.96 : state.hovered && !dropping ? 1.1 : 1})`,
         boxShadow: `var(--shadow-ball)${state.panelVisible ? ", inset 0 0 0 3px var(--color-accent)" : ""}`, cursor: state.dragging ? "grabbing" : "pointer" }}
       onPointerDown={(event) => {
         event.preventDefault();
@@ -74,7 +74,19 @@ export function Ball() {
       }}
       onContextMenu={(event) => { event.preventDefault(); void run(ipc.showBallMenu); }}>
       <svg viewBox="0 0 64 64" className="block h-full w-full" aria-hidden>
-        <circle cx="32" cy="34" r="24" fill="var(--color-brand)" stroke="var(--color-brand-ink)" strokeWidth="3" />
+        <defs>
+          <radialGradient id="ball-body" cx="36%" cy="28%" r="80%">
+            <stop offset="0" style={{ stopColor: "color-mix(in srgb, var(--color-brand) 65%, white)" }} />
+            <stop offset="0.5" style={{ stopColor: "var(--color-brand)" }} />
+            <stop offset="1" style={{ stopColor: "color-mix(in srgb, var(--color-brand) 80%, #d97706)" }} />
+          </radialGradient>
+          <linearGradient id="ball-gloss" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#fff" stopOpacity="0.55" />
+            <stop offset="1" stopColor="#fff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <circle cx="32" cy="34" r="24" fill="url(#ball-body)" stroke="var(--color-brand-ink)" strokeWidth="3" />
+        <ellipse cx="32" cy="20.5" rx="15" ry="7.5" fill="url(#ball-gloss)" />
         <path d={eyes} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3.5" strokeLinecap="round" />
         <path d={mouth} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3.5" strokeLinecap="round" />
       </svg>
