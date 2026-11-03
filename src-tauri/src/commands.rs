@@ -7,7 +7,8 @@ use std::sync::Mutex;
 
 use serde::{Serialize, Serializer};
 use sticker_core::{
-    ImportReport, Library, LibraryOverview, LibraryView, Sticker, Tag, TagGroup, TagSidebar,
+    ImportReport, Library, LibraryOverview, LibraryView, Sticker, StickerCursor, StickerPage, Tag,
+    TagGroup, TagSidebar,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -68,6 +69,18 @@ pub async fn library_overview(app: AppHandle) -> CommandResult<LibraryOverview> 
 #[tauri::command]
 pub async fn list_stickers(app: AppHandle, view: LibraryView) -> CommandResult<Vec<Sticker>> {
     with_library(app, move |library| Ok(library.list_stickers(view)?)).await
+}
+
+#[tauri::command]
+pub async fn list_stickers_page(
+    app: AppHandle,
+    after: Option<StickerCursor>,
+    limit: u32,
+) -> CommandResult<StickerPage> {
+    with_library(app, move |library| {
+        Ok(library.list_stickers_page(after.as_ref(), limit)?)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -258,7 +271,8 @@ pub async fn copy_sticker(app: AppHandle, id: String, file_only: bool) -> Comman
     let handle = app.clone();
     with_library(app, move |library| {
         let sticker = library.sticker_for_use(&id)?;
-        let image = if file_only {
+        // macOS 统一复制原文件，无需解码或取动图首帧；Windows 保持原有策略。
+        let image = if cfg!(target_os = "macos") || file_only {
             None
         } else {
             Some(sticker.read_image()?)

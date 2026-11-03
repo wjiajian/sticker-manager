@@ -4,20 +4,13 @@ use image::DynamicImage;
 
 pub type ClipboardResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+/// macOS 只写文件 URL，交出原文件，保留格式、透明通道和动画；`image` 只有 Windows 用。
 #[cfg(target_os = "macos")]
-pub fn write(path: &Path, image: Option<&DynamicImage>) -> ClipboardResult<()> {
-    use std::io::Cursor;
-
+pub fn write(path: &Path, _image: Option<&DynamicImage>) -> ClipboardResult<()> {
     use objc2::{rc::autoreleasepool, runtime::ProtocolObject};
-    use objc2_app_kit::{
-        NSPasteboard, NSPasteboardItem, NSPasteboardTypeFileURL, NSPasteboardTypePNG,
-    };
-    use objc2_foundation::{NSArray, NSData, NSString, NSURL};
+    use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardTypeFileURL};
+    use objc2_foundation::{NSArray, NSString, NSURL};
 
-    let mut png = Cursor::new(Vec::new());
-    if let Some(image) = image {
-        image.write_to(&mut png, image::ImageFormat::Png)?;
-    }
     autoreleasepool(|_| {
         let path = path.to_str().ok_or("文件路径无法转换为文字")?;
         let url = NSURL::fileURLWithPath(&NSString::from_str(path));
@@ -25,12 +18,6 @@ pub fn write(path: &Path, image: Option<&DynamicImage>) -> ClipboardResult<()> {
         let item = NSPasteboardItem::new();
         if !item.setString_forType(&url, unsafe { NSPasteboardTypeFileURL }) {
             return Err("无法写入文件引用".into());
-        }
-        if image.is_some() {
-            let data = NSData::with_bytes(png.get_ref());
-            if !item.setData_forType(&data, unsafe { NSPasteboardTypePNG }) {
-                return Err("无法写入图片".into());
-            }
         }
         let items = NSArray::from_retained_slice(&[ProtocolObject::from_retained(item)]);
         let pasteboard = NSPasteboard::generalPasteboard();

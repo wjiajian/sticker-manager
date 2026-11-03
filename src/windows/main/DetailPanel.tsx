@@ -63,7 +63,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
               aria-label={copied ? "已复制" : "复制"}
               disabled={unavailable || actions.busy}
               onClick={() => void actions.copy(sticker)}
-              title={platform === "macos" ? "⌘C 复制 · ⌘⇧C 复制为文件" : "Ctrl+C 复制 · Ctrl+Shift+C 复制为文件"}
+              title={platform === "macos" ? "⌘C 复制（保留原始格式）" : "Ctrl+C 复制 · Ctrl+Shift+C 复制为文件"}
               className="flex-1 justify-center text-base disabled:opacity-50"
             >
               {copied ? <CheckIcon size={16} aria-hidden /> : <CopyIcon size={16} aria-hidden />}

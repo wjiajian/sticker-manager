@@ -25,7 +25,7 @@ export function useStickerMenu(actions: StickerActions) {
       await dispose();
       const items: MenuOptions["items"] = sticker.deletedAt === null ? [
         { id: "copy-sticker", text: "复制", action: () => { void actions.copy(sticker); } },
-        { id: "copy-sticker-file", text: "复制为文件", action: () => { void actions.copy(sticker, true); } },
+        ...(platform === "windows" ? [{ id: "copy-sticker-file", text: "复制为文件", action: () => { void actions.copy(sticker, true); } }] : []),
         { id: "reveal-sticker", text: platform === "windows" ? "在资源管理器中显示" : "在访达中显示", action: () => { void actions.reveal(sticker); } },
         { item: "Separator" },
         { id: "delete-sticker", text: "删除", action: () => { void actions.deleteSticker(sticker); } },

@@ -61,6 +61,24 @@ pub struct Sticker {
     pub thumbnail_path: PathBuf,
 }
 
+/// 分页位置：上一页最后一张表情的添加时间和 id。
+///
+/// 不用 rowid：同步投影会清空并重写表情表，rowid 随之改变。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickerCursor {
+    pub added_at: i64,
+    pub id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickerPage {
+    pub stickers: Vec<Sticker>,
+    /// 还有下一页时，读下一页要传的位置。
+    pub next: Option<StickerCursor>,
+}
+
 /// 侧栏仓库各项的数量。
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,6 +155,47 @@ impl Library {
         self.query_stickers(filter, order, tag_id.as_slice())
     }
 
+    /// 按添加时间倒序分页列出未删除的表情，`after` 为空时从第一页开始。
+    /// 读取期间新导入的表情排在最前面，不会让后面的页重复出现已读过的表情。
+    pub fn list_stickers_page(
+        &self,
+        after: Option<&StickerCursor>,
+        limit: u32,
+    ) -> Result<StickerPage> {
+        let limit = limit.max(1) as usize;
+        // 多读一张来判断还有没有下一页；先在子查询里分页，使用次数等列只为这一页计算。
+        let mut statement = self.conn.prepare(&format!(
+            "SELECT {STICKER_COLUMNS} FROM stickers s WHERE s.id IN (
+                 SELECT id FROM stickers WHERE deleted_at IS NULL
+                     AND (?1 IS NULL OR added_at < ?1 OR (added_at = ?1 AND id < ?2))
+                 ORDER BY added_at DESC, id DESC LIMIT ?3)
+             ORDER BY s.added_at DESC, s.id DESC"
+        ))?;
+        let mut stickers = statement
+            .query_map(
+                rusqlite::params![
+                    after.map(|cursor| cursor.added_at),
+                    after.map(|cursor| cursor.id.as_str()),
+                    limit as i64 + 1
+                ],
+                |row| Sticker::from_row(row, &self.root),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let more = stickers.len() > limit;
+        stickers.truncate(limit);
+        let ids = serde_json::to_string(&stickers.iter().map(|s| &s.id).collect::<Vec<_>>())?;
+        self.attach_tags(
+            &mut stickers,
+            "s.id IN (SELECT value FROM json_each(?1))",
+            [ids],
+        )?;
+        let next = stickers.last().filter(|_| more).map(|last| StickerCursor {
+            added_at: last.added_at,
+            id: last.id.clone(),
+        });
+        Ok(StickerPage { stickers, next })
+    }
+
     pub(crate) fn query_stickers(
         &self,
         filter: &str,
@@ -151,22 +210,32 @@ impl Library {
                 Sticker::from_row(row, &self.root)
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        self.attach_tags(&mut stickers, filter, params_from_iter(parameters))?;
+        Ok(stickers)
+    }
+
+    /// 一次读取这批表情的标签，避免为每张表情单独查询。`scope` 是限定表情 `s` 的条件。
+    fn attach_tags(
+        &self,
+        stickers: &mut [Sticker],
+        scope: &str,
+        parameters: impl rusqlite::Params,
+    ) -> Result<()> {
         if stickers.is_empty() {
-            return Ok(stickers);
+            return Ok(());
         }
         let indexes: HashMap<_, _> = stickers
             .iter()
             .enumerate()
             .map(|(i, sticker)| (sticker.id.clone(), i))
             .collect();
-        // 一次读取列表中所有表情的标签，避免为每张表情单独查询。
         let mut statement = self.conn.prepare(&format!(
             "SELECT t.id, t.name, t.color, t.group_id, t.position, st.sticker_id
              FROM tags t JOIN sticker_tags st ON st.tag_id = t.id
              JOIN stickers s ON s.id = st.sticker_id
-             WHERE {filter} ORDER BY t.position, t.id"
+             WHERE {scope} ORDER BY t.position, t.id"
         ))?;
-        let tags = statement.query_map(params_from_iter(parameters), |row| {
+        let tags = statement.query_map(parameters, |row| {
             Ok((row.get::<_, String>(5)?, Tag::from_row(row)?))
         })?;
         for tag in tags {
@@ -175,7 +244,7 @@ impl Library {
                 stickers[index].tags.push(tag);
             }
         }
-        Ok(stickers)
+        Ok(())
     }
 
     pub fn overview(&self) -> Result<LibraryOverview> {
@@ -305,6 +374,45 @@ mod tests {
         ] {
             assert_eq!(ids(view).len(), count as usize);
         }
+    }
+
+    #[test]
+    fn pages_follow_added_time_and_new_imports_do_not_repeat_read_stickers() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        library.conn.execute_batch(
+            "INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at, deleted_at) VALUES
+                ('a', 'h1', 'png', 'a', 1, 1, 1, 50, NULL),
+                ('c', 'h2', 'png', 'c', 1, 1, 1, 40, NULL),
+                ('b', 'h3', 'png', 'b', 1, 1, 1, 40, NULL),
+                ('gone', 'h4', 'png', 'gone', 1, 1, 1, 35, 60),
+                ('d', 'h5', 'png', 'd', 1, 1, 1, 30, NULL),
+                ('e', 'h6', 'png', 'e', 1, 1, 1, 20, NULL);
+             INSERT INTO tags (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
+             INSERT INTO sticker_tags VALUES ('b', 'work');",
+        ).unwrap();
+        let ids = |page: &StickerPage| {
+            page.stickers
+                .iter()
+                .map(|s| s.id.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let first = library.list_stickers_page(None, 2).unwrap();
+        assert_eq!(ids(&first), ["a", "c"]);
+        // 第一页读完后才导入的表情排在最前，不会出现在后面的页里。
+        library.conn.execute(
+            "INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at) VALUES ('new', 'h7', 'png', 'new', 1, 1, 1, 99)",
+            [],
+        ).unwrap();
+        let second = library.list_stickers_page(first.next.as_ref(), 2).unwrap();
+        assert_eq!(ids(&second), ["b", "d"]);
+        assert_eq!(second.stickers[0].tags[0].name, "打工");
+        let last = library.list_stickers_page(second.next.as_ref(), 2).unwrap();
+        assert_eq!(ids(&last), ["e"]);
+        assert_eq!(last.next, None);
+        // 刚好读完一整页时也知道没有下一页，不用再请求一次空页。
+        assert_eq!(library.list_stickers_page(None, 6).unwrap().next, None);
     }
 
     #[test]

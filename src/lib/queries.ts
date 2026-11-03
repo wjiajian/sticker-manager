@@ -1,8 +1,10 @@
-import { keepPreviousData, QueryClient, skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData, QueryClient, skipToken, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData,
+} from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import { ipc, type LibraryView } from "./ipc";
+import { ipc, type LibraryView, type StickerCursor, type StickerPage } from "./ipc";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +41,25 @@ export function useSticker(id: string | null) {
 
 export function useStickers(view: LibraryView) {
   return useQuery({ queryKey: ["library", "stickers", view], queryFn: () => ipc.listStickers(view) });
+}
+
+const STICKER_PAGE_SIZE = 48;
+const stickerPagesKey = ["library", "stickers", "pages"];
+
+/** 按添加时间倒序分页读取全部表情，滚动到底再读下一页。仓库变动时已读的各页依次重读。 */
+export function useStickerPages() {
+  return useInfiniteQuery({
+    queryKey: stickerPagesKey,
+    queryFn: ({ pageParam }) => ipc.listStickersPage(pageParam, STICKER_PAGE_SIZE),
+    initialPageParam: null as StickerCursor | null,
+    getNextPageParam: (page) => page.next,
+  });
+}
+
+/** 只保留第一页：下次打开从头显示，滚动加载过的页不一直留在内存里。 */
+export function keepFirstStickerPage(client: QueryClient) {
+  client.setQueryData<InfiniteData<StickerPage, StickerCursor | null>>(stickerPagesKey, (data) =>
+    data && { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) });
 }
 
 export function useStickerSearch(query: string) {

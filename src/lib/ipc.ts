@@ -58,6 +58,17 @@ export interface Sticker {
   thumbnailPath: string;
 }
 
+/** 分页位置：上一页最后一张表情的添加时间和 id。 */
+export interface StickerCursor {
+  addedAt: number;
+  id: string;
+}
+
+export interface StickerPage {
+  stickers: Sticker[];
+  next: StickerCursor | null;
+}
+
 export interface ImportFailure {
   path: string;
   message: string;
@@ -136,6 +147,7 @@ export const ipc = {
   globalShortcutError: () => invoke<string | null>("global_shortcut_error"),
   libraryOverview: () => invoke<LibraryOverview>("library_overview"),
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
+  listStickersPage: (after: StickerCursor | null, limit: number) => invoke<StickerPage>("list_stickers_page", { after, limit }),
   searchStickers: (query: string) => invoke<Sticker[]>("search_stickers", { query }),
   tagSidebar: () => invoke<TagSidebar>("tag_sidebar"),
   sticker: (id: string) => invoke<Sticker | null>("sticker", { id }),

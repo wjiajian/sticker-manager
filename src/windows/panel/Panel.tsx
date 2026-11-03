@@ -2,19 +2,18 @@ import { MagnifyingGlassIcon, PushPinIcon } from "@phosphor-icons/react";
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSyncStatus, syncLabel, deviceTime, syncStateLabel, restoringLibrary } from "../main/useSyncStatus";
 import { SyncIcon } from "../main/SyncIcon";
-import { TagDot } from "../../components/TagDot";
 import { ipc, type Sticker } from "../../lib/ipc";
-import { useLibraryChangedEvents, useLibraryOverview, useStickers, useTagSidebar } from "../../lib/queries";
+import { keepFirstStickerPage, useLibraryChangedEvents, useLibraryOverview, useStickerPages, useStickers, useTagSidebar } from "../../lib/queries";
 import { StickerImage } from "../main/StickerImage";
 import { sortStickers, useUsageSnapshot } from "../main/stickerList";
 import { useDragOut } from "../main/useDragOut";
 import { usePanelActions } from "./usePanelActions";
 import { previewDescription, previewSticker } from "../../lib/preview";
 import { usePreview } from "./usePreview";
-import { GridSkeleton, TagSkeleton, useDelayedLoading } from "../../components/Skeleton";
+import { GridSkeleton, useDelayedLoading } from "../../components/Skeleton";
 
 const EMPTY: Sticker[] = [];
 
@@ -28,35 +27,42 @@ export function Panel() {
   const [composing, setComposing] = useState(false);
   const composingRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tagId, setTagId] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
   const [pinBusy, setPinBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 每次打开面板换一份使用数据记录：打开期间复制不让最近使用和标签网格跳位。
+  // 每次打开面板换一份使用数据记录：打开期间复制不让最近使用网格跳位。
   const [session, setSession] = useState(0);
   const usage = useUsageSnapshot(session);
   const overview = useLibraryOverview();
   const recentQuery = useStickers("recent");
+  const pages = useStickerPages();
   const sidebar = useTagSidebar();
   const eventError = useLibraryChangedEvents();
   const actions = usePanelActions();
   const resetActions = actions.reset;
-  const tags = useMemo(() => sidebar.data
-    ? [...sidebar.data.groups.flatMap((group) => group.tags), ...sidebar.data.ungrouped].filter((tag) => tag.stickerCount > 0)
-    : [], [sidebar.data]);
-  const currentTag = tags.find((tag) => tag.id === tagId) ?? tags[0];
-  const tagged = useQuery({
-    queryKey: ["library", "stickers", { tag: currentTag?.id }],
-    queryFn: currentTag ? () => ipc.listStickers({ tag: currentTag.id }) : skipToken,
-  });
-  const tagStickers = useMemo(() => sortStickers(tagged.data ?? EMPTY, "recent", usage), [tagged.data, usage]);
+  const all = useMemo(() => pages.data?.pages.flatMap((page) => page.stickers) ?? EMPTY, [pages.data]);
+  const allScroll = useRef<HTMLDivElement>(null);
+  const [nearEnd, setNearEnd] = useState(false);
+  // 列表末尾进入滚动区下方 240px 内就读下一页，通常在滚到底之前就读完了。
+  const sentinel = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    const observer = new IntersectionObserver(([entry]) => setNearEnd(entry.isIntersecting),
+      { root: node.parentElement, rootMargin: "0px 0px 240px 0px" });
+    observer.observe(node);
+    return () => { observer.disconnect(); setNearEnd(false); };
+  }, []);
+  const { hasNextPage, isFetching, isFetchNextPageError, fetchNextPage } = pages;
+  useEffect(() => {
+    // 重读期间不追加，否则会打断已读各页的重读；读下一页出错后不自动重试。
+    if (nearEnd && hasNextPage && !isFetching && !isFetchNextPageError) void fetchNextPage();
+  }, [nearEnd, hasNextPage, isFetching, isFetchNextPageError, fetchNextPage]);
   const search = useQuery({
     queryKey: ["library", "search", query],
     queryFn: query ? () => ipc.searchStickers(query) : skipToken,
   });
   const searching = text.length > 0;
   const searchReady = !composing && text.trim() === query && !search.isFetching && !search.isError;
-  for (const list of [recentQuery.data, tagged.data, search.data]) list?.forEach(usage);
+  for (const list of [recentQuery.data, all, search.data]) list?.forEach(usage);
   const recent = useMemo(() => sortStickers(recentQuery.data ?? EMPTY, "recent", usage).slice(0, 8), [recentQuery.data, usage]);
   // 防抖期间不让 Enter 复制上一个词的结果。
   const choices = searching ? (searchReady ? search.data ?? EMPTY : EMPTY) : recent;
@@ -65,16 +71,11 @@ export function Panel() {
   const activeId = selected ? `${choicePrefix}-${selected.id}` : undefined;
   const empty = overview.data?.all === 0;
   const recentSkeleton = useDelayedLoading(recentQuery.isPending || overview.isPending);
-  const tagsSkeleton = useDelayedLoading(sidebar.isPending);
-  const taggedSkeleton = useDelayedLoading(tagged.isPending && !!currentTag, currentTag?.id);
+  const allSkeleton = useDelayedLoading(pages.isPending);
   const previews = new Map((empty ? [] : searching ? choices.map((sticker) => ["search", sticker] as const)
-    : [...recent.map((sticker) => ["recent", sticker] as const), ...tagStickers.map((sticker) => ["tag", sticker] as const)])
+    : [...recent.map((sticker) => ["recent", sticker] as const), ...all.map((sticker) => ["all", sticker] as const)])
     .map(([prefix, sticker]) => [`${prefix}-${sticker.id}`, previewSticker(sticker, sidebar.data)]));
   const preview = usePreview(previews, actions.busy, text, setError);
-
-  useEffect(() => {
-    if (currentTag) setTagId(currentTag.id);
-  }, [currentTag]);
 
   useEffect(() => {
     if (composing) return;
@@ -96,6 +97,8 @@ export function Panel() {
       setText(""); setQuery(""); setSelectedId(null); setError(null); setSession((count) => count + 1);
       composingRef.current = false; setComposing(false);
       resetActions();
+      keepFirstStickerPage(client);
+      allScroll.current?.scrollTo({ top: 0 });
       void client.invalidateQueries({ queryKey: ["library"] });
       focus();
       requestAnimationFrame(() => { if (!disposed) focus(); });
@@ -145,13 +148,13 @@ export function Panel() {
   function tile(sticker: Sticker, prefix: string, index?: number) {
     const key = `${prefix}-${sticker.id}`;
     return <PanelTile key={key} id={key} sticker={sticker} number={index === undefined ? undefined : index + 1}
-      selectable={prefix !== "tag"} selected={activeId === key} copied={actions.copiedKey === key}
+      selectable={prefix !== "all"} selected={activeId === key} copied={actions.copiedKey === key}
       busy={actions.busy} onCopy={() => { void actions.copy(sticker, key); }}
       preview={preview.tile(key)} description={previewDescription(previewSticker(sticker, sidebar.data))}
       onDrag={(isPressed) => actions.drag(sticker, isPressed)} />;
   }
 
-  const problem = error ?? actions.error ?? eventError ?? [overview, recentQuery, sidebar, tagged, search].find((result) => result.error)?.error;
+  const problem = error ?? actions.error ?? eventError ?? [overview, recentQuery, pages, sidebar, search].find((result) => result.error)?.error;
 
   return (
     <main className="relative grid h-full w-full grid-cols-1 grid-rows-[36px_minmax(0,1fr)_32px] gap-3 rounded-3xl bg-surface p-3 [&_button]:cursor-pointer" aria-label="表情面板"
@@ -199,18 +202,17 @@ export function Panel() {
                   : <div className="flex h-full flex-1 flex-col items-center justify-center gap-2 text-ink-secondary"><p>用过的表情会出现在这里</p></div>}
               </div>
             </section>
-            {sidebar.isPending ? tagsSkeleton ? <><TagSkeleton panel /><GridSkeleton panel /></> : null : tags.length > 0 && <>
-              <div className="flex h-8 shrink-0 items-center gap-2 overflow-x-auto overscroll-contain [scrollbar-width:thin]" aria-label="标签">
-                {tags.map((tag) => <button key={tag.id} type="button" className="flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs font-semibold whitespace-nowrap aria-pressed:border-selection-edge aria-pressed:bg-selection aria-pressed:text-on-selection hover:opacity-82" aria-pressed={currentTag?.id === tag.id}
-                  onMouseDown={(event) => event.preventDefault()} onClick={() => { setTagId(tag.id); input.current?.focus(); }}>
-                  <TagDot color={tag.color} />{tag.name}
-                </button>)}
+            <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="all-heading" aria-busy={pages.isPending}>
+              <div className="mb-2 flex shrink-0 justify-between px-1 text-xs text-ink-secondary [&_h2]:font-semibold [&_h2]:text-ink-tertiary">
+                <h2 id="all-heading">全部表情</h2>
+                {overview.data && <span>{overview.data.all} 张</span>}
               </div>
-              <section className="h-41 shrink-0 overflow-y-auto overscroll-contain" aria-label={`${currentTag?.name}的表情`}>
-                {tagged.isPending ? taggedSkeleton ? <GridSkeleton panel /> : null
-                  : <div className="grid grid-cols-4 gap-2">{tagStickers.map((sticker) => tile(sticker, "tag"))}</div>}
-              </section>
-            </>}
+              <div ref={allScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                {pages.isPending ? allSkeleton ? <GridSkeleton panel /> : null
+                  : <div className="grid grid-cols-4 gap-2">{all.map((sticker) => tile(sticker, "all"))}</div>}
+                {hasNextPage && <div ref={sentinel} className="h-px" aria-hidden />}
+              </div>
+            </section>
           </>}
       </div>
       {problem && <p role="alert" className="absolute right-3 bottom-14 left-3 max-h-24 overflow-y-auto rounded-lg border border-accent bg-surface px-3 py-2 text-xs leading-5 text-accent">{String(problem)}</p>}

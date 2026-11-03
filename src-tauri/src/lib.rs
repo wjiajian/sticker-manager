@@ -88,6 +88,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::library_overview,
             commands::list_stickers,
+            commands::list_stickers_page,
             commands::search_stickers,
             commands::sticker,
             commands::delete_sticker,
