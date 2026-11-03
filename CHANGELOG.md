@@ -1,5 +1,9 @@
 # 更新记录
 
+## 未发布
+
+- **GitHub Actions**：新增手动触发的 macOS（arm64）DMG 构建，说明见 [docs/packaging.md](docs/packaging.md)。
+
 ## 0.1.1
 
 - **多选**：⌘（Windows 为 Ctrl）点击、Shift 点击连选，鼠标放在表情格上时左上角出现复选框，点它也能多选。多选后可批量删除，在最近删除里批量恢复或彻底删除；右键菜单和 ⌘⌫ / Delete 对整个多选生效，Esc 取消多选。

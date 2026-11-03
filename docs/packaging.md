@@ -9,6 +9,16 @@ CI=true pnpm tauri build --bundles app,dmg
 
 产物分别在 `target/release/bundle/macos/表情管理器.app` 和 `target/release/bundle/dmg/`。只要 DMG 时可用 `--bundles dmg`，但 Tauri 会清理作为中间产物的 `.app`；要同时保留两者就用 `--bundles app,dmg`。`CI=true` 跳过 DMG 的访达窗口美化，避免构建时弹出自动化权限提示。当前未配置开发者签名、公证和自动更新。
 
+## GitHub Actions 构建
+
+在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow 手动触发。只构建 Apple Silicon（arm64）的 DMG，完成后在运行详情页的 Artifacts 下载，保留 14 天，不创建 Release。
+
+CI 构建同样没有签名和公证，下载的 DMG 装好后首次打开会被 Gatekeeper 拦下。右键应用选「打开」，或在终端执行：
+
+```bash
+xattr -cr /Applications/表情管理器.app
+```
+
 **试运行发布版必须隔离 HOME**：发布版忽略 `STICKER_LIBRARY_DIR`，直接启动会打开真实仓库，也可能写入真实 `~/Library/LaunchAgents`。目前锁定的 Tauri 使用 `dirs 7` 解析数据目录，自启依赖 `auto-launch 0.6` 使用 `dirs 6` 解析 HOME；两者共用优先读取 `HOME` 的 `dirs-sys 0.5`，已用一次性程序验证。升级这些依赖后应重新验证，再运行发布版。
 
 ```bash
