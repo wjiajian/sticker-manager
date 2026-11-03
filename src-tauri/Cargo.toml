@@ -3,6 +3,7 @@ name = "sticker-manager"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # 库名和可执行文件名不能相同，否则 Windows 上调试符号文件会冲突
 [lib]

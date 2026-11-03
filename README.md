@@ -10,6 +10,7 @@
 - 测试：[docs/testing.md](docs/testing.md)
 - 界面设计：[design/README.md](design/README.md)
 - 待办：[TODO.md](TODO.md)
+- 许可证：[MIT](LICENSE)
 
 ## 开发
 
