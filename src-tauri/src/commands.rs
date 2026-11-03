@@ -110,6 +110,16 @@ pub async fn restore_sticker(app: AppHandle, id: String) -> CommandResult<()> {
 }
 
 #[tauri::command]
+pub async fn delete_stickers(app: AppHandle, ids: Vec<String>) -> CommandResult<Vec<String>> {
+    with_library(app, move |library| Ok(library.delete_stickers(&ids)?)).await
+}
+
+#[tauri::command]
+pub async fn restore_stickers(app: AppHandle, ids: Vec<String>) -> CommandResult<Vec<String>> {
+    with_library(app, move |library| Ok(library.restore_stickers(&ids)?)).await
+}
+
+#[tauri::command]
 pub async fn purge_sticker(app: AppHandle, id: String) -> CommandResult<()> {
     with_library(app, move |library| Ok(library.purge_sticker(&id)?)).await
 }

@@ -89,7 +89,7 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
     if (id) await ipc.cancelSyncConnection(id);
   }
   async function stop() {
-    if (await confirm(`停止后，本机的表情和存储后端里的内容都会保留。${status?.target?.credentialsSaved ? "已保存的凭据会从本机钥匙串删除。" : ""}`, { title: "停止同步？", kind: "warning", okLabel: "停止同步", cancelLabel: "取消" })) {
+    if (await confirm(`停止后，本机的表情和存储后端里的内容都会保留。${status?.target?.credentialsSaved ? "已保存的凭据会从本机删除。" : ""}`, { title: "停止同步？", kind: "warning", okLabel: "停止同步", cancelLabel: "取消" })) {
       try { await ipc.stopSync(); } finally { setReenter(false); }
     }
   }
@@ -125,7 +125,7 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
         onCopy={(event) => { event.clipboardData.setData("text/plain", address); event.preventDefault(); }}>
         <span className="min-w-0 truncate">{address.slice(0, split)}</span><span className="shrink-0">{address.slice(split)}</span>
       </p>
-      {target.credentialsSaved && <p className="text-xs text-ink-secondary">凭据已保存到系统钥匙串</p>}
+      {target.credentialsSaved && <p className="text-xs text-ink-secondary">凭据已保存在本机，不会同步</p>}
       <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void run(async () => { await ipc.setDeviceName(name); editingName.current = false; setName(name.trim()); }); }}>
         <label htmlFor="sync-device-name" className="shrink-0">设备名</label>
         <input id="sync-device-name" value={name} disabled={busy} onChange={(event) => { editingName.current = true; setName(event.target.value); }} className="min-w-0 flex-1 rounded-control border border-line bg-surface px-3 py-1" />

@@ -11,6 +11,7 @@ import { DetailPanel } from "./DetailPanel";
 import { Sidebar } from "./Sidebar";
 import { StickerGrid } from "./StickerGrid";
 import { filterStickers, sortStickers, useUsageSnapshot } from "./stickerList";
+import { UndoBar } from "./UndoBar";
 import { TitleBar } from "./TitleBar";
 import { useImport } from "./useImport";
 import { PreferencesDialog } from "./PreferencesDialog";
@@ -81,6 +82,7 @@ export function App() {
         {status && <p className="px-6 py-2">{status}</p>}
       </div>}
       <ImportBar key={importing.status?.batch ?? 0} status={importing.status} error={importing.error} clearError={importing.clearError} />
+      <UndoBar actions={actions} />
       {anchor && sync.data?.target && !preferences.open && <SyncDetails status={sync.data} anchor={anchor.button} above={anchor.above} onClose={closeSync} onSettings={() => { closeSync(); preferences.show(true); }} />}
       <div className="flex min-h-0 flex-1">
         <Sidebar onPreferences={() => preferences.show()} sync={sync.data} onSync={(button) => openSync(button, true)} />

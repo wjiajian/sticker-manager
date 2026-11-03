@@ -153,6 +153,8 @@ export const ipc = {
   sticker: (id: string) => invoke<Sticker | null>("sticker", { id }),
   deleteSticker: (id: string) => invoke<void>("delete_sticker", { id }),
   restoreSticker: (id: string) => invoke<void>("restore_sticker", { id }),
+  deleteStickers: (ids: string[]) => invoke<string[]>("delete_stickers", { ids }),
+  restoreStickers: (ids: string[]) => invoke<string[]>("restore_stickers", { ids }),
   purgeSticker: (id: string) => invoke<void>("purge_sticker", { id }),
   purgeDeletedStickers: (ids: string[]) => invoke<number>("purge_deleted_stickers", { ids }),
   createTag: (name: string, color: string | null = null, groupId: string | null = null) => invoke<Tag>("create_tag", { name, color, groupId }),

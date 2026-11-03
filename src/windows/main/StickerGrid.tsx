@@ -11,7 +11,7 @@ import { useUiStore, type StickerTypeFilter } from "../../stores/ui";
 import { LIBRARY_VIEWS } from "./libraryViews";
 import { RecentStickers } from "./RecentStickers";
 import type { Usage } from "./stickerList";
-import { StickerTile } from "./StickerTile";
+import { StickerTile, type SelectMode } from "./StickerTile";
 import { STICKER_SORTS, useSortMenu } from "./useSortMenu";
 import type { StickerActions } from "./useStickerActions";
 import { useStickerMenu } from "./useStickerMenu";
@@ -36,7 +36,9 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const setTypeFilter = useUiStore((s) => s.setTypeFilter);
   const sortOrder = useUiStore((s) => s.sortOrder);
   const selectedId = useUiStore((s) => s.selectedStickerId);
+  const selectedIds = useUiStore((s) => s.selectedStickerIds);
   const selectSticker = useUiStore((s) => s.selectSticker);
+  const setSelection = useUiStore((s) => s.setSelection);
   const resultFocusRequested = useUiStore((s) => s.resultFocusRequested);
   const requestResultFocus = useUiStore((s) => s.requestResultFocus);
   const firstTile = useRef<HTMLButtonElement>(null);
@@ -60,6 +62,31 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
     const selected = source?.find((sticker) => sticker.id === selectedId);
     if (selected && selected.animated !== (typeFilter === "animated")) selectSticker(null);
   }, [source, typeFilter, selectedId, selectSticker]);
+
+  // 多选里的表情不在列表里了（被其他设备删除、筛选掉等），就从多选里去掉。
+  useEffect(() => {
+    if (selectedIds.length < 2 || isPending || listing.isPlaceholderData) return;
+    const present = selectedIds.filter((id) => stickers.some((sticker) => sticker.id === id));
+    if (present.length === selectedIds.length) return;
+    if (present.length > 1) setSelection(present, present.includes(selectedId ?? "") ? selectedId : present[0]);
+    else selectSticker(present[0] ?? null);
+  }, [stickers, selectedIds, selectedId, isPending, listing.isPlaceholderData, selectSticker, setSelection]);
+
+  function choose(sticker: Sticker, mode: SelectMode) {
+    const anchor = stickers.findIndex((item) => item.id === selectedId);
+    if (mode === "range" && anchor >= 0) {
+      const to = stickers.findIndex((item) => item.id === sticker.id);
+      const [from, end] = anchor < to ? [anchor, to] : [to, anchor];
+      const ids = stickers.slice(from, end + 1).map((item) => item.id);
+      setSelection(ids, selectedId);
+    } else if (mode === "toggle") {
+      const ids = selectedIds.includes(sticker.id) ? selectedIds.filter((id) => id !== sticker.id) : [...selectedIds, sticker.id];
+      if (ids.length < 2) selectSticker(ids[0] ?? null);
+      else setSelection(ids, selectedIds.includes(sticker.id) ? ids[ids.length - 1] : sticker.id);
+    } else {
+      selectSticker(sticker.id);
+    }
+  }
 
   useEffect(() => {
     if (!results) return;
@@ -149,8 +176,8 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
               key={sticker.id}
               buttonRef={index === 0 ? firstTile : undefined}
               sticker={sticker}
-              selected={selectedId === sticker.id}
-              onSelect={() => selectSticker(sticker.id)}
+              selected={selectedIds.includes(sticker.id)}
+              onSelect={(mode) => choose(sticker, mode)}
               onMenu={(x, y) => menus.popup(sticker, x, y)}
               actions={actions}
             />

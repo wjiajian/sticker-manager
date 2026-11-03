@@ -105,6 +105,30 @@ fn deletion_updates_views_search_and_counts_without_removing_tag_associations() 
 }
 
 #[test]
+fn batch_delete_and_restore_skip_stickers_in_the_wrong_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = library(dir.path());
+    let ask = |names: &[&str]| names.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+
+    library.delete_sticker("three").unwrap();
+    let mut deleted = library
+        .delete_stickers(&ask(&["one", "two", "three", "missing"]))
+        .unwrap();
+    deleted.sort();
+    assert_eq!(deleted, ["one", "two"]);
+    assert!(ids(&library, LibraryView::All).is_empty());
+
+    let mut restored = library
+        .restore_stickers(&ask(&["one", "two", "missing"]))
+        .unwrap();
+    restored.sort();
+    assert_eq!(restored, ["one", "two"]);
+    assert_eq!(ids(&library, LibraryView::RecentlyDeleted), ["three"]);
+    assert!(library.restore_stickers(&ask(&["one"])).unwrap().is_empty());
+    assert!(library.delete_stickers(&[]).unwrap().is_empty());
+}
+
+#[test]
 fn invalid_transitions_return_the_corresponding_error() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = library(dir.path());

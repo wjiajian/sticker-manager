@@ -18,11 +18,15 @@ interface UiState {
   setSearchText: (text: string) => void;
   setSearchQuery: (query: string) => void;
   requestResultFocus: (requested: boolean) => void;
+  /** 主选中，也是 Shift 连选的起点。 */
   selectedStickerId: string | null;
+  /** 全部选中的表情。单选时只有主选中那一张，没有选中为空。 */
+  selectedStickerIds: string[];
   captionDrafts: Record<string, string>;
   setCaptionDraft: (id: string, value: string | null) => void;
   setView: (view: LibraryView) => void;
   selectSticker: (id: string | null) => void;
+  setSelection: (ids: string[], primary: string | null) => void;
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -38,9 +42,10 @@ export const useUiStore = create<UiState>()((set) => ({
   setSearchText: (searchText) => set({ searchText, resultFocusRequested: false }),
   // 只有真的退出搜索才取消选中；没进入搜索时清空搜索框（比如取消输入法组字）不影响选中。
   setSearchQuery: (searchQuery) => set((state) =>
-    searchQuery || !state.searchQuery ? { searchQuery } : { searchQuery, selectedStickerId: null }),
+    searchQuery || !state.searchQuery ? { searchQuery } : { searchQuery, selectedStickerId: null, selectedStickerIds: [] }),
   requestResultFocus: (resultFocusRequested) => set({ resultFocusRequested }),
   selectedStickerId: null,
+  selectedStickerIds: [],
   captionDrafts: {},
   setCaptionDraft: (id, value) => set((state) => {
     const captionDrafts = { ...state.captionDrafts };
@@ -48,6 +53,7 @@ export const useUiStore = create<UiState>()((set) => ({
     else captionDrafts[id] = value;
     return { captionDrafts };
   }),
-  setView: (view) => set({ view, searchText: "", searchQuery: "", resultFocusRequested: false, selectedStickerId: null }),
-  selectSticker: (id) => set({ selectedStickerId: id }),
+  setView: (view) => set({ view, searchText: "", searchQuery: "", resultFocusRequested: false, selectedStickerId: null, selectedStickerIds: [] }),
+  selectSticker: (id) => set({ selectedStickerId: id, selectedStickerIds: id ? [id] : [] }),
+  setSelection: (selectedStickerIds, selectedStickerId) => set({ selectedStickerIds, selectedStickerId }),
 }));

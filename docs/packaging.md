@@ -18,6 +18,6 @@ env HOME="$release_home" TMPDIR="$release_home/tmp" \
   target/release/bundle/macos/表情管理器.app/Contents/MacOS/sticker-manager
 ```
 
-使用二进制的完整路径启动，不通过 Dock 或访达首次启动测试副本，避免丢失隔离环境。偏好设置中的仓库路径应在 `release_home` 下；不要在测试副本中配置同步或凭据，HOME 不会隔离系统钥匙串。退出测试进程后才清理隔离目录。
+使用二进制的完整路径启动，不通过 Dock 或访达首次启动测试副本，避免丢失隔离环境。偏好设置中的仓库路径应在 `release_home` 下；不要在测试副本中配置同步或凭据，凭据存在仓库的 local 文件夹里，随隔离 HOME 走，但仍不要用测试副本填真实账号。退出测试进程后才清理隔离目录。
 
 挂载检查可用 `hdiutil attach -nobrowse -readonly <DMG路径>`，检查后立即 `hdiutil detach <挂载点>`。DMG、App Translocation 和系统临时目录中的应用不会自动登记自启，也不会消耗首次登记机会；要验证搬到稳定位置后再登记，可用 `ditto` 复制到 `/Users/Shared/` 下专用目录的 `Applications/` 中，仍用上述隔离 HOME 启动，测试完退出并删除副本。不要把验收副本装进 `/Applications`。

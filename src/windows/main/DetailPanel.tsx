@@ -29,6 +29,33 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
   const copied = actions.copiedId === sticker?.id;
   const days = usePurgeDays(sticker?.purgeAt ?? null);
 
+  const many = actions.selectedStickers;
+  if (many.length > 1) {
+    const deleted = many.every((item) => item.deletedAt !== null);
+    return (
+      <aside aria-label="表情详情" className="flex w-66 shrink-0 flex-col items-center justify-center gap-4 overflow-y-auto bg-detail p-6 text-center *:shrink-0">
+        <p role="status" className="text-lg font-semibold">已选 {many.length} 张</p>
+        <p className="text-xs text-ink-secondary">按 Esc 取消多选</p>
+        {deleted ? <div className="flex gap-2">
+          <Button variant="accent" disabled={actions.busy} onClick={() => void actions.restoreStickers(many)} className="justify-center disabled:opacity-50">
+            <ArrowCounterClockwiseIcon size={16} aria-hidden />
+            恢复
+          </Button>
+          <Button disabled={actions.busy} onClick={() => void actions.purgeStickers(many)} className="disabled:opacity-50">彻底删除</Button>
+        </div> : <Button
+          disabled={actions.busy}
+          onClick={() => void actions.deleteStickers(many)}
+          title={`移到最近删除，30 天内可以恢复 · ${platform === "macos" ? "⌘⌫" : "Delete"}`}
+          className="justify-center disabled:opacity-50"
+        >
+          <TrashIcon size={16} aria-hidden />
+          删除 {many.length} 张
+        </Button>}
+        {actions.error && <p role="alert" className="text-xs text-ink-secondary">{actions.error}</p>}
+      </aside>
+    );
+  }
+
   return (
     <aside
       aria-label="表情详情"

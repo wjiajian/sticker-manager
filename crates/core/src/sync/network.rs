@@ -39,7 +39,7 @@ pub enum StorageConfig {
     },
 }
 
-/// 只用于输入和钥匙串；刻意不实现 Debug/Serialize，不能作为 IPC 返回值或设置持久化。
+/// 只用于输入和本机凭据文件；刻意不实现 Debug/Serialize，不能作为 IPC 返回值或设置持久化。
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Credentials {

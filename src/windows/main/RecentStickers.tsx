@@ -13,7 +13,7 @@ export function RecentStickers({ actions, usage, onMenu }: {
 }) {
   const { data } = useStickers("recent");
   const typeFilter = useUiStore((s) => s.typeFilter);
-  const selectedId = useUiStore((s) => s.selectedStickerId);
+  const selectedIds = useUiStore((s) => s.selectedStickerIds);
   const selectSticker = useUiStore((s) => s.selectSticker);
   const setView = useUiStore((s) => s.setView);
   const stickers = useMemo(() => sortStickers(filterStickers(data ?? [], typeFilter), "recent", usage), [data, typeFilter, usage]);
@@ -48,7 +48,7 @@ export function RecentStickers({ actions, usage, onMenu }: {
             key={sticker.id}
             sticker={sticker}
             compact
-            selected={selectedId === sticker.id}
+            selected={selectedIds.includes(sticker.id)}
             onSelect={() => selectSticker(sticker.id)}
             onMenu={(x, y) => onMenu(sticker, x, y)}
             actions={actions}

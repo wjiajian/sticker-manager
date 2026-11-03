@@ -23,7 +23,14 @@ export function useStickerMenu(actions: StickerActions) {
     setError(null);
     try {
       await dispose();
-      const items: MenuOptions["items"] = sticker.deletedAt === null ? [
+      const targets = actions.targetsFor(sticker);
+      const items: MenuOptions["items"] = targets.length > 1 ? (sticker.deletedAt === null ? [
+        { id: "delete-stickers", text: `删除 ${targets.length} 张`, action: () => { void actions.deleteStickers(targets); } },
+      ] : [
+        { id: "restore-stickers", text: `恢复 ${targets.length} 张`, action: () => { void actions.restoreStickers(targets); } },
+        { item: "Separator" },
+        { id: "purge-stickers", text: `彻底删除 ${targets.length} 张…`, action: () => { void actions.purgeStickers(targets); } },
+      ]) : sticker.deletedAt === null ? [
         { id: "copy-sticker", text: "复制", action: () => { void actions.copy(sticker); } },
         ...(platform === "windows" ? [{ id: "copy-sticker-file", text: "复制为文件", action: () => { void actions.copy(sticker, true); } }] : []),
         { id: "reveal-sticker", text: platform === "windows" ? "在资源管理器中显示" : "在访达中显示", action: () => { void actions.reveal(sticker); } },

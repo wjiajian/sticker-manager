@@ -97,6 +97,8 @@ pub fn run() {
             commands::sticker,
             commands::delete_sticker,
             commands::restore_sticker,
+            commands::delete_stickers,
+            commands::restore_stickers,
             commands::purge_sticker,
             commands::purge_deleted_stickers,
             commands::tag_sidebar,

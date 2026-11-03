@@ -34,6 +34,37 @@ impl Library {
         Ok(())
     }
 
+    /// 一次删除一批表情，返回实际移进最近删除的 id；已删除或已不存在的跳过。
+    pub fn delete_stickers(&mut self, ids: &[String]) -> Result<Vec<String>> {
+        self.set_deleted_at(Some(unix_millis()?), "deleted_at IS NULL", ids)
+    }
+
+    /// 一次恢复一批表情，返回实际恢复的 id；不在最近删除里的跳过。撤销删除用它。
+    pub fn restore_stickers(&mut self, ids: &[String]) -> Result<Vec<String>> {
+        self.set_deleted_at(None, "deleted_at IS NOT NULL", ids)
+    }
+
+    fn set_deleted_at(
+        &mut self,
+        deleted_at: Option<i64>,
+        filter: &str,
+        ids: &[String],
+    ) -> Result<Vec<String>> {
+        let tx = self.conn.transaction()?;
+        let changed = {
+            let mut statement = tx.prepare(&format!(
+                "UPDATE stickers SET deleted_at = ?2 WHERE {filter} AND id IN (SELECT value FROM json_each(?1)) RETURNING id"
+            ))?;
+            statement
+                .query_map(params![serde_json::to_string(ids)?, deleted_at], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        tx.commit()?;
+        Ok(changed)
+    }
+
     pub fn purge_sticker(&mut self, id: &str) -> Result<()> {
         if self.purge_matching("id = ?1 AND deleted_at IS NOT NULL", [id])? == 0 {
             return Err(Error::StickerNotDeleted);

@@ -1,5 +1,5 @@
 //! 单后台工作线程；命令只排队，文件后端从不在主线程执行。
-use crate::credentials::{self, CredentialCache, CredentialStore, SystemCredentials};
+use crate::credentials::{self, CredentialCache, CredentialStore, FileCredentials};
 use crate::settings::{self, SettingsState, SyncSettings};
 use serde::Serialize;
 use std::{
@@ -66,7 +66,7 @@ fn describe(config: &StorageConfig, state: &SyncState) -> TargetDescription {
         name: config.label(),
         address,
         short_address,
-        // 正在读钥匙串（可能停在授权弹窗上）时不等它，按已保存算。
+        // 正在读凭据时不等它，按已保存算。
         credentials_saved: config.is_network()
             && state.credentials.try_lock().map_or(true, |c| !c.failed()),
     }
@@ -658,7 +658,7 @@ fn storage_for(
         .credentials
         .lock()
         .unwrap()
-        .read(&SystemCredentials, &account)
+        .read(&FileCredentials::of(app), &account)
         .map_err(sticker_core::Error::Sync)?;
     Ok(Box::new(NetworkStorage::new(
         target,
@@ -815,10 +815,10 @@ pub async fn stop_sync(app: AppHandle) -> Result<(), String> {
             };
             settings::update(&app, |s| s.sync = None)?;
             state.credentials.lock().unwrap().clear();
-            // 先停同步再删凭据：钥匙串拒绝访问时，用户也不能停不下来。
-            match account.map(|account| SystemCredentials.delete(&account)) {
+            // 先停同步再删凭据：凭据文件删不掉时，用户也不能停不下来。
+            match account.map(|account| FileCredentials::of(&app).delete(&account)) {
                 Some(Err(_)) => Err(
-                    "同步已停止，但没能删除钥匙串里保存的凭据，可以在系统的钥匙串或凭据管理器里手动删除"
+                    "同步已停止，但没能删除本机保存的凭据，可以退出应用后删掉仓库文件夹里 local/credentials.json"
                         .into(),
                 ),
                 _ => Ok(()),
@@ -941,7 +941,7 @@ pub async fn join_network_target(
             generation_check(&state, generation)?;
             let account = credential_account(&app, &connection.target)?;
             // 快照加入成功后才保存凭据；设置写入失败则撤销本次保存。
-            SystemCredentials.save(&account, &connection.credentials)?;
+            FileCredentials::of(&app).save(&account, &connection.credentials)?;
             let save = {
                 let mut runtime = state.inner.lock().unwrap();
                 if runtime.generation != generation {
@@ -958,7 +958,7 @@ pub async fn join_network_target(
                 }
             };
             if let Err(error) = save {
-                let cleanup = SystemCredentials.delete(&account);
+                let cleanup = FileCredentials::of(&app).delete(&account);
                 return Err(match cleanup {
                     Ok(()) => error,
                     Err(cleanup) => format!("{error}；{cleanup}"),
@@ -1025,12 +1025,12 @@ pub async fn update_sync_credentials(
             }
             generation_check(&state, generation)?;
             let account = credential_account(&app, &config.target)?;
-            // 保存这一小段是提交点；取消不会在钥匙串已更新后把成功结果改写成失败。
+            // 保存这一小段是提交点；取消不会在凭据已更新后把成功结果改写成失败。
             let mut runtime = state.inner.lock().unwrap();
             if runtime.generation != generation {
                 return Err("连接已取消".into());
             }
-            SystemCredentials.save(&account, &credentials)?;
+            FileCredentials::of(&app).save(&account, &credentials)?;
             runtime.connection = None;
             drop(runtime);
             state
