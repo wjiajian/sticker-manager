@@ -11,7 +11,9 @@ CI=true pnpm tauri build --bundles app,dmg
 
 ## GitHub Actions 构建
 
-在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow 手动触发。只构建 Apple Silicon（arm64）的 DMG，完成后在运行详情页的 Artifacts 下载，保留 14 天，不创建 Release。
+在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow 手动触发。只构建 Apple Silicon（arm64）的 DMG，完成后在运行详情页的 Artifacts 下载，保留 14 天。
+
+运行时勾选「发布到 Release」，会以 `v` 加 `package.json` 的版本号为 tag 创建正式 Release 并附上 DMG；该 tag 的 Release 已存在时，只覆盖上传 DMG。tag 指向运行时选择的分支的最新提交，发布前先确认版本号已更新。
 
 CI 构建同样没有签名和公证，下载的 DMG 装好后首次打开会被 Gatekeeper 拦下。右键应用选「打开」，或在终端执行：
 

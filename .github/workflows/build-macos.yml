@@ -2,10 +2,17 @@ name: 构建 macOS 安装包
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 发布到 Release（tag 为 v + package.json 版本号）
+        type: boolean
+        default: false
 
 jobs:
   build-macos:
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -36,3 +43,15 @@ jobs:
           path: target/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 14
+
+      # Release 已存在时只覆盖上传 DMG，不改说明
+      - if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.value }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" target/release/bundle/dmg/*.dmg --clobber
+          else
+            gh release create "$TAG" target/release/bundle/dmg/*.dmg --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          fi
