@@ -132,7 +132,7 @@
 
 ## 发布
 
-- macOS 最低版本为 14.0，设置在 `bundle.macOS.minimumSystemVersion`。启动错误对话框调用的 `NSApplication::activate` 要求 macOS 14；Network.framework 路径监视及费用检测最高要求 10.15，当前 NSPanel 用法不要求更高版本。按 API 要求设定，未在旧系统上运行。打包与隔离 HOME 的试运行方法见 [README](../README.md#打包macos-140-起)。
+- macOS 最低版本为 14.0，设置在 `bundle.macOS.minimumSystemVersion`。启动错误对话框调用的 `NSApplication::activate` 要求 macOS 14；Network.framework 路径监视及费用检测最高要求 10.15，当前 NSPanel 用法不要求更高版本。按 API 要求设定，未在旧系统上运行。打包与隔离 HOME 的试运行方法见 [README](packaging.md)。
 - 第一版只给自己用，不签名：macOS 第一次打开时要在"系统设置 › 隐私与安全性"里手动允许；Windows 会被 SmartScreen 拦一下，点"仍要运行"即可。
 - 公开发布前再补上：Apple 开发者账号签名和公证、Windows 代码签名证书。
 

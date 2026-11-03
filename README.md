@@ -1,57 +1,74 @@
+<div align="center">
+
+<img src="src-tauri/icons/icon.png" alt="表情管理器" width="128" height="128">
+
 # 表情管理器
 
-跨 macOS 与 Windows 的个人表情管理工具：把表情集中收进一个仓库，打标签、快速取用，并在自己的设备之间同步。
+把表情集中收进一个仓库，打标签、快速取用，并在自己的设备之间同步。
 
-当前版本 0.1.0，只在 macOS 14 及以上验证过，Windows 还没有编译和运行过。
+![版本 0.1.0](https://img.shields.io/badge/版本-0.1.0-blue)
+![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
+[![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
 
-- 更新记录：[CHANGELOG.md](CHANGELOG.md)
-- 术语：[GLOSSARY.md](GLOSSARY.md)
-- 技术栈与代码结构：[docs/tech-stack.md](docs/tech-stack.md)，关键取舍见 [docs/adr/](docs/adr/)
-- 测试：[docs/testing.md](docs/testing.md)
-- 界面设计：[design/README.md](design/README.md)
-- 待办：[TODO.md](TODO.md)
-- 许可证：[MIT](LICENSE)
+</div>
+
+表情包散落在聊天记录、下载文件夹和各种相册里，想用的时候翻半天。表情管理器是一个个人桌面应用：所有表情放进一个本地仓库，按标签和配文找，一个快捷键呼出面板，单击就能复制或拖出去发送。
+
+> [!NOTE]
+> 目前只在 macOS 14 及以上验证过，Windows 还没有编译和运行过。还没有发布安装包，需要[自己打包](docs/packaging.md)；应用没有签名，第一次打开要在“系统设置 › 隐私与安全性”里手动允许。
+
+## 功能
+
+- **收进仓库**：从文件、文件夹、zip 导入，也可以直接拖入；同一张图自动去重。
+- **整理**：标签和标签分组、配文、收藏；按静态或动图筛选，按最近添加、最近使用、使用次数或名称排序。
+- **找到并取用**：按名称、配文和标签搜索；一键复制、拖出发送、在访达中显示；常用的排在最近使用条里。
+- **随手取用**：全局快捷键 `⌃⌥E` 呼出表情面板，屏幕边上的悬浮球和菜单栏托盘，悬停预览大图，开机自启。
+- **同步**：不需要服务器。用同步文件夹（网盘目录）、WebDAV、Cloudflare R2 或 S3 兼容存储在多台设备间同步，可暂停，也可在按流量计费的网络上自动暂停。
+- **删除不怕手滑**：先进入最近删除，30 天内可恢复。
+- **其他**：跟随系统的浅色和深色外观；密码和密钥只存系统钥匙串。
+
+## 快速开始
+
+1. 打开应用，点右上角“导入表情”，选文件、文件夹或 zip；也可以直接把图片拖进窗口。
+2. 在详情栏给表情打标签、写配文。
+3. 在任何应用里按 `⌃⌥E` 呼出面板，搜索后单击表情复制，再粘贴到聊天里。
+4. 有多台设备的话，在“偏好设置 › 同步”里选一种存储，另一台设备连到同一个地方就会合并。
+
+仓库默认放在 `~/Library/Application Support/com.shaojian.sticker-manager/`，同步只传表情和它的整理信息，不上传到任何第三方服务，除非你自己选了某个云存储。
 
 ## 开发
 
-需要 Node 24、pnpm 11、Rust stable；macOS 上还要 Xcode 命令行工具，Windows 上要 WebView2 和 MSVC 生成工具。
+需要 Node 24、pnpm 11、Rust stable；macOS 上还要 Xcode 命令行工具。
 
 ```bash
 pnpm install
-pnpm tauri dev      # 启动应用，前端改动热更新，Rust 改动自动重新编译
+pnpm tauri dev      # 启动应用，前端热更新，Rust 改动自动重新编译
 ```
 
-开发时默认打开真实仓库（macOS 在 `~/Library/Application Support/com.shaojian.sticker-manager/`）。想用一个临时仓库调试，就把环境变量 `STICKER_LIBRARY_DIR` 设成一个绝对路径，目录不存在会自动新建；这个变量只在开发构建里生效，打包出来的应用会忽略它。
+开发时默认会打开真实仓库。想用一个临时仓库调试，把 `STICKER_LIBRARY_DIR` 设成绝对路径，目录不存在会自动新建；这个变量只在开发构建里生效。
 
 ```bash
 STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm tauri dev
 ```
 
 ```bash
-cargo test          # 核心库单元测试
-pnpm typecheck      # 前端类型检查
+cargo test --workspace   # Rust 测试
+pnpm typecheck           # 前端类型检查
 ```
 
-应用图标的源文件是 `src-tauri/icons/app-icon.svg`，改完后运行 `pnpm tauri icon src-tauri/icons/app-icon.svg` 重新生成各尺寸。
+### 目录
 
-### 打包（macOS 14.0 起）
+| 路径 | 内容 |
+|---|---|
+| `src/` | 前端（React + TypeScript），主窗口、面板、悬浮球和预览各一个入口 |
+| `crates/core/` | 核心逻辑（Rust）：仓库、导入、搜索、删除、同步，不依赖 Tauri |
+| `src-tauri/` | 应用外壳：窗口、托盘、快捷键、剪贴板、钥匙串 |
+| `design/` | 界面设计规范和设计稿 |
+| `docs/` | 技术栈、架构决策、测试和打包说明 |
 
-```bash
-pnpm tauri build --bundles app
-CI=true pnpm tauri build --bundles app,dmg
-```
+## 文档
 
-产物分别在 `target/release/bundle/macos/表情管理器.app` 和 `target/release/bundle/dmg/`。只要 DMG 时可用 `--bundles dmg`，但 Tauri 会清理作为中间产物的 `.app`；要同时保留两者就用 `--bundles app,dmg`。`CI=true` 跳过 DMG 的访达窗口美化，避免构建时弹出自动化权限提示。当前未配置开发者签名、公证和自动更新。
-
-**试运行发布版必须隔离 HOME**：发布版忽略 `STICKER_LIBRARY_DIR`，直接启动会打开真实仓库，也可能写入真实 `~/Library/LaunchAgents`。目前锁定的 Tauri 使用 `dirs 7` 解析数据目录，自启依赖 `auto-launch 0.6` 使用 `dirs 6` 解析 HOME；两者共用优先读取 `HOME` 的 `dirs-sys 0.5`，已用一次性程序验证。升级这些依赖后应重新验证，再运行发布版。
-
-```bash
-release_home="$(mktemp -d /tmp/sticker-release-home.XXXXXX)"
-mkdir -p "$release_home/Library/LaunchAgents" "$release_home/tmp"
-env HOME="$release_home" TMPDIR="$release_home/tmp" \
-  target/release/bundle/macos/表情管理器.app/Contents/MacOS/sticker-manager
-```
-
-使用二进制的完整路径启动，不通过 Dock 或访达首次启动测试副本，避免丢失隔离环境。偏好设置中的仓库路径应在 `release_home` 下；不要在测试副本中配置同步或凭据，HOME 不会隔离系统钥匙串。退出测试进程后才清理隔离目录。
-
-挂载检查可用 `hdiutil attach -nobrowse -readonly <DMG路径>`，检查后立即 `hdiutil detach <挂载点>`。DMG、App Translocation 和系统临时目录中的应用不会自动登记自启，也不会消耗首次登记机会；要验证搬到稳定位置后再登记，可用 `ditto` 复制到 `/Users/Shared/` 下本轮专用目录的 `Applications/` 中，仍用上述隔离 HOME 启动，测试完退出并删除副本。不要把验收副本装进 `/Applications`。
+- [技术栈与代码结构](docs/tech-stack.md)，关键取舍见 [docs/adr/](docs/adr/)
+- [界面设计](design/README.md)
+- [打包](docs/packaging.md)　[测试](docs/testing.md)
+- [术语表](GLOSSARY.md)　[更新记录](CHANGELOG.md)　[待办](TODO.md)

@@ -47,4 +47,4 @@ cargo test -p sticker-core sync::tests::network_integration::s3_ \
 
 ## 真实窗口测试
 
-测试实例一律用 `STICKER_LIBRARY_DIR` 指向临时目录，不要动真实仓库。发布版忽略这个变量，试运行打包版的做法见 [README](../README.md#打包macos-140-起)。拖拽相关的功能靠日常使用来发现问题。
+测试实例一律用 `STICKER_LIBRARY_DIR` 指向临时目录，不要动真实仓库。发布版忽略这个变量，试运行打包版的做法见 [README](packaging.md)。拖拽相关的功能靠日常使用来发现问题。
