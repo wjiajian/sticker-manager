@@ -241,7 +241,11 @@ pub fn open_library_directory(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn initialize_autostart(app: &AppHandle) {
-    #[cfg(not(debug_assertions))]
+    #[cfg(target_os = "macos")]
+    if let Err(error) = crate::autostart::initialize(app) {
+        eprintln!("初始化自启失败：{error}");
+    }
+    #[cfg(all(not(debug_assertions), not(target_os = "macos")))]
     if !app.state::<SettingsState>().get().autostart_initialized {
         let result = app
             .autolaunch()
@@ -252,7 +256,7 @@ pub fn initialize_autostart(app: &AppHandle) {
             eprintln!("默认开启自启失败：{error}");
         }
     }
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(target_os = "macos")))]
     let _ = app;
 }
 

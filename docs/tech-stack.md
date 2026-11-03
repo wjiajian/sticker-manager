@@ -121,11 +121,18 @@
 ## 默认设置
 
 - 全局快捷键：macOS ⌃⌥E，Windows Ctrl+Alt+E，在鼠标所在的屏幕弹出面板。
-- 开机自启：发布版首次启动时默认开启，之后尊重用户的系统登记；调试版不自动开启。自启启动参数为 `--autostart`，只显示悬浮球和托盘。
+- 开机自启：发布版首次从稳定位置启动时默认开启，调试版不自动开启。macOS 排除 `/Volumes/`、App Translocation、系统临时目录和当前 `TMPDIR`；这些位置既不登记，也不设置首次初始化标记，不覆盖原有登记。之后若系统登记仍开启、当前位置稳定，但 LaunchAgent 的可执行文件路径与当前规范化路径不同，则重新登记；用户关闭后不自动重开。手动开关仍直接按请求执行，包括不稳定位置。插件没有读取登记路径的接口，`autostart.rs` 用 `plist` 读取 `~/Library/LaunchAgents/<应用名>.plist`。自启参数为 `--autostart`，只显示悬浮球和托盘。Windows 保持原有行为。
 - 悬浮球：开启，初始在主显示器右边、高度 40% 处；静止 3 秒后收起，可改为 10 秒或不收起。
+
+## 菜单栏
+
+- macOS 由 `src-tauri/src/menu.rs` 提供“表情管理器 / 编辑 / 窗口”三组中文菜单，Windows 不添加菜单栏。关于只提供配置中的名称和版本号。
+- AppKit 会追加 AutoFill、听写、表情符号和 Close All；编辑与窗口子菜单在打开时只保留指定的原生动作及分隔线，不修改系统偏好设置。
+- 偏好设置（⌘,）和退出（⌘Q）共用托盘的 `entry-preferences` / `entry-quit` 分发；macOS 桌面版不再重复监听网页里的 ⌘,。编辑菜单保留原生 responder chain，文字编辑和表情快捷键沿用原有处理；关闭窗口（⌘W）走 `CloseRequested`，与红色关闭按钮一样只隐藏。
 
 ## 发布
 
+- macOS 最低版本为 14.0，设置在 `bundle.macOS.minimumSystemVersion`。启动错误对话框调用的 `NSApplication::activate` 要求 macOS 14；Network.framework 路径监视及费用检测最高要求 10.15，当前 NSPanel 用法不要求更高版本。按 API 要求设定，未在旧系统上运行。打包与隔离 HOME 的试运行方法见 [README](../README.md#打包macos-140-起)。
 - 第一版只给自己用，不签名：macOS 第一次打开时要在"系统设置 › 隐私与安全性"里手动允许；Windows 会被 SmartScreen 拦一下，点"仍要运行"即可。
 - 公开发布前再补上：Apple 开发者账号签名和公证、Windows 代码签名证书。
 

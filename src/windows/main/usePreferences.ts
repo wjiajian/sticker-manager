@@ -9,6 +9,8 @@ export function usePreferences() {
   const [focusSync, setFocusSync] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    // macOS 桌面版由菜单的 entry-preferences 统一处理 ⌘,。
+    const nativeShortcut = isTauri() && platform === "macos";
     function keydown(event: KeyboardEvent) {
       if (event.isComposing || event.keyCode === 229 || event.repeat || event.altKey || event.shiftKey) return;
       if (event.key === "," && (platform === "macos" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) {
@@ -16,7 +18,7 @@ export function usePreferences() {
         event.preventDefault(); setFocusSync(false); setOpen(true);
       }
     }
-    window.addEventListener("keydown", keydown);
+    if (!nativeShortcut) window.addEventListener("keydown", keydown);
     if (!isTauri()) return () => window.removeEventListener("keydown", keydown);
     let disposed = false;
     const listening = listen("open-preferences", () => {

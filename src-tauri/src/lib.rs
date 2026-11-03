@@ -6,6 +6,8 @@ use sticker_core::Library;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod appearance;
+#[cfg(target_os = "macos")]
+mod autostart;
 mod ball;
 mod clipboard;
 mod commands;
@@ -14,6 +16,8 @@ mod desktop;
 mod export;
 mod geometry;
 mod imports;
+#[cfg(target_os = "macos")]
+mod menu;
 mod metered;
 mod panel;
 mod preview;
@@ -25,7 +29,7 @@ mod tray;
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
-    let builder = builder.plugin(tauri_nspanel::init());
+    let builder = builder.plugin(tauri_nspanel::init()).menu(menu::build);
 
     let autostart = tauri_plugin_autostart::Builder::new().args(["--autostart"]);
     #[cfg(target_os = "macos")]
@@ -162,6 +166,8 @@ pub fn run() {
         .expect("启动应用失败")
         .run(|_app, _event| {
             if matches!(_event, tauri::RunEvent::Ready) {
+                #[cfg(target_os = "macos")]
+                menu::install_filters();
                 startup::show_pending(_app);
             }
             #[cfg(target_os = "macos")]
