@@ -12,4 +12,4 @@
 - **同步**：同步文件夹、WebDAV、Cloudflare R2、S3 兼容存储；可暂停，可在按流量计费的网络上自动暂停；密码只存系统钥匙串。
 - **外观**：跟随系统的浅色和深色。
 
-已知限制见 [TODO.md](TODO.md)。
+已知限制见 [docs/TODO.md](docs/TODO.md)。

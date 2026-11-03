@@ -63,12 +63,15 @@ pnpm typecheck           # 前端类型检查
 | `src/` | 前端（React + TypeScript），主窗口、面板、悬浮球和预览各一个入口 |
 | `crates/core/` | 核心逻辑（Rust）：仓库、导入、搜索、删除、同步，不依赖 Tauri |
 | `src-tauri/` | 应用外壳：窗口、托盘、快捷键、剪贴板、钥匙串 |
-| `design/` | 界面设计规范和设计稿 |
-| `docs/` | 技术栈、架构决策、测试和打包说明 |
+| `design/` | 界面设计规范 |
+| `docs/` | 技术栈、架构决策、测试、打包、术语表和待办 |
 
 ## 文档
 
-- [技术栈与代码结构](docs/tech-stack.md)，关键取舍见 [docs/adr/](docs/adr/)
+- [技术栈与代码结构](docs/tech-stack.md)
 - [界面设计](design/README.md)
-- [打包](docs/packaging.md)　[测试](docs/testing.md)
-- [术语表](GLOSSARY.md)　[更新记录](CHANGELOG.md)　[待办](TODO.md)
+- [打包](docs/packaging.md)　
+- [测试](docs/testing.md)
+- [术语表](docs/GLOSSARY.md)　
+- [更新记录](CHANGELOG.md)　
+- [待办](docs/TODO.md)

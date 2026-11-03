@@ -1,6 +1,6 @@
 # 技术栈
 
-术语见 [GLOSSARY.md](../GLOSSARY.md)；关键取舍的理由见 [docs/adr/](adr/)。
+术语见 [GLOSSARY.md](GLOSSARY.md)；关键取舍的理由见 [docs/adr/](adr/)。
 
 ## 一览
 
@@ -19,7 +19,7 @@
 | 拖出发送 | `tauri-plugin-drag` |
 | 全局快捷键 | `tauri-plugin-global-shortcut` |
 | 开机自启 | `tauri-plugin-autostart` |
-| 自动更新 | `tauri-plugin-updater`，从 GitHub Releases 拉取（尚未实现，见 [TODO.md](../TODO.md)） |
+| 自动更新 | `tauri-plugin-updater`，从 GitHub Releases 拉取（尚未实现，见 [TODO.md](TODO.md)） |
 | 包管理 | pnpm；Rust workspace |
 
 ## 代码结构
@@ -30,8 +30,8 @@
 ├── src-tauri/           Tauri 外壳：窗口、托盘、快捷键、剪贴板、拖拽，以及转发给核心库的命令
 ├── crates/
 │   └── core/            仓库、标签、导入、同步与合并规则；可单独测试
-├── design/              设计稿与设计说明
-└── docs/                技术文档与 ADR
+├── design/              界面设计规范
+└── docs/                技术文档、ADR、术语表、待办
 ```
 
 同步合并规则是最容易出错的部分，放在 `crates/core/` 里，脱离界面写单元测试。
@@ -44,7 +44,7 @@
 
 ### 代码命名
 
-代码里的英文名与 [GLOSSARY.md](../GLOSSARY.md) 的术语一一对应。GLOSSARY 里的"避免"只约束中文文案和讨论，比如 `sticker` 只出现在标识符里，界面上仍然写"表情"。
+代码里的英文名与 [GLOSSARY.md](GLOSSARY.md) 的术语一一对应。GLOSSARY 里的"避免"只约束中文文案和讨论，比如 `sticker` 只出现在标识符里，界面上仍然写"表情"。
 
 | 术语 | 代码里 |
 |---|---|
@@ -93,7 +93,7 @@
 - **拖出发送**：在系统层发起拖拽，交出副本。
 - **在访达 / 资源管理器中显示**：显示副本。
 - 以上交出的文件引用都指向临时目录里按表情名命名的副本，保留 7 天，不把仓库里按哈希命名的原文件交给其他应用或用户改动。
-- 依据：2026-11-03 在 QQ 和飞书自己的会话里，文件 URL + PNG、只有 PNG、只有文件 URL 都能粘成图片缩略图，去掉 PNG 没有损失；飞书只有带文件 URL 时才引用原 GIF。代价是 Safari、文本编辑粘不出来（旧应用实测），接受这项取舍，不按前台应用分流。微信的外观、飞书的透明度和发送后的动画还要人工确认（见 [TODO.md](../TODO.md)）。
+- 依据：2026-11-03 在 QQ 和飞书自己的会话里，文件 URL + PNG、只有 PNG、只有文件 URL 都能粘成图片缩略图，去掉 PNG 没有损失；飞书只有带文件 URL 时才引用原 GIF。代价是 Safari、文本编辑粘不出来（旧应用实测），接受这项取舍，不按前台应用分流。微信的外观、飞书的透明度和发送后的动画还要人工确认（见 [TODO.md](TODO.md)）。
 
 ## 同步
 
@@ -138,7 +138,7 @@
 
 ## 远期设想
 
-还没决定做，先记下来。已经决定要做的在 [TODO.md](../TODO.md)。
+还没决定做，先记下来。已经决定要做的在 [TODO.md](TODO.md)。
 
 
 - 用大模型自动识别配文：只在表情还没有配文时自动填入，不覆盖手动填写的。
