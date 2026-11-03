@@ -40,11 +40,9 @@ impl Site {
         for (table, cols) in [
             (
                 "stickers",
-                "id,hash,ext,name,caption,favorite,animated,width,height,byte_size,added_at,deleted_at",
+                "id,hash,ext,name,caption,favorite,animated,width,height,byte_size,added_at,deleted_at,category_id",
             ),
-            ("tags", "id,name,color,group_id,position"),
-            ("tag_groups", "id,name,position"),
-            ("sticker_tags", "sticker_id,tag_id"),
+            ("categories", "id,name,color,position"),
             ("usages", "sticker_id,device_id,count,last_used_at"),
         ] {
             let mut q = l
@@ -124,16 +122,27 @@ fn write_segment(s: &dyn Storage, device: &str, ops: &[Operation]) {
     )
     .unwrap();
 }
-fn remote_tag(device: &str, id: &str, at: i64, name: &str) -> Change {
+trait Categorize {
+    fn categorize(&mut self, id: &str, name: &str) -> Result<crate::Category>;
+}
+impl Categorize for crate::Library {
+    /// 新建（或复用同名）分类并把这张表情放进去。
+    fn categorize(&mut self, id: &str, name: &str) -> Result<crate::Category> {
+        Ok(self
+            .create_category_and_set_stickers(&[id.to_owned()], name)?
+            .0)
+    }
+}
+fn remote_category(device: &str, id: &str, at: i64, name: &str) -> Change {
     change(
         at,
         device,
         Action::Create {
-            entity: Kind::Tag,
+            entity: Kind::Category,
             id: id.into(),
             data: None,
             fields: serde_json::from_value(
-                json!({"name":name,"color":"#F2B705","group_id":null,"position":0}),
+                json!({"name":name,"color":"#F2B705","position":0}),
             )
             .unwrap(),
         },
@@ -154,7 +163,7 @@ fn two_library_end_to_end(s: &dyn Storage) {
     let y = a.import(20);
     let tag = {
         let mut l = a.lib.lock().unwrap();
-        let t = l.create_tag_and_add(&x, "开心").unwrap();
+        let t = l.categorize(&x, "开心").unwrap();
         l.set_sticker_caption(&x, "收到").unwrap();
         t.id
     };
@@ -180,14 +189,14 @@ fn two_library_end_to_end(s: &dyn Storage) {
         .lib
         .lock()
         .unwrap()
-        .create_tag_and_add(&x, "Shared")
+        .categorize(&x, "Shared")
         .unwrap()
         .id;
     let t2 = b
         .lib
         .lock()
         .unwrap()
-        .create_tag_and_add(&y, "shared")
+        .categorize(&y, "shared")
         .unwrap()
         .id;
     for _ in 0..3 {
@@ -196,10 +205,16 @@ fn two_library_end_to_end(s: &dyn Storage) {
     }
     assert_eq!(a.state(), b.state());
     let l = a.lib.lock().unwrap();
-    let sidebar = l.tag_sidebar().unwrap();
-    assert_eq!(sidebar.ungrouped.len(), 2);
-    assert_eq!(l.sticker(&y).unwrap().tags[0].id, t1.min(t2));
-    assert!(l.sticker(&x).unwrap().tags.iter().any(|t| t.id == tag));
+    assert_eq!(l.categories().unwrap().len(), 2);
+    let merged = t1.min(t2);
+    assert_eq!(l.sticker(&y).unwrap().category.as_ref().unwrap().id, merged);
+    // 单分类：x 从“开心”换到了 Shared，“开心”留下空分类。
+    assert_eq!(l.sticker(&x).unwrap().category.as_ref().unwrap().id, merged);
+    let emptied = l.categories().unwrap();
+    assert_eq!(
+        emptied.iter().find(|c| c.category.id == tag).unwrap().sticker_count,
+        0
+    );
     let key = format!(
         "objects/{}",
         l.sticker(&y)
@@ -237,7 +252,7 @@ fn independent_fields_hlc_and_edits_during_recently_deleted() {
         let mut l = b.lib.lock().unwrap();
         l.set_sticker_caption(&id, "仍在").unwrap();
         l.toggle_favorite(&id).unwrap();
-        l.create_tag_and_add(&id, "晚到").unwrap();
+        l.categorize(&id, "晚到").unwrap();
     }
     settle(&[&b, &a], &s, &m);
     a.lib.lock().unwrap().restore_sticker(&id).unwrap();
@@ -246,7 +261,7 @@ fn independent_fields_hlc_and_edits_during_recently_deleted() {
     let sticker = l.sticker(&id).unwrap();
     assert_eq!(sticker.caption.as_deref(), Some("仍在"));
     assert!(sticker.favorite);
-    assert_eq!(sticker.tags.len(), 1);
+    assert!(sticker.category.is_some());
     drop(l);
     assert_eq!(a.state(), b.state());
 }
@@ -315,7 +330,7 @@ fn purge_is_permanent_and_reimport_has_no_old_links_or_usage() {
     let old = a.import(3);
     {
         let mut l = a.lib.lock().unwrap();
-        l.create_tag_and_add(&old, "旧标签").unwrap();
+        l.categorize(&old, "旧标签").unwrap();
         l.record_usage(&old).unwrap();
         l.toggle_favorite(&old).unwrap();
     }
@@ -337,7 +352,7 @@ fn purge_is_permanent_and_reimport_has_no_old_links_or_usage() {
     assert!(l.sticker(&old).is_err());
     let v = l.sticker(&new).unwrap();
     assert_eq!(v.usage_count, 0);
-    assert!(v.tags.is_empty());
+    assert!(v.category.is_none());
     assert!(!v.favorite);
     assert_eq!(v.caption, None);
     drop(l);
@@ -369,7 +384,7 @@ fn missing_objects_and_cross_device_dependencies_wait_and_retry_without_new_segm
     b.lib
         .lock()
         .unwrap()
-        .create_tag_and_add(&id, "依赖")
+        .categorize(&id, "依赖")
         .unwrap();
     b.sync(&s, &m); // 补传原图
     s.delete(&format!("objects/{key}")).unwrap();
@@ -381,7 +396,7 @@ fn missing_objects_and_cross_device_dependencies_wait_and_retry_without_new_segm
     assert!(c.sync(&s, &m).pending > 0);
     s.write(&format!("objects/{key}"), &object).unwrap();
     assert_eq!(c.sync(&s, &m).pending, 0);
-    assert_eq!(c.lib.lock().unwrap().sticker(&id).unwrap().tags.len(), 1);
+    assert_eq!(c.lib.lock().unwrap().sticker(&id).unwrap().category.is_some(), true);
 }
 
 #[test]
@@ -389,12 +404,12 @@ fn gap_overlap_parse_failure_unknown_operation_and_conflict_names() {
     let (s, m) = backend();
     let a = Site::new();
     let d = Uuid::new_v4().to_string();
-    let first = remote_tag(&d, "tag", 1, "first");
+    let first = remote_category(&d, "tag", 1, "first");
     let second = change(
         2,
         &d,
         Action::Set {
-            entity: Kind::Tag,
+            entity: Kind::Category,
             id: "tag".into(),
             field: "name".into(),
             value: json!("second"),
@@ -402,15 +417,7 @@ fn gap_overlap_parse_failure_unknown_operation_and_conflict_names() {
     );
     write_ops(&s, &d, 2, std::slice::from_ref(&second));
     a.sync(&s, &m);
-    assert!(
-        a.lib
-            .lock()
-            .unwrap()
-            .tag_sidebar()
-            .unwrap()
-            .ungrouped
-            .is_empty()
-    );
+    assert!(a.lib.lock().unwrap().categories().unwrap().is_empty());
     let key = format!("ops/{d}/000000000001-000000000001.jsonl");
     s.write(&key, b"{bad\n").unwrap();
     a.sync(&s, &m);
@@ -447,7 +454,7 @@ fn gap_overlap_parse_failure_unknown_operation_and_conflict_names() {
                 4,
                 &d,
                 Action::Set {
-                    entity: Kind::Tag,
+                    entity: Kind::Category,
                     id: "tag".into(),
                     field: "name".into(),
                     value: json!("must not apply"),
@@ -483,7 +490,7 @@ fn newer_format_and_cloned_device_identity_stop_before_writes() {
         &s,
         &device,
         next + 1,
-        &[remote_tag(&device, "other", 7, "clone")],
+        &[remote_category(&device, "other", 7, "clone")],
     );
     assert!(matches!(
         synchronize(&a.lib, &s, &m.id),
@@ -500,55 +507,36 @@ fn newer_format_and_cloned_device_identity_stop_before_writes() {
 }
 
 #[test]
-fn tags_groups_fields_delete_and_group_dependencies() {
+fn categories_fields_delete_and_sticker_category_dependency() {
     let (s, m) = backend();
     let a = Site::new();
     let b = Site::new();
     let id = a.import(5);
-    let (group, tag) = {
-        let mut l = a.lib.lock().unwrap();
-        let g = l.create_tag_group("Work").unwrap();
-        let t = l.create_tag("Reply", None, Some(&g.id)).unwrap();
-        l.add_sticker_tag(&id, &t.id).unwrap();
-        (g.id, t.id)
-    };
+    let category = a.lib.lock().unwrap().categorize(&id, "Reply").unwrap().id;
     settle(&[&a, &b], &s, &m);
-    {
-        let mut l = a.lib.lock().unwrap();
-        l.rename_tag(&tag, "新名字").unwrap();
-        l.rename_tag_group(&group, "工作").unwrap();
-    }
-    {
-        let l = b.lib.lock().unwrap();
-        l.set_tag_color(&tag, "#E5484D").unwrap();
-        l.delete_tag_group(&group).unwrap();
-    }
-    settle(&[&a, &b], &s, &m);
-    let t = a
-        .lib
+    a.lib
         .lock()
         .unwrap()
-        .tag_sidebar()
+        .rename_category(&category, "新名字")
+        .unwrap();
+    b.lib
+        .lock()
         .unwrap()
-        .ungrouped
-        .remove(0)
-        .tag;
-    assert_eq!(t.name, "新名字");
-    assert_eq!(t.color, "#E5484D");
-    assert_eq!(t.group_id, None);
-    a.lib.lock().unwrap().delete_tag(&tag).unwrap();
-    b.lib.lock().unwrap().rename_tag(&tag, "迟到改名").unwrap();
+        .set_category_color(&category, "#E5484D")
+        .unwrap();
+    settle(&[&a, &b], &s, &m);
+    let c = a.lib.lock().unwrap().categories().unwrap().remove(0).category;
+    assert_eq!(c.name, "新名字");
+    assert_eq!(c.color, "#E5484D");
+    a.lib.lock().unwrap().delete_category(&category).unwrap();
+    b.lib
+        .lock()
+        .unwrap()
+        .rename_category(&category, "迟到改名")
+        .unwrap();
     settle(&[&b, &a], &s, &m);
-    assert!(a.lib.lock().unwrap().sticker(&id).unwrap().tags.is_empty());
-    assert!(
-        a.lib
-            .lock()
-            .unwrap()
-            .tag_sidebar()
-            .unwrap()
-            .ungrouped
-            .is_empty()
-    );
+    assert!(a.lib.lock().unwrap().sticker(&id).unwrap().category.is_none());
+    assert!(a.lib.lock().unwrap().categories().unwrap().is_empty());
     assert_eq!(a.state(), b.state());
 }
 
@@ -563,16 +551,16 @@ fn baseline_migration_clocks_zero_snapshot_retains_stamps_and_switches_library()
     c.execute_batch(include_str!("../migrations/0001_init.sql"))
         .unwrap();
     c.pragma_update(None, "user_version", 1).unwrap();
-    c.execute("INSERT INTO tag_groups VALUES('old','旧分组',0)", [])
+    c.execute("INSERT INTO tags VALUES('old','旧分类','#F2B705',NULL,0)", [])
         .unwrap();
     drop(c);
     let mut l = Library::open(&root).unwrap();
     let (_, model) = store::load(&l.conn).unwrap();
     assert_eq!(
-        model.entities[&Kind::Group]["old"].fields["name"].stamp.at,
+        model.entities[&Kind::Category]["old"].fields["name"].stamp.at,
         0
     );
-    l.rename_tag_group("old", "新分组").unwrap();
+    l.rename_category("old", "新分类").unwrap();
     let a = Site {
         dir: a.dir,
         lib: Mutex::new(l),
@@ -604,28 +592,23 @@ fn every_public_mutation_is_captured_and_transaction_rollback_has_no_log() {
             last = next;
         }};
     }
-    changed!(l.create_tag_group("分组"));
-    let group = l.tag_sidebar().unwrap().groups[0].id.clone();
-    changed!(l.rename_tag_group(&group, "改组名"));
-    changed!(l.create_tag("标签", None, None));
-    let tag = l.tag_sidebar().unwrap().ungrouped[0].tag.id.clone();
-    changed!(l.rename_tag(&tag, "改标签名"));
-    changed!(l.set_tag_color(&tag, "#E5484D"));
-    changed!(l.move_tag(&tag, Some(&group)));
-    changed!(l.add_sticker_tag(&id, &tag));
-    changed!(l.remove_sticker_tag(&id, &tag));
-    changed!(l.create_tag_and_add(&id, "新标签"));
+    changed!(l.create_category("分类", None));
+    let category = l.categories().unwrap()[0].category.id.clone();
+    changed!(l.rename_category(&category, "改分类名"));
+    changed!(l.set_category_color(&category, "#E5484D"));
+    changed!(l.set_sticker_category(&id, Some(&category)));
+    changed!(l.set_sticker_category(&id, None));
+    changed!(l.categorize(&id, "新分类"));
     changed!(l.set_sticker_caption(&id, "配文"));
     changed!(l.toggle_favorite(&id));
     changed!(l.record_usage(&id));
-    changed!(l.delete_tag(&tag));
-    changed!(l.delete_tag_group(&group));
+    changed!(l.delete_category(&category));
     changed!(l.delete_sticker(&id));
     changed!(l.restore_sticker(&id));
     changed!(l.delete_sticker(&id));
     changed!(l.purge_sticker(&id));
     let tx = l.conn.unchecked_transaction().unwrap();
-    tx.execute("INSERT INTO tag_groups VALUES('rollback','回滚',0)", [])
+    tx.execute("INSERT INTO categories VALUES('rollback','回滚','#F2B705',0)", [])
         .unwrap();
     drop(tx);
     assert_eq!(l.local_revision().unwrap(), last);
@@ -750,7 +733,7 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
             for color in 10..13 {
                 a.import(color);
             }
-            a.lib.lock().unwrap().create_tag_group("共同分组").unwrap();
+            a.lib.lock().unwrap().create_category("共同分类", None).unwrap();
         }
         s.hold(true);
         for _ in 0..120 {
@@ -769,7 +752,7 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
                 match (action, id) {
                     (1, Some(id)) => {
                         let _ = l
-                            .create_tag_and_add(&id, if next() % 2 == 0 { "same" } else { "SAME" });
+                            .categorize(&id, if next() % 2 == 0 { "same" } else { "SAME" });
                     }
                     (2, Some(id)) => {
                         l.set_sticker_caption(&id, &format!("配文{}", next() % 5))
@@ -791,23 +774,20 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
                         l.purge_sticker(&deleted[0].id).unwrap();
                     }
                     (8, Some(id)) => {
-                        let ts = l.tag_sidebar().unwrap();
-                        let t = ts
-                            .ungrouped
+                        let first = l
+                            .categories()
+                            .unwrap()
                             .first()
-                            .or_else(|| ts.groups.iter().flat_map(|g| &g.tags).next());
-                        if let Some(t) = t {
-                            l.add_sticker_tag(&id, &t.tag.id).unwrap();
+                            .map(|c| c.category.id.clone());
+                        if let Some(category) = first {
+                            l.set_sticker_category(&id, Some(&category)).unwrap();
                         }
                     }
                     (9, Some(id)) => {
-                        let v = l.sticker(&id).unwrap();
-                        if let Some(t) = v.tags.first() {
-                            l.remove_sticker_tag(&id, &t.id).unwrap();
-                        }
+                        l.set_sticker_category(&id, None).unwrap();
                     }
                     (10, _) => {
-                        let _ = l.create_tag_group("共同分组");
+                        let _ = l.create_category("共同分类", None);
                     }
                     _ => {}
                 }
@@ -835,13 +815,13 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
 fn tie_breaker_field_positions_and_relationship_lww_are_order_independent() {
     let mut model = Model::default();
     let available = BTreeSet::new();
-    let create = remote_tag("a", "tag", 0, "original");
+    let create = remote_category("a", "tag", 0, "original");
     model.apply(&create, &available).unwrap();
     let earlier = change(
         10,
         "a",
         Action::Set {
-            entity: Kind::Tag,
+            entity: Kind::Category,
             id: "tag".into(),
             field: "name".into(),
             value: json!("earlier"),
@@ -851,7 +831,7 @@ fn tie_breaker_field_positions_and_relationship_lww_are_order_independent() {
         10,
         "z",
         Action::Set {
-            entity: Kind::Tag,
+            entity: Kind::Category,
             id: "tag".into(),
             field: "name".into(),
             value: json!("winner"),
@@ -861,7 +841,7 @@ fn tie_breaker_field_positions_and_relationship_lww_are_order_independent() {
         8,
         "a",
         Action::Set {
-            entity: Kind::Tag,
+            entity: Kind::Category,
             id: "tag".into(),
             field: "position".into(),
             value: json!(12),
@@ -876,11 +856,11 @@ fn tie_breaker_field_positions_and_relationship_lww_are_order_independent() {
     }
     assert_eq!(model, reversed);
     assert_eq!(
-        model.projected(Kind::Tag)["tag"].fields["name"].value,
+        model.projected(Kind::Category)["tag"].fields["name"].value,
         "winner"
     );
     assert_eq!(
-        model.projected(Kind::Tag)["tag"].fields["position"].value,
+        model.projected(Kind::Category)["tag"].fields["position"].value,
         12
     );
     let (s, m) = backend();
@@ -891,40 +871,45 @@ fn tie_breaker_field_positions_and_relationship_lww_are_order_independent() {
         .lib
         .lock()
         .unwrap()
-        .create_tag_and_add(&id, "关系")
+        .categorize(&id, "关系")
         .unwrap()
         .id;
     settle(&[&a, &b], &s, &m);
-    a.lib.lock().unwrap().remove_sticker_tag(&id, &tag).unwrap();
+    a.lib
+        .lock()
+        .unwrap()
+        .set_sticker_category(&id, None)
+        .unwrap();
     settle(&[&a, &b], &s, &m);
-    assert!(b.lib.lock().unwrap().sticker(&id).unwrap().tags.is_empty());
-    b.lib.lock().unwrap().add_sticker_tag(&id, &tag).unwrap();
+    assert!(b.lib.lock().unwrap().sticker(&id).unwrap().category.is_none());
+    b.lib
+        .lock()
+        .unwrap()
+        .set_sticker_category(&id, Some(&tag))
+        .unwrap();
     settle(&[&b, &a], &s, &m);
-    assert_eq!(a.lib.lock().unwrap().sticker(&id).unwrap().tags.len(), 1);
+    assert!(a.lib.lock().unwrap().sticker(&id).unwrap().category.is_some());
 }
 
 #[test]
-fn duplicate_group_names_merge_with_members_and_late_group_reference() {
+fn duplicate_category_names_merge_with_members_and_late_category_reference() {
     let (s, m) = backend();
     let a = Site::new();
     let b = Site::new();
-    let (ga, ta) = {
-        let mut l = a.lib.lock().unwrap();
-        let g = l.create_tag_group("Work").unwrap().id;
-        let t = l.create_tag("a", None, Some(&g)).unwrap().id;
-        (g, t)
-    };
-    let gb = {
-        let mut l = b.lib.lock().unwrap();
-        let g = l.create_tag_group("WORK").unwrap().id;
-        l.create_tag("b", None, Some(&g)).unwrap();
-        g
-    };
+    let x = a.import(41);
+    let y = b.import(42);
+    let ca = a.lib.lock().unwrap().categorize(&x, "Work").unwrap().id;
+    let cb = b.lib.lock().unwrap().categorize(&y, "WORK").unwrap().id;
     settle(&[&a, &b], &s, &m);
-    let sidebar = a.lib.lock().unwrap().tag_sidebar().unwrap();
-    assert_eq!(sidebar.groups.len(), 1);
-    assert_eq!(sidebar.groups[0].tags.len(), 2);
-    assert_eq!(sidebar.groups[0].id, ga.clone().min(gb.clone()));
+    let winner = ca.clone().min(cb.clone());
+    {
+        let l = a.lib.lock().unwrap();
+        assert_eq!(l.categories().unwrap().len(), 1);
+        for id in [&x, &y] {
+            assert_eq!(l.sticker(id).unwrap().category.unwrap().id, winner);
+        }
+    }
+    // 迟到的操作仍然引用被合并掉的那个 id，要归到合并后的分类。
     let d = Uuid::new_v4().to_string();
     let future = unix_millis().unwrap() + 1000;
     write_ops(
@@ -935,21 +920,18 @@ fn duplicate_group_names_merge_with_members_and_late_group_reference() {
             future,
             &d,
             Action::Set {
-                entity: Kind::Tag,
-                id: ta,
-                field: "group_id".into(),
-                value: json!(ga.max(gb)),
+                entity: Kind::Sticker,
+                id: x.clone(),
+                field: "category_id".into(),
+                value: json!(ca.max(cb)),
             },
         )],
     );
     settle(&[&a, &b], &s, &m);
     assert_eq!(a.state(), b.state());
-    assert_eq!(
-        a.lib.lock().unwrap().tag_sidebar().unwrap().groups[0]
-            .tags
-            .len(),
-        2
-    );
+    let l = a.lib.lock().unwrap();
+    assert_eq!(l.categories().unwrap().len(), 1);
+    assert_eq!(l.sticker(&x).unwrap().category.unwrap().id, winner);
 }
 
 #[test]
@@ -966,7 +948,7 @@ fn pending_reference_can_arrive_before_its_creation_on_another_device() {
             10,
             &d,
             Action::Set {
-                entity: Kind::Tag,
+                entity: Kind::Category,
                 id: "late".into(),
                 field: "name".into(),
                 value: json!("修改先到"),
@@ -978,11 +960,11 @@ fn pending_reference_can_arrive_before_its_creation_on_another_device() {
         store::cursor(&a.lib.lock().unwrap().conn, &m.id, &d).unwrap(),
         1
     );
-    write_ops(&s, &e, 1, &[remote_tag(&e, "late", 1, "创建晚到")]);
+    write_ops(&s, &e, 1, &[remote_category(&e, "late", 1, "创建晚到")]);
     assert_eq!(a.sync(&s, &m).pending, 0);
     assert_eq!(
-        a.lib.lock().unwrap().tag_sidebar().unwrap().ungrouped[0]
-            .tag
+        a.lib.lock().unwrap().categories().unwrap()[0]
+            .category
             .name,
         "修改先到"
     );
@@ -1041,7 +1023,7 @@ fn reimport_on_another_device_survives_merge_with_delayed_purge() {
     let old = a.import(33);
     {
         let mut l = a.lib.lock().unwrap();
-        l.create_tag_and_add(&old, "旧关系").unwrap();
+        l.categorize(&old, "旧关系").unwrap();
         l.record_usage(&old).unwrap();
     }
     settle(&[&a, &b, &c], &s, &m);
@@ -1076,7 +1058,7 @@ fn reimport_on_another_device_survives_merge_with_delayed_purge() {
     for site in [&a, &b, &c] {
         let l = site.lib.lock().unwrap();
         let v = l.sticker(&new).unwrap();
-        assert!(v.tags.is_empty());
+        assert!(v.category.is_none());
         assert_eq!(v.usage_count, 0);
         assert!(l.sticker(&old).is_err());
     }
@@ -1091,7 +1073,7 @@ fn explicit_join_detects_cloned_identity_before_snapshot_sequence_is_allocated()
         &s,
         &device,
         1,
-        &[remote_tag(&device, "conflict", 1, "冲突")],
+        &[remote_category(&device, "conflict", 1, "冲突")],
     );
     assert!(matches!(
         join(&a.lib, &s, &m.id),
@@ -1138,7 +1120,7 @@ fn late_joiner_keeps_its_copy_of_an_image_purged_after_sync() {
     b.lib
         .lock()
         .unwrap()
-        .create_tag_and_add(&old, "删除前")
+        .categorize(&old, "删除前")
         .unwrap();
     b.sync(&s, &m);
     {
@@ -1155,7 +1137,7 @@ fn late_joiner_keeps_its_copy_of_an_image_purged_after_sync() {
         let l = site.lib.lock().unwrap();
         let v = l.sticker(&mine).unwrap();
         assert!(v.deleted_at.is_none());
-        assert!(v.tags.is_empty());
+        assert!(v.category.is_none());
         assert!(v.object_path.exists());
         assert!(l.sticker(&old).is_err());
     }

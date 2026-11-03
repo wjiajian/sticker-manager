@@ -6,36 +6,23 @@ export interface LibraryOverview {
   all: number;
   recent: number;
   favorites: number;
-  untagged: number;
+  uncategorized: number;
   recentlyDeleted: number;
 }
 
-export type FixedLibraryView = "all" | "recent" | "favorites" | "untagged" | "recentlyDeleted";
-export type LibraryView = FixedLibraryView | { tag: string };
+export type FixedLibraryView = "all" | "recent" | "favorites" | "uncategorized" | "recentlyDeleted";
+export type LibraryView = FixedLibraryView | { category: string };
 
-export interface Tag {
+export interface Category {
   id: string;
   name: string;
   color: string;
-  groupId: string | null;
   position: number;
 }
 
-export interface TagSummary extends Tag {
+export interface CategorySummary extends Category {
   stickerCount: number;
   totalStickerCount: number;
-}
-
-export interface TagGroup {
-  id: string;
-  name: string;
-  position: number;
-  tags: TagSummary[];
-}
-
-export interface TagSidebar {
-  groups: TagGroup[];
-  ungrouped: TagSummary[];
 }
 
 export interface Sticker {
@@ -53,7 +40,7 @@ export interface Sticker {
   usageDevices: number;
   lastUsedAt: number | null;
   caption: string | null;
-  tags: Tag[];
+  category: Category | null;
   objectPath: string;
   thumbnailPath: string;
 }
@@ -91,7 +78,7 @@ export interface StickerSyncInfo { waitingUpload: boolean; deviceCount: number |
 export interface PreviewSticker {
   name: string;
   usageCount: number;
-  tags: string[];
+  category: string | null;
   thumbnailPath: string;
   objectPath: string;
 }
@@ -108,8 +95,8 @@ export const ipc = {
   previewReady: (requestId: number, cardHeight: number) => invoke<boolean>("preview_ready", { requestId, cardHeight }),
   importStatus: () => invoke<ImportStatus>("import_status"),
   cancelImport: () => invoke<void>("cancel_import"),
-  addTagToStickers: (ids: string[], tagId: string) => invoke<number>("add_tag_to_stickers", { ids, tagId }),
-  createTagAndAddToStickers: (ids: string[], name: string) => invoke<[Tag, number]>("create_tag_and_add_to_stickers", { ids, name }),
+  setStickersCategory: (ids: string[], categoryId: string | null) => invoke<number>("set_stickers_category", { ids, categoryId }),
+  createCategoryAndSetStickers: (ids: string[], name: string) => invoke<[Category, number]>("create_category_and_set_stickers", { ids, name }),
   setSyncPaused: (paused: boolean) => invoke<void>("set_sync_paused", { paused }),
   setPauseOnMetered: (enabled: boolean) => invoke<void>("set_pause_on_metered", { enabled }),
   stickerSyncInfo: (id: string) => invoke<StickerSyncInfo | null>("sticker_sync_info", { id }),
@@ -149,7 +136,7 @@ export const ipc = {
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
   listStickersPage: (after: StickerCursor | null, limit: number) => invoke<StickerPage>("list_stickers_page", { after, limit }),
   searchStickers: (query: string) => invoke<Sticker[]>("search_stickers", { query }),
-  tagSidebar: () => invoke<TagSidebar>("tag_sidebar"),
+  categories: () => invoke<CategorySummary[]>("categories"),
   sticker: (id: string) => invoke<Sticker | null>("sticker", { id }),
   deleteSticker: (id: string) => invoke<void>("delete_sticker", { id }),
   restoreSticker: (id: string) => invoke<void>("restore_sticker", { id }),
@@ -157,17 +144,11 @@ export const ipc = {
   restoreStickers: (ids: string[]) => invoke<string[]>("restore_stickers", { ids }),
   purgeSticker: (id: string) => invoke<void>("purge_sticker", { id }),
   purgeDeletedStickers: (ids: string[]) => invoke<number>("purge_deleted_stickers", { ids }),
-  createTag: (name: string, color: string | null = null, groupId: string | null = null) => invoke<Tag>("create_tag", { name, color, groupId }),
-  renameTag: (id: string, name: string) => invoke<void>("rename_tag", { id, name }),
-  setTagColor: (id: string, color: string) => invoke<void>("set_tag_color", { id, color }),
-  moveTag: (id: string, groupId: string | null) => invoke<void>("move_tag", { id, groupId }),
-  deleteTag: (id: string) => invoke<void>("delete_tag", { id }),
-  createTagGroup: (name: string) => invoke<TagGroup>("create_tag_group", { name }),
-  renameTagGroup: (id: string, name: string) => invoke<void>("rename_tag_group", { id, name }),
-  deleteTagGroup: (id: string) => invoke<void>("delete_tag_group", { id }),
-  addStickerTag: (stickerId: string, tagId: string) => invoke<void>("add_sticker_tag", { stickerId, tagId }),
-  removeStickerTag: (stickerId: string, tagId: string) => invoke<void>("remove_sticker_tag", { stickerId, tagId }),
-  createTagAndAdd: (stickerId: string, name: string) => invoke<Tag>("create_tag_and_add", { stickerId, name }),
+  createCategory: (name: string, color: string | null = null) => invoke<Category>("create_category", { name, color }),
+  renameCategory: (id: string, name: string) => invoke<void>("rename_category", { id, name }),
+  setCategoryColor: (id: string, color: string) => invoke<void>("set_category_color", { id, color }),
+  deleteCategory: (id: string) => invoke<void>("delete_category", { id }),
+  setStickerCategory: (stickerId: string, categoryId: string | null) => invoke<void>("set_sticker_category", { stickerId, categoryId }),
   setStickerCaption: (id: string, caption: string) => invoke<void>("set_sticker_caption", { id, caption }),
   importStickers: (paths: string[]) => invoke<ImportReport>("import_stickers", { paths }),
   copySticker: (id: string, fileOnly: boolean) => invoke<void>("copy_sticker", { id, fileOnly }),

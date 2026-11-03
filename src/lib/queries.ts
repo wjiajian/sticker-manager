@@ -22,8 +22,8 @@ export function useLibraryOverview() {
   return useQuery({ queryKey: ["library", "overview"], queryFn: ipc.libraryOverview });
 }
 
-export function useTagSidebar() {
-  return useQuery({ queryKey: ["library", "tags"], queryFn: ipc.tagSidebar });
+export function useCategories() {
+  return useQuery({ queryKey: ["library", "categories"], queryFn: ipc.categories });
 }
 
 export function useLibraryMutation<TData, TVariables>(mutationFn: (variables: TVariables) => Promise<TData>) {

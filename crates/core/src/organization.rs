@@ -4,242 +4,148 @@ use uuid::Uuid;
 
 use crate::{Error, Library, Result};
 
-/// 顺序与 design/README.md 的标签圆点色一致。
-pub const TAG_COLORS: [&str; 8] = [
+/// 顺序与 design/README.md 的分类圆点色一致。
+pub const CATEGORY_COLORS: [&str; 8] = [
     "#F2B705", "#8A8A8A", "#E5484D", "#3E7BFA", "#2BA471", "#7A5AF8", "#E8572A", "#A0662F",
 ];
 
+/// 没有分类的表情显示在这个名字下，所以不能用它给真正的分类命名。
+pub const UNCATEGORIZED: &str = "未分类";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Tag {
+pub struct Category {
     pub id: String,
     pub name: String,
     pub color: String,
-    pub group_id: Option<String>,
     pub position: i64,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TagSummary {
+pub struct CategorySummary {
     #[serde(flatten)]
-    pub tag: Tag,
+    pub category: Category,
     pub sticker_count: u32,
     pub total_sticker_count: u32,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TagGroup {
-    pub id: String,
-    pub name: String,
-    pub position: i64,
-    pub tags: Vec<TagSummary>,
-}
-
-#[derive(Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TagSidebar {
-    pub groups: Vec<TagGroup>,
-    pub ungrouped: Vec<TagSummary>,
-}
-
-impl Tag {
+impl Category {
     pub(crate) fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
             name: row.get(1)?,
             color: row.get(2)?,
-            group_id: row.get(3)?,
-            position: row.get(4)?,
+            position: row.get(3)?,
         })
     }
 }
 
 impl Library {
-    pub fn add_tag_to_stickers(&mut self, ids: &[String], tag_id: &str) -> Result<usize> {
+    /// `category_id` 为空表示移到"未分类"。已删除的表情不动。
+    pub fn set_stickers_category(
+        &mut self,
+        ids: &[String],
+        category_id: Option<&str>,
+    ) -> Result<usize> {
         let tx = self.conn.transaction()?;
-        require_tag(&tx, tag_id)?;
-        let count = batch_add(&tx, ids, tag_id)?;
+        if let Some(category_id) = category_id {
+            require_category(&tx, category_id)?;
+        }
+        let count = batch_set(&tx, ids, category_id)?;
         tx.commit()?;
         Ok(count)
     }
 
-    /// 重试同名标签时复用它；新建和整批关联在同一个事务内。
-    pub fn create_tag_and_add_to_stickers(
+    pub fn set_sticker_category(
         &mut self,
-        ids: &[String],
-        name: &str,
-    ) -> Result<(Tag, usize)> {
-        let tx = self.conn.transaction()?;
-        let tag = tx
-            .query_row(
-                "SELECT id,name,color,group_id,position FROM tags WHERE name=?1 COLLATE NOCASE",
-                [name.trim()],
-                Tag::from_row,
-            )
-            .optional()?;
-        let tag = match tag {
-            Some(tag) => tag,
-            None => insert_tag(&tx, name, None, None)?,
-        };
-        let count = batch_add(&tx, ids, &tag.id)?;
-        tx.commit()?;
-        Ok((tag, count))
-    }
-
-    pub fn create_tag(
-        &mut self,
-        name: &str,
-        color: Option<&str>,
-        group_id: Option<&str>,
-    ) -> Result<Tag> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let tag = insert_tag(&tx, name, color, group_id)?;
-        tx.commit()?;
-        Ok(tag)
-    }
-
-    /// 新建并添加是一次操作，任一步失败都不保留改动。
-    pub fn create_tag_and_add(&mut self, sticker_id: &str, name: &str) -> Result<Tag> {
+        sticker_id: &str,
+        category_id: Option<&str>,
+    ) -> Result<()> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_editable_sticker(&tx, sticker_id)?;
-        let tag = insert_tag(&tx, name, None, None)?;
-        tx.execute(
-            "INSERT INTO sticker_tags (sticker_id, tag_id) VALUES (?1, ?2)",
-            params![sticker_id, tag.id],
-        )?;
-        tx.commit()?;
-        Ok(tag)
-    }
-
-    pub fn rename_tag(&mut self, id: &str, name: &str) -> Result<()> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_tag(&tx, id)?;
-        let name = validate_name(&tx, "tags", "标签", name, Some(id))?;
-        tx.execute("UPDATE tags SET name = ?2 WHERE id = ?1", params![id, name])?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn set_tag_color(&self, id: &str, color: &str) -> Result<()> {
-        let color = validate_color(color)?;
-        let changed = self.conn.execute(
-            "UPDATE tags SET color = ?2 WHERE id = ?1",
-            params![id, color],
-        )?;
-        if changed == 0 {
-            return Err(Error::TagUnavailable);
-        }
-        Ok(())
-    }
-
-    pub fn move_tag(&mut self, id: &str, group_id: Option<&str>) -> Result<()> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_tag(&tx, id)?;
-        if let Some(group_id) = group_id {
-            require_group(&tx, group_id)?;
+        if let Some(category_id) = category_id {
+            require_category(&tx, category_id)?;
         }
         tx.execute(
-            "UPDATE tags SET group_id = ?2 WHERE id = ?1",
-            params![id, group_id],
+            "UPDATE stickers SET category_id = ?2 WHERE id = ?1",
+            params![sticker_id, category_id],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn delete_tag(&self, id: &str) -> Result<()> {
-        // 外键同时移除所有表情上的此标签，包括最近删除中的表情。
-        if self.conn.execute("DELETE FROM tags WHERE id = ?1", [id])? == 0 {
-            return Err(Error::TagUnavailable);
-        }
-        Ok(())
-    }
-
-    pub fn create_tag_group(&mut self, name: &str) -> Result<TagGroup> {
+    /// 重试同名分类时复用它；新建和整批设置在同一个事务内。
+    pub fn create_category_and_set_stickers(
+        &mut self,
+        ids: &[String],
+        name: &str,
+    ) -> Result<(Category, usize)> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let name = validate_name(&tx, "tag_groups", "标签分组", name, None)?;
-        let position: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(position), -1) + 1 FROM tag_groups",
-            [],
-            |row| row.get(0),
-        )?;
-        let group = TagGroup {
-            id: Uuid::new_v4().to_string(),
-            name: name.to_owned(),
-            position,
-            tags: Vec::new(),
+        let category = tx
+            .query_row(
+                "SELECT id,name,color,position FROM categories WHERE name=?1 COLLATE NOCASE",
+                [name.trim()],
+                Category::from_row,
+            )
+            .optional()?;
+        let category = match category {
+            Some(category) => category,
+            None => insert_category(&tx, name, None)?,
         };
-        tx.execute(
-            "INSERT INTO tag_groups (id, name, position) VALUES (?1, ?2, ?3)",
-            params![group.id, group.name, group.position],
-        )?;
+        let count = batch_set(&tx, ids, Some(&category.id))?;
         tx.commit()?;
-        Ok(group)
+        Ok((category, count))
     }
 
-    pub fn rename_tag_group(&mut self, id: &str, name: &str) -> Result<()> {
+    pub fn create_category(&mut self, name: &str, color: Option<&str>) -> Result<Category> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_group(&tx, id)?;
-        let name = validate_name(&tx, "tag_groups", "标签分组", name, Some(id))?;
+        let category = insert_category(&tx, name, color)?;
+        tx.commit()?;
+        Ok(category)
+    }
+
+    pub fn rename_category(&mut self, id: &str, name: &str) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_category(&tx, id)?;
+        let name = validate_name(&tx, name, Some(id))?;
         tx.execute(
-            "UPDATE tag_groups SET name = ?2 WHERE id = ?1",
+            "UPDATE categories SET name = ?2 WHERE id = ?1",
             params![id, name],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn delete_tag_group(&self, id: &str) -> Result<()> {
-        // ON DELETE SET NULL 保留标签，将它们移到未分组。
-        if self
-            .conn
-            .execute("DELETE FROM tag_groups WHERE id = ?1", [id])?
-            == 0
-        {
-            return Err(Error::TagGroupUnavailable);
+    pub fn set_category_color(&self, id: &str, color: &str) -> Result<()> {
+        let color = validate_color(color)?;
+        let changed = self.conn.execute(
+            "UPDATE categories SET color = ?2 WHERE id = ?1",
+            params![id, color],
+        )?;
+        if changed == 0 {
+            return Err(Error::CategoryUnavailable);
         }
         Ok(())
     }
 
-    pub fn add_sticker_tag(&mut self, sticker_id: &str, tag_id: &str) -> Result<()> {
-        let tx = self
+    pub fn delete_category(&self, id: &str) -> Result<()> {
+        // 外键把这个分类下的表情（包括最近删除中的）移到"未分类"，不删表情。
+        if self
             .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_editable_sticker(&tx, sticker_id)?;
-        require_tag(&tx, tag_id)?;
-        tx.execute(
-            "INSERT INTO sticker_tags (sticker_id, tag_id) VALUES (?1, ?2)
-             ON CONFLICT(sticker_id, tag_id) DO NOTHING",
-            params![sticker_id, tag_id],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn remove_sticker_tag(&mut self, sticker_id: &str, tag_id: &str) -> Result<()> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_editable_sticker(&tx, sticker_id)?;
-        require_tag(&tx, tag_id)?;
-        tx.execute(
-            "DELETE FROM sticker_tags WHERE sticker_id = ?1 AND tag_id = ?2",
-            params![sticker_id, tag_id],
-        )?;
-        tx.commit()?;
+            .execute("DELETE FROM categories WHERE id = ?1", [id])?
+            == 0
+        {
+            return Err(Error::CategoryUnavailable);
+        }
         Ok(())
     }
 
@@ -260,147 +166,105 @@ impl Library {
         Ok(())
     }
 
-    pub fn tag_sidebar(&self) -> Result<TagSidebar> {
-        let mut statement = self
-            .conn
-            .prepare("SELECT id, name, position FROM tag_groups ORDER BY position, id")?;
-        let groups = statement
+    pub fn categories(&self) -> Result<Vec<CategorySummary>> {
+        let mut statement = self.conn.prepare(
+            "SELECT c.id, c.name, c.color, c.position, COUNT(s.id), COUNT(a.id)
+             FROM categories c
+             LEFT JOIN stickers a ON a.category_id = c.id
+             LEFT JOIN stickers s ON s.id = a.id AND s.deleted_at IS NULL
+             GROUP BY c.id ORDER BY c.position, c.id",
+        )?;
+        let categories = statement
             .query_map([], |row| {
-                Ok(TagGroup {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    position: row.get(2)?,
-                    tags: Vec::new(),
+                Ok(CategorySummary {
+                    category: Category::from_row(row)?,
+                    sticker_count: row.get(4)?,
+                    total_sticker_count: row.get(5)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut sidebar = TagSidebar {
-            groups,
-            ungrouped: Vec::new(),
-        };
-        let mut statement = self.conn.prepare(
-            "SELECT t.id, t.name, t.color, t.group_id, t.position, COUNT(s.id), COUNT(st.sticker_id)
-             FROM tags t
-             LEFT JOIN sticker_tags st ON st.tag_id = t.id
-             LEFT JOIN stickers s ON s.id = st.sticker_id AND s.deleted_at IS NULL
-             GROUP BY t.id ORDER BY t.position, t.id",
-        )?;
-        let tags = statement.query_map([], |row| {
-            Ok(TagSummary {
-                tag: Tag::from_row(row)?,
-                sticker_count: row.get(5)?,
-                total_sticker_count: row.get(6)?,
-            })
-        })?;
-        for tag in tags {
-            let tag = tag?;
-            if let Some(group) = sidebar
-                .groups
-                .iter_mut()
-                .find(|group| Some(&group.id) == tag.tag.group_id.as_ref())
-            {
-                group.tags.push(tag);
-            } else {
-                sidebar.ungrouped.push(tag);
-            }
-        }
-        Ok(sidebar)
+        Ok(categories)
     }
 }
 
-fn batch_add(conn: &Connection, ids: &[String], tag: &str) -> Result<usize> {
+fn batch_set(conn: &Connection, ids: &[String], category: Option<&str>) -> Result<usize> {
     let mut count = 0;
     for id in ids.iter().collect::<std::collections::BTreeSet<_>>() {
         count += conn.execute(
-            "INSERT OR IGNORE INTO sticker_tags(sticker_id,tag_id) SELECT id,?2 FROM stickers WHERE id=?1 AND deleted_at IS NULL",
-            params![id, tag],
+            "UPDATE stickers SET category_id = ?2 WHERE id = ?1 AND deleted_at IS NULL AND category_id IS NOT ?2",
+            params![id, category],
         )?;
     }
     Ok(count)
 }
 
-fn insert_tag(
-    conn: &Connection,
-    name: &str,
-    color: Option<&str>,
-    group_id: Option<&str>,
-) -> Result<Tag> {
-    let name = validate_name(conn, "tags", "标签", name, None)?;
-    if let Some(group_id) = group_id {
-        require_group(conn, group_id)?;
-    }
+fn insert_category(conn: &Connection, name: &str, color: Option<&str>) -> Result<Category> {
+    let name = validate_name(conn, name, None)?;
     let position: i64 = conn.query_row(
-        "SELECT COALESCE(MAX(position), -1) + 1 FROM tags",
+        "SELECT COALESCE(MAX(position), -1) + 1 FROM categories",
         [],
         |row| row.get(0),
     )?;
     let color = match color {
         Some(color) => validate_color(color)?,
-        None => TAG_COLORS[position.rem_euclid(TAG_COLORS.len() as i64) as usize],
+        None => CATEGORY_COLORS[position.rem_euclid(CATEGORY_COLORS.len() as i64) as usize],
     };
-    let tag = Tag {
+    let category = Category {
         id: Uuid::new_v4().to_string(),
         name: name.to_owned(),
         color: color.to_owned(),
-        group_id: group_id.map(str::to_owned),
         position,
     };
     conn.execute(
-        "INSERT INTO tags (id, name, color, group_id, position) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![tag.id, tag.name, tag.color, tag.group_id, tag.position],
+        "INSERT INTO categories (id, name, color, position) VALUES (?1, ?2, ?3, ?4)",
+        params![category.id, category.name, category.color, category.position],
     )?;
-    Ok(tag)
+    Ok(category)
 }
 
+/// 分类名以后要直接用作文件夹名，所以不能带路径分隔符，也不能以点开头。
 fn validate_name<'a>(
     conn: &Connection,
-    table: &str,
-    kind: &'static str,
     name: &'a str,
     exclude_id: Option<&str>,
 ) -> Result<&'a str> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(Error::EmptyName(kind));
+        return Err(Error::EmptyName("分类"));
     }
-    // 表名来自本模块；用户输入始终通过参数绑定。事务避免两个连接同时通过重名检查。
+    if name == UNCATEGORIZED {
+        return Err(Error::ReservedCategoryName);
+    }
+    if name.starts_with('.') || name.contains(['/', '\\']) {
+        return Err(Error::InvalidCategoryName);
+    }
+    // 用户输入始终通过参数绑定。事务避免两个连接同时通过重名检查。
     let exists: bool = conn.query_row(
-        &format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE name = ?1 COLLATE NOCASE AND (?2 IS NULL OR id != ?2))"),
+        "SELECT EXISTS (SELECT 1 FROM categories WHERE name = ?1 COLLATE NOCASE AND (?2 IS NULL OR id != ?2))",
         params![name, exclude_id],
         |row| row.get(0),
     )?;
     if exists {
-        return Err(Error::DuplicateName(kind));
+        return Err(Error::DuplicateName("分类"));
     }
     Ok(name)
 }
 
 fn validate_color(color: &str) -> Result<&'static str> {
-    TAG_COLORS
+    CATEGORY_COLORS
         .iter()
         .copied()
         .find(|candidate| candidate.eq_ignore_ascii_case(color))
-        .ok_or(Error::InvalidTagColor)
+        .ok_or(Error::InvalidCategoryColor)
 }
 
-fn require_tag(conn: &Connection, id: &str) -> Result<()> {
+fn require_category(conn: &Connection, id: &str) -> Result<()> {
     if !conn.query_row(
-        "SELECT EXISTS (SELECT 1 FROM tags WHERE id = ?1)",
+        "SELECT EXISTS (SELECT 1 FROM categories WHERE id = ?1)",
         [id],
         |row| row.get::<_, bool>(0),
     )? {
-        return Err(Error::TagUnavailable);
-    }
-    Ok(())
-}
-
-fn require_group(conn: &Connection, id: &str) -> Result<()> {
-    if !conn.query_row(
-        "SELECT EXISTS (SELECT 1 FROM tag_groups WHERE id = ?1)",
-        [id],
-        |row| row.get::<_, bool>(0),
-    )? {
-        return Err(Error::TagGroupUnavailable);
+        return Err(Error::CategoryUnavailable);
     }
     Ok(())
 }

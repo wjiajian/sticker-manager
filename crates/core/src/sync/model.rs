@@ -1,14 +1,13 @@
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Sticker,
-    Tag,
-    Group,
+    Category,
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Stamp {
@@ -71,11 +70,6 @@ pub enum Action {
     Delete {
         entity: Kind,
         ids: Vec<String>,
-    },
-    Link {
-        sticker: String,
-        tag: String,
-        present: i64,
     },
     Usage {
         sticker: String,
@@ -147,9 +141,8 @@ impl Change {
 }
 pub fn fields(kind: Kind) -> &'static [&'static str] {
     match kind {
-        Kind::Sticker => &["name", "caption", "favorite", "deleted_at"],
-        Kind::Tag => &["name", "color", "group_id", "position"],
-        Kind::Group => &["name", "position"],
+        Kind::Sticker => &["name", "caption", "favorite", "deleted_at", "category_id"],
+        Kind::Category => &["name", "color", "position"],
     }
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -169,7 +162,6 @@ pub struct Model {
     pub entities: BTreeMap<Kind, BTreeMap<String, Entity>>,
     pub aliases: BTreeMap<Kind, BTreeMap<String, String>>,
     pub tombstones: BTreeMap<Kind, BTreeSet<String>>,
-    pub links: BTreeMap<String, BTreeMap<String, Register>>,
     pub usages: BTreeMap<String, BTreeMap<String, Usage>>,
 }
 impl Model {
@@ -276,7 +268,7 @@ impl Model {
                 } else if *entity == Kind::Sticker {
                     return Err(Error::Sync("导入缺少原图信息".into()));
                 }
-                if !self.group_ready(*entity, values.get("group_id")) {
+                if !self.category_ready(*entity, values.get("category_id")) {
                     return Ok(false);
                 }
                 let entity = self
@@ -306,7 +298,7 @@ impl Model {
                     return Ok(true);
                 }
                 if !self.exists(*entity, id)
-                    || (field == "group_id" && !self.group_ready(*entity, Some(value)))
+                    || (field == "category_id" && !self.category_ready(*entity, Some(value)))
                 {
                     return Ok(false);
                 }
@@ -336,24 +328,6 @@ impl Model {
                     let (from, into) = if a > b { (a, b) } else { (b, a) };
                     self.aliases.entry(*entity).or_default().insert(from, into);
                 }
-            }
-            Action::Link {
-                sticker,
-                tag,
-                present,
-            } => {
-                if self.dead(Kind::Sticker, sticker) || self.dead(Kind::Tag, tag) {
-                    return Ok(true);
-                }
-                if !self.exists(Kind::Sticker, sticker) || !self.exists(Kind::Tag, tag) {
-                    return Ok(false);
-                }
-                set_register(
-                    self.links.entry(sticker.clone()).or_default(),
-                    tag.clone(),
-                    json!(present),
-                    stamp,
-                );
             }
             Action::Usage {
                 sticker,
@@ -389,13 +363,14 @@ impl Model {
         }
         Ok(true)
     }
-    fn group_ready(&self, entity: Kind, value: Option<&Value>) -> bool {
-        if entity != Kind::Tag {
+    /// 表情所属的分类还没到时，先放进待应用表；分类已被删除则按未分类处理。
+    fn category_ready(&self, entity: Kind, value: Option<&Value>) -> bool {
+        if entity != Kind::Sticker {
             return true;
         }
         value
             .and_then(Value::as_str)
-            .is_none_or(|id| self.dead(Kind::Group, id) || self.exists(Kind::Group, id))
+            .is_none_or(|id| self.dead(Kind::Category, id) || self.exists(Kind::Category, id))
     }
     /// 按代表 id 汇总合并身份里还活着的 id 的字段。
     pub fn projected(&self, kind: Kind) -> BTreeMap<String, Entity> {
@@ -425,7 +400,7 @@ impl Model {
         result
     }
     pub fn duplicate(&self) -> Option<Action> {
-        for kind in [Kind::Sticker, Kind::Group, Kind::Tag] {
+        for kind in [Kind::Sticker, Kind::Category] {
             let mut keys = BTreeMap::new();
             for (id, entity) in self.projected(kind) {
                 let key = if kind == Kind::Sticker {
@@ -477,7 +452,7 @@ impl Model {
                 });
             }
         }
-        for kind in [Kind::Group, Kind::Tag, Kind::Sticker] {
+        for kind in [Kind::Category, Kind::Sticker] {
             if let Some(entities) = self.entities.get(&kind) {
                 for (id, entity) in entities {
                     if self.dead(kind, id) {
@@ -507,18 +482,6 @@ impl Model {
                         });
                     }
                 }
-            }
-        }
-        for (sticker, tags) in &self.links {
-            for (tag, value) in tags {
-                result.push(Change {
-                    stamp: value.stamp.clone(),
-                    action: Action::Link {
-                        sticker: sticker.clone(),
-                        tag: tag.clone(),
-                        present: value.value.as_i64().unwrap_or(0),
-                    },
-                });
             }
         }
         for (sticker, usages) in &self.usages {

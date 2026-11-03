@@ -4,15 +4,14 @@ import { Image } from "@tauri-apps/api/image";
 import { IconMenuItem, Menu, type MenuOptions } from "@tauri-apps/api/menu";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
-import { ipc, type TagGroup, type TagSummary } from "../../lib/ipc";
+import { ipc, type CategorySummary } from "../../lib/ipc";
 import { useLibraryMutation } from "../../lib/queries";
-import { TAG_COLORS } from "../../lib/tagColors";
+import { CATEGORY_COLORS } from "../../lib/categoryColors";
 import { useUiStore } from "../../stores/ui";
-import type { TagCreation } from "./TagCreateDialog";
 
-export type RenameTarget = { kind: "tag" | "group"; id: string; name: string };
+export type RenameTarget = { id: string; name: string };
 
-export function useTagMenu(groups: TagGroup[], onCreate: (creation: TagCreation) => void, onRename: (target: RenameTarget) => void) {
+export function useCategoryMenu(onRename: (target: RenameTarget) => void) {
   const resources = useRef<Resource[]>([]);
   const opening = useRef(false);
   const working = useRef(false);
@@ -55,14 +54,14 @@ export function useTagMenu(groups: TagGroup[], onCreate: (creation: TagCreation)
     }
   }
 
-  function tagMenu(tag: TagSummary, x: number, y: number) {
+  function categoryMenu(category: CategorySummary, x: number, y: number) {
     return popup(async () => {
       const colors: IconMenuItem[] = [];
-      for (const color of TAG_COLORS) {
+      for (const color of CATEGORY_COLORS) {
         const canvas = document.createElement("canvas");
         canvas.width = canvas.height = 16;
         const context = canvas.getContext("2d");
-        if (!context) throw new Error("无法生成标签色点");
+        if (!context) throw new Error("无法生成分类色点");
         context.fillStyle = color.value;
         context.beginPath();
         context.arc(8, 8, 4, 0, Math.PI * 2);
@@ -70,11 +69,11 @@ export function useTagMenu(groups: TagGroup[], onCreate: (creation: TagCreation)
         const icon = await Image.new(new Uint8Array(context.getImageData(0, 0, 16, 16).data.buffer), 16, 16);
         try {
           const item = await IconMenuItem.new({
-            id: `tag-color-${color.name}`,
+            id: `category-color-${color.name}`,
             // IconMenuItem 没有 checked 属性，勾选标记放在文字中。
-            text: `${color.name}${tag.color === color.value ? " ✓" : ""}`,
+            text: `${color.name}${category.color === color.value ? " ✓" : ""}`,
             icon,
-            action: () => { void change(() => ipc.setTagColor(tag.id, color.value)); },
+            action: () => { void change(() => ipc.setCategoryColor(category.id, color.value)); },
           });
           colors.push(item);
           resources.current.push(item);
@@ -83,48 +82,23 @@ export function useTagMenu(groups: TagGroup[], onCreate: (creation: TagCreation)
         }
       }
       return [
-        { id: "rename-tag", text: "改名", action: () => onRename({ kind: "tag", id: tag.id, name: tag.name }) },
+        { id: "rename-category", text: "改名", action: () => onRename({ id: category.id, name: category.name }) },
         { text: "改颜色", items: colors },
-        { text: "移到标签分组", items: [
-          ...groups.map((group) => ({
-            id: `move-tag-${group.id}`, text: group.name, checked: tag.groupId === group.id,
-            action: () => { void change(() => ipc.moveTag(tag.id, group.id)); },
-          })),
-          { id: "move-tag-ungrouped", text: "未分组", checked: tag.groupId === null, action: () => { void change(() => ipc.moveTag(tag.id, null)); } },
-        ] },
         { item: "Separator" },
-        { id: "delete-tag", text: "删除标签", action: () => { void change(async () => {
-          const deletedCount = tag.totalStickerCount - tag.stickerCount;
+        { id: "delete-category", text: "删除分类", action: () => { void change(async () => {
+          const deletedCount = category.totalStickerCount - category.stickerCount;
           const accepted = await confirm(
-            `会从 ${tag.totalStickerCount} 张表情中移除这个标签${deletedCount > 0 ? `（包含最近删除中的 ${deletedCount} 张）` : ""}。`,
-            { title: `删除标签“${tag.name}”`, kind: "warning", okLabel: "删除标签", cancelLabel: "取消" },
+            `这个分类下的 ${category.totalStickerCount} 张表情会移到“未分类”${deletedCount > 0 ? `（包含最近删除中的 ${deletedCount} 张）` : ""}，表情本身不会删除。`,
+            { title: `删除分类“${category.name}”`, kind: "warning", okLabel: "删除分类", cancelLabel: "取消" },
           );
           if (!accepted) return;
-          await ipc.deleteTag(tag.id);
+          await ipc.deleteCategory(category.id);
           const { view, setView } = useUiStore.getState();
-          if (typeof view !== "string" && view.tag === tag.id) setView("all");
+          if (typeof view !== "string" && view.category === category.id) setView("all");
         }); } },
       ];
     }, x, y);
   }
 
-  function groupMenu(group: TagGroup | null, x: number, y: number) {
-    return popup(async () => {
-      const items: MenuOptions["items"] = [
-        { id: "create-tag", text: "新建标签", action: () => onCreate({ kind: "tag", groupId: group?.id ?? null }) },
-      ];
-      if (group) {
-        items.push(
-          { id: "rename-group", text: "改名", action: () => onRename({ kind: "group", id: group.id, name: group.name }) },
-          { item: "Separator" },
-          { id: "delete-group", text: "删除标签分组", action: () => { void change(() => ipc.deleteTagGroup(group.id)); } },
-        );
-      } else {
-        items.push({ id: "create-group", text: "新建标签分组", action: () => onCreate({ kind: "group" }) });
-      }
-      return items;
-    }, x, y);
-  }
-
-  return { tagMenu, groupMenu, error, busy: mutation.isPending };
+  return { categoryMenu, error, busy: mutation.isPending };
 }

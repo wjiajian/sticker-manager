@@ -3,7 +3,7 @@ import { useIsMutating } from "@tanstack/react-query";
 import { Button } from "../../components/Button";
 import { useEffect, useRef } from "react";
 import type { Sticker, SyncStatus } from "../../lib/ipc";
-import { type useStickers, useTagSidebar, useLibraryOverview } from "../../lib/queries";
+import { type useStickers, useCategories, useLibraryOverview } from "../../lib/queries";
 import { GridSkeleton, useDelayedLoading } from "../../components/Skeleton";
 import { ReadError } from "../../components/ReadError";
 import { EmptyLibrary } from "./EmptyLibrary";
@@ -44,15 +44,15 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const firstTile = useRef<HTMLButtonElement>(null);
   const mutating = useIsMutating() > 0;
   const { data: source, error, isPending } = listing;
-  const skeleton = useDelayedLoading(isPending, searchQuery || (typeof view === "string" ? view : view.tag));
+  const skeleton = useDelayedLoading(isPending, searchQuery || (typeof view === "string" ? view : view.category));
   const overview = useLibraryOverview();
   const menus = useStickerMenu(actions);
   const sortMenu = useSortMenu();
   const recentlyDeleted = !searchQuery && view === "recentlyDeleted";
-  const { data: sidebar } = useTagSidebar();
+  const { data: categories } = useCategories();
   const label = searchQuery ? `搜索“${searchQuery}”` : typeof view === "string"
     ? LIBRARY_VIEWS.find((v) => v.view === view)?.label
-    : [...(sidebar?.groups.flatMap((group) => group.tags) ?? []), ...(sidebar?.ungrouped ?? [])].find((tag) => tag.id === view.tag)?.name;
+    : categories?.find((category) => category.id === view.category)?.name;
   // 换搜索词后，新结果回来之前网格里还是上一次的结果，这时不能据此取消选中或选中第一张。
   const results = searchQuery && source && !listing.isPlaceholderData ? stickers : undefined;
   const filteredEmpty = Boolean(source?.length) && stickers.length === 0 && typeFilter !== "all";
@@ -164,7 +164,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
           </> : <>
             <p className="text-base font-semibold">{searchQuery ? "没有找到相关表情" : recentlyDeleted ? "最近删除里没有表情" : "这里还没有表情"}</p>
             {recentlyDeleted && <p className="text-ink-secondary">删除的表情会在这里保留 30 天</p>}
-            {searchQuery ? <p className="text-ink-secondary">可以搜表情名、标签和配文</p> : (view === "all" || view === "untagged") && (
+            {searchQuery ? <p className="text-ink-secondary">可以搜表情名、分类和配文</p> : (view === "all" || view === "uncategorized") && (
               <p className="text-ink-secondary">点击“导入表情”，或把图片和文件夹拖入窗口</p>
             )}
           </>}

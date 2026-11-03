@@ -23,13 +23,15 @@ fn ids(library: &Library, query: &str) -> Vec<String> {
 }
 
 #[test]
-fn matches_english_case_in_names_captions_and_tags() {
+fn matches_english_case_in_names_captions_and_categories() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = Library::open(dir.path()).unwrap();
     insert(&library, "name", "HeLLo", None, 1);
     insert(&library, "caption", "配文匹配", Some("HELLO"), 2);
     insert(&library, "tag", "标签匹配", None, 3);
-    library.create_tag_and_add("tag", "hello").unwrap();
+    library
+        .create_category_and_set_stickers(&["tag".into()], "hello")
+        .unwrap();
     for query in ["hello", "HELLO", "hElLo", "ell", "ELL"] {
         assert_eq!(ids(&library, query), ["tag", "caption", "name"]);
     }
@@ -40,23 +42,38 @@ fn treats_wildcards_and_escape_characters_literally_in_every_field() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = Library::open(dir.path()).unwrap();
     insert(&library, "decoy", "普通名称", Some("普通配文"), 100);
-    library.create_tag_and_add("decoy", "普通标签").unwrap();
-    for (i, literal) in ["%", "_", "\\", "\\%_", "'"].into_iter().enumerate() {
+    library
+        .create_category_and_set_stickers(&["decoy".into()], "普通分类")
+        .unwrap();
+    // 分类名不能含反斜杠，所以这几个字面量只在名称和配文里测。
+    let literals = ["%", "_", "\\", "\\%_", "'"];
+    for (i, literal) in literals.into_iter().enumerate() {
         let name = format!("name{i}");
         let caption = format!("caption{i}");
         let tag = format!("tag{i}");
         insert(&library, &name, literal, None, 1);
         insert(&library, &caption, "配文匹配", Some(literal), 2);
         insert(&library, &tag, "标签匹配", None, 3);
-        library.create_tag_and_add(&tag, literal).unwrap();
+        if !literal.contains('\\') {
+            library
+                .create_category_and_set_stickers(&[tag.clone()], literal)
+                .unwrap();
+        }
     }
-    for (i, literal) in ["%", "_", "\\", "\\%_", "'"].into_iter().enumerate() {
+    for (i, literal) in literals.into_iter().enumerate() {
         let matches = ids(&library, literal);
-        assert_eq!(
-            &matches[..3],
-            &[format!("tag{i}"), format!("caption{i}"), format!("name{i}")]
-        );
-        assert_eq!(matches.len(), if i < 3 { 6 } else { 3 });
+        let own: Vec<_> = (!literal.contains('\\'))
+            .then(|| format!("tag{i}"))
+            .into_iter()
+            .chain([format!("caption{i}"), format!("name{i}")])
+            .collect();
+        assert_eq!(&matches[..own.len()], own.as_slice());
+        let expected: usize = literals
+            .iter()
+            .filter(|other| other.contains(literal))
+            .map(|other| 2 + usize::from(!other.contains('\\')))
+            .sum();
+        assert_eq!(matches.len(), expected);
         assert!(!matches.iter().any(|id| id == "decoy"));
     }
     assert!(ids(&library, "' OR 1=1 --").is_empty());
@@ -66,12 +83,10 @@ fn treats_wildcards_and_escape_characters_literally_in_every_field() {
 fn requires_every_word_across_fields_and_excludes_recently_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = Library::open(dir.path()).unwrap();
-    let happy = library.create_tag("开心", None, None).unwrap();
-    let cat = library.create_tag("猫猫", None, None).unwrap();
+    let happy = library.create_category("开心猫猫", None).unwrap();
     for id in ["active", "deleted"] {
         insert(&library, id, "欢迎回家", Some("已经收到啦"), 1);
-        library.add_sticker_tag(id, &happy.id).unwrap();
-        library.add_sticker_tag(id, &cat.id).unwrap();
+        library.set_sticker_category(id, Some(&happy.id)).unwrap();
     }
     insert(&library, "partial", "开心", Some("没有配文关键词"), 2);
     library
@@ -98,20 +113,16 @@ fn requires_every_word_across_fields_and_excludes_recently_deleted() {
 }
 
 #[test]
-fn returns_all_tags_and_the_same_sticker_data_as_listing() {
+fn returns_the_category_and_the_same_sticker_data_as_listing() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = Library::open(dir.path()).unwrap();
     insert(&library, "one", "表情名称", Some("收到"), 1);
-    let group = library.create_tag_group("情绪").unwrap();
-    let tag = library
-        .create_tag("开心", Some("#F2B705"), Some(&group.id))
-        .unwrap();
-    library.add_sticker_tag("one", &tag.id).unwrap();
-    library.create_tag_and_add("one", "猫猫").unwrap();
+    let category = library.create_category("开心", Some("#F2B705")).unwrap();
+    library.set_sticker_category("one", Some(&category.id)).unwrap();
     library.record_usage("one").unwrap();
 
     let searched = library.search_stickers("开心 收到").unwrap();
-    assert_eq!(searched[0].tags.len(), 2);
+    assert_eq!(searched[0].category, Some(category));
     assert_eq!(
         serde_json::to_value(searched).unwrap(),
         serde_json::to_value(library.list_stickers(LibraryView::All).unwrap()).unwrap()
@@ -139,13 +150,13 @@ fn ranks_the_whole_trimmed_query_then_latest_usage_and_added_time() {
         insert(&library, id, name, caption, added);
     }
     library
-        .create_tag_and_add("exact-tag", "hELLo WoRLD")
+        .create_category_and_set_stickers(&["exact-tag".into()], "hELLo WoRLD")
         .unwrap();
     library
-        .create_tag_and_add("prefix-tag", "hello world tag")
+        .create_category_and_set_stickers(&["prefix-tag".into()], "hello world tag")
         .unwrap();
     library
-        .create_tag_and_add("substring-old", "say hello world!")
+        .create_category_and_set_stickers(&["substring-old".into()], "say hello world!")
         .unwrap();
     library
         .conn
@@ -194,17 +205,21 @@ fn metadata_changes_affect_subsequent_searches() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = Library::open(dir.path()).unwrap();
     insert(&library, "one", "猫猫", Some("收到"), 1);
-    let tag = library.create_tag_and_add("one", "开心").unwrap();
+    let (category, _) = library
+        .create_category_and_set_stickers(&["one".into()], "开心")
+        .unwrap();
     assert_eq!(ids(&library, "开心 收到"), ["one"]);
     library.set_sticker_caption("one", "好的").unwrap();
     assert!(ids(&library, "开心 收到").is_empty());
     assert_eq!(ids(&library, "开心 好的"), ["one"]);
-    library.rename_tag(&tag.id, "高兴").unwrap();
+    library.rename_category(&category.id, "高兴").unwrap();
     assert!(ids(&library, "开心").is_empty());
     assert_eq!(ids(&library, "高兴"), ["one"]);
-    library.remove_sticker_tag("one", &tag.id).unwrap();
+    library.set_sticker_category("one", None).unwrap();
     assert!(ids(&library, "高兴").is_empty());
-    library.add_sticker_tag("one", &tag.id).unwrap();
+    library
+        .set_sticker_category("one", Some(&category.id))
+        .unwrap();
     assert_eq!(ids(&library, "高兴"), ["one"]);
 }
 
@@ -222,19 +237,16 @@ fn search_ten_thousand_stickers() {
     {
         transaction
             .execute(
-                "INSERT INTO tags (id, name, color, position) VALUES (?1, ?2, '#F2B705', ?3)",
+                "INSERT INTO categories (id, name, color, position) VALUES (?1, ?2, '#F2B705', ?3)",
                 params![i.to_string(), name, i as i64],
             )
             .unwrap();
     }
     {
         let mut sticker = transaction.prepare(
-            "INSERT INTO stickers (id, hash, ext, name, caption, width, height, byte_size, added_at)
-             VALUES (?1, ?1, 'png', ?2, ?3, 128, 128, 4096, ?4)",
+            "INSERT INTO stickers (id, hash, ext, name, caption, width, height, byte_size, added_at, category_id)
+             VALUES (?1, ?1, 'png', ?2, ?3, 128, 128, 4096, ?4, ?5)",
         ).unwrap();
-        let mut tag = transaction
-            .prepare("INSERT INTO sticker_tags VALUES (?1, ?2)")
-            .unwrap();
         let mut usage = transaction
             .prepare("INSERT INTO usages VALUES (?1, ?2, 2, ?3)")
             .unwrap();
@@ -243,14 +255,8 @@ fn search_ten_thousand_stickers() {
             let name = format!("表情{i:05} {}", if i % 10 == 0 { "Happy" } else { "日常" });
             let caption = ["收到", "好的谢谢", "晚安", "100%_完成\\"][i % 4];
             sticker
-                .execute(params![id, name, caption, i as i64])
+                .execute(params![id, name, caption, i as i64, (i % 8).to_string()])
                 .unwrap();
-            for tag_id in [0, 1 + i % 4]
-                .into_iter()
-                .chain((i % 2 == 0).then_some(5 + i % 3))
-            {
-                tag.execute(params![id, tag_id.to_string()]).unwrap();
-            }
             if i % 3 == 0 {
                 usage.execute(params![id, "mac", i as i64]).unwrap();
                 usage.execute(params![id, "win", i as i64 + 1]).unwrap();

@@ -71,7 +71,7 @@ export function usePreview(items: Map<string, PreviewSticker>, busy: boolean, se
     if (!next) { reset(); return; }
     const old = sent.current;
     if (old && (old.name !== next.name || old.usageCount !== next.usageCount || old.thumbnailPath !== next.thumbnailPath
-      || old.objectPath !== next.objectPath || old.tags.length !== next.tags.length || old.tags.some((tag, index) => tag !== next.tags[index]))) show();
+      || old.objectPath !== next.objectPath || old.category !== next.category)) show();
   }, [items, reset, show]);
 
   function move(key: string, event: PointerEvent<HTMLElement>) {

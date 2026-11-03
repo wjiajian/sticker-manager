@@ -2,15 +2,14 @@
 identifier = "main-commands"
 description = "主窗口的仓库管理命令和快捷键注册状态。"
 commands.allow = [
-  "set_sync_paused", "set_pause_on_metered", "sticker_sync_info", "take_sync_details_request", "import_status", "cancel_import", "add_tag_to_stickers", "create_tag_and_add_to_stickers",
+  "set_sync_paused", "set_pause_on_metered", "sticker_sync_info", "take_sync_details_request", "import_status", "cancel_import", "set_stickers_category", "create_category_and_set_stickers",
   "sync_status", "sync_now", "inspect_sync_folder", "join_sync_folder", "stop_sync", "set_device_name",
   "inspect_network_target", "join_network_target", "cancel_sync_connection", "update_sync_credentials",
   "get_settings", "set_appearance", "set_ball_visible", "set_ball_auto_hide", "get_autostart", "set_autostart",
   "library_directory", "open_library_directory", "take_preferences_request",
-  "library_overview", "list_stickers", "search_stickers", "sticker", "tag_sidebar",
-  "delete_sticker", "restore_sticker", "delete_stickers", "restore_stickers", "purge_sticker", "purge_deleted_stickers", "create_tag", "rename_tag",
-  "set_tag_color", "move_tag", "delete_tag", "create_tag_group", "rename_tag_group",
-  "delete_tag_group", "add_sticker_tag", "remove_sticker_tag", "create_tag_and_add",
+  "library_overview", "list_stickers", "search_stickers", "sticker", "categories",
+  "delete_sticker", "restore_sticker", "delete_stickers", "restore_stickers", "purge_sticker", "purge_deleted_stickers", "create_category", "rename_category",
+  "set_category_color", "delete_category", "set_sticker_category",
   "set_sticker_caption", "import_stickers", "copy_sticker", "prepare_sticker_drag",
   "record_sticker_usage", "toggle_sticker_favorite", "reveal_sticker", "global_shortcut_error",
 ]

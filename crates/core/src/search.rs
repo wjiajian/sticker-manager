@@ -1,7 +1,7 @@
 use crate::{Library, Result, Sticker};
 
 impl Library {
-    /// 每个词都要匹配名称、配文或标签；完整搜索词的完全匹配和前缀匹配优先。
+    /// 每个词都要匹配名称、配文或分类；完整搜索词的完全匹配和前缀匹配优先。
     pub fn search_stickers(&self, query: &str) -> Result<Vec<Sticker>> {
         let query = query.trim();
         if query.is_empty() {
@@ -21,10 +21,9 @@ impl Library {
             filter.push_str(&format!(
                 " AND (s.name LIKE ?{parameter} ESCAPE '\\'
                     OR s.caption LIKE ?{parameter} ESCAPE '\\'
-                    OR EXISTS (SELECT 1 FROM sticker_tags search_st
-                        JOIN tags search_t ON search_t.id = search_st.tag_id
-                        WHERE search_st.sticker_id = s.id
-                            AND search_t.name LIKE ?{parameter} ESCAPE '\\'))"
+                    OR EXISTS (SELECT 1 FROM categories search_c
+                        WHERE search_c.id = s.category_id
+                            AND search_c.name LIKE ?{parameter} ESCAPE '\\'))"
             ));
         }
         let parameters: Vec<_> = patterns.iter().map(String::as_str).collect();
@@ -34,7 +33,7 @@ impl Library {
              s.added_at DESC, s.rowid DESC",
             &parameters,
         )?;
-        // 标签已经批量读回；稳定排序只调整匹配档位，保留同档内的使用和添加时间顺序。
+        // 分类已经批量读回；稳定排序只调整匹配档位，保留同档内的使用和添加时间顺序。
         stickers.sort_by_cached_key(|sticker| match_rank(sticker, query));
         Ok(stickers)
     }
@@ -43,7 +42,7 @@ impl Library {
 fn match_rank(sticker: &Sticker, query: &str) -> u8 {
     std::iter::once(sticker.name.as_str())
         .chain(sticker.caption.as_deref())
-        .chain(sticker.tags.iter().map(|tag| tag.name.as_str()))
+        .chain(sticker.category.as_ref().map(|category| category.name.as_str()))
         .map(|value| {
             if value.eq_ignore_ascii_case(query) {
                 0

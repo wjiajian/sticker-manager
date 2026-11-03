@@ -29,7 +29,7 @@
   --color-tile: #f3f2ee; /* 只用于表情图片区 */
   --color-muted: #f3f2ee; /* 控件与骨架 */
   --color-line: #e2e0d9;
-  --color-tag-add: #b9b7b0;
+  --color-category-add: #b9b7b0;
   --color-hover: #eae8e1;
   --color-brand: #ffc94a;
   --color-brand-ink: #1f1f1f;
@@ -45,14 +45,14 @@
   --color-on-selection: #ffffff;
   --color-selection-edge: #1f1f1f;
   --color-synced: #1e8a4c;
-  --color-tag-yellow: #f2b705;
-  --color-tag-gray: #8a8a8a;
-  --color-tag-red: #e5484d;
-  --color-tag-blue: #3e7bfa;
-  --color-tag-green: #2ba471;
-  --color-tag-purple: #7a5af8;
-  --color-tag-orange: #e8572a;
-  --color-tag-brown: #a0662f;
+  --color-category-yellow: #f2b705;
+  --color-category-gray: #8a8a8a;
+  --color-category-red: #e5484d;
+  --color-category-blue: #3e7bfa;
+  --color-category-green: #2ba471;
+  --color-category-purple: #7a5af8;
+  --color-category-orange: #e8572a;
+  --color-category-brown: #a0662f;
 
   /* Windows 版收小圆角，见下方 data-platform 覆盖 */
   --radius-card: 12px;
@@ -76,7 +76,7 @@
     --color-tile: #74736e;
     --color-muted: #313131;
     --color-line: #85837b;
-    --color-tag-add: #85837b;
+    --color-category-add: #85837b;
     --color-hover: #313131;
     --color-brand: #ffc94a;
     --color-brand-ink: #1f1f1f;
@@ -92,14 +92,14 @@
     --color-on-selection: #f4f3ef;
     --color-selection-edge: #ffccad;
     --color-synced: #67cc8d;
-    --color-tag-yellow: #f2b705;
-    --color-tag-gray: #a6a6a6;
-    --color-tag-red: #f16c70;
-    --color-tag-blue: #709fff;
-    --color-tag-green: #4fbe8d;
-    --color-tag-purple: #a28aff;
-    --color-tag-orange: #f28461;
-    --color-tag-brown: #c38b55;
+    --color-category-yellow: #f2b705;
+    --color-category-gray: #a6a6a6;
+    --color-category-red: #f16c70;
+    --color-category-blue: #709fff;
+    --color-category-green: #4fbe8d;
+    --color-category-purple: #a28aff;
+    --color-category-orange: #f28461;
+    --color-category-brown: #c38b55;
   }
 }
 

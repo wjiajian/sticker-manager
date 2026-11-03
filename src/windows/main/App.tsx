@@ -59,7 +59,7 @@ export function App() {
   const source = visible.data ?? NO_STICKERS;
   const sortable = !searchQuery && view !== "recent" && view !== "recentlyDeleted";
   // 窗口重新打开、换视图、搜索、筛选或排序时才按实际使用数据重排。
-  const usage = useUsageSnapshot(`${reopened}|${typeof view === "string" ? view : view.tag}|${searchQuery}|${typeFilter}|${sortOrder}`);
+  const usage = useUsageSnapshot(`${reopened}|${typeof view === "string" ? view : view.category}|${searchQuery}|${typeFilter}|${sortOrder}`);
   // 当前列表先记下使用数据，复制后它们在网格和最近使用条里都不跳位。
   source.forEach(usage);
   const stickers = useMemo(() => {

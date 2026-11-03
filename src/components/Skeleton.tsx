@@ -41,8 +41,8 @@ export function GridSkeleton({ panel = false }: { panel?: boolean }) {
   </div>;
 }
 
-export function TagSkeleton({ panel = false }: { panel?: boolean }) {
-  return <Skeleton label="正在读取标签" className={panel ? "h-8 shrink-0" : "px-2 py-1"}>
+export function CategorySkeleton({ panel = false }: { panel?: boolean }) {
+  return <Skeleton label="正在读取分类" className={panel ? "h-8 shrink-0" : "px-2 py-1"}>
     <div className={panel ? "flex gap-2" : "flex flex-col gap-3"}>
       {[0, 1, 2].map((index) => panel ? <div key={index} className="h-8 w-16 rounded-full bg-muted" />
         : <div key={index} className="flex h-4 items-center gap-2"><div className="size-2 rounded-full bg-muted" /><div className="h-3 w-24 rounded-sm bg-muted" /></div>)}

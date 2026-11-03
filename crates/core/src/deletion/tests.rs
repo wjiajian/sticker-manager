@@ -22,10 +22,9 @@ fn library(root: &Path) -> Library {
 }
 
 fn add_metadata(library: &mut Library, id: &str) {
-    for name in ["开心", "回复"] {
-        let tag = library.create_tag(name, None, None).unwrap();
-        library.add_sticker_tag(id, &tag.id).unwrap();
-    }
+    library
+        .create_category_and_set_stickers(&[id.to_owned()], "开心")
+        .unwrap();
     library.set_sticker_caption(id, "收到").unwrap();
     library.toggle_favorite(id).unwrap();
     library.record_usage(id).unwrap();
@@ -49,12 +48,12 @@ fn ids(library: &Library, view: LibraryView) -> Vec<String> {
 }
 
 #[test]
-fn deletion_updates_views_search_and_counts_without_removing_tag_associations() {
+fn deletion_updates_views_search_and_counts_without_removing_the_category() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = library(dir.path());
     add_metadata(&mut library, "one");
-    let tag = library.sticker("one").unwrap().tags[0].clone();
-    assert_eq!(ids(&library, LibraryView::Tag(tag.id.clone())), ["one"]);
+    let tag = library.sticker("one").unwrap().category.unwrap();
+    assert_eq!(ids(&library, LibraryView::Category(tag.id.clone())), ["one"]);
     assert_eq!(library.search_stickers("收到").unwrap().len(), 1);
     assert_eq!(
         library.overview().unwrap(),
@@ -62,7 +61,7 @@ fn deletion_updates_views_search_and_counts_without_removing_tag_associations() 
             all: 3,
             recent: 1,
             favorites: 1,
-            untagged: 2,
+            uncategorized: 2,
             recently_deleted: 0,
         }
     );
@@ -75,11 +74,11 @@ fn deletion_updates_views_search_and_counts_without_removing_tag_associations() 
             .contains(&library.sticker("one").unwrap().deleted_at.unwrap())
     );
     assert_eq!(ids(&library, LibraryView::All), ["three"]);
-    assert_eq!(ids(&library, LibraryView::Untagged), ["three"]);
+    assert_eq!(ids(&library, LibraryView::Uncategorized), ["three"]);
     for view in [
         LibraryView::Favorites,
         LibraryView::Recent,
-        LibraryView::Tag(tag.id),
+        LibraryView::Category(tag.id),
     ] {
         assert!(ids(&library, view).is_empty());
     }
@@ -93,13 +92,13 @@ fn deletion_updates_views_search_and_counts_without_removing_tag_associations() 
             all: 1,
             recent: 0,
             favorites: 0,
-            untagged: 1,
+            uncategorized: 1,
             recently_deleted: 2,
         }
     );
     let deleted = ids(&library, LibraryView::RecentlyDeleted);
     assert!(deleted.contains(&"one".into()) && deleted.contains(&"two".into()));
-    for tag in library.tag_sidebar().unwrap().ungrouped {
+    for tag in library.categories().unwrap() {
         assert_eq!((tag.sticker_count, tag.total_sticker_count), (0, 1));
     }
 }
@@ -179,7 +178,7 @@ fn restoring_preserves_metadata_and_each_devices_usage() {
     let after = library.sticker("one").unwrap();
     assert_eq!(after.deleted_at, None);
     assert_eq!(after.purge_at, None);
-    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.category, before.category);
     assert_eq!(after.caption, before.caption);
     assert_eq!(after.favorite, before.favorite);
     assert_eq!(
@@ -190,7 +189,7 @@ fn restoring_preserves_metadata_and_each_devices_usage() {
     assert_eq!((after.id, after.added_at), (before.id, before.added_at));
     assert_eq!(ids(&library, LibraryView::Favorites), ["one"]);
     assert_eq!(ids(&library, LibraryView::Recent), ["one"]);
-    for tag in library.tag_sidebar().unwrap().ungrouped {
+    for tag in library.categories().unwrap() {
         assert_eq!((tag.sticker_count, tag.total_sticker_count), (1, 1));
     }
 }
@@ -207,7 +206,7 @@ fn purging_cascades_metadata_and_removes_both_files() {
         library.sticker("one"),
         Err(Error::StickerUnavailable)
     ));
-    for table in ["sticker_tags", "usages"] {
+    for table in ["usages"] {
         let count: i64 = library
             .conn
             .query_row(
@@ -220,7 +219,7 @@ fn purging_cascades_metadata_and_removes_both_files() {
     }
     assert!(!sticker.object_path.exists());
     assert!(!sticker.thumbnail_path.exists());
-    assert_eq!(library.tag_sidebar().unwrap().ungrouped.len(), 2);
+    assert_eq!(library.categories().unwrap().len(), 1);
     assert!(library.sticker("two").unwrap().object_path.is_file());
 }
 
@@ -239,7 +238,7 @@ fn bulk_purge_uses_confirmed_ids_skips_restored_and_cascades_metadata_and_files(
     assert!(library.sticker("one").is_err());
     assert!(library.sticker("two").unwrap().deleted_at.is_none());
     assert!(library.sticker("three").unwrap().deleted_at.is_some());
-    for table in ["sticker_tags", "usages", "sync_usage_offsets"] {
+    for table in ["usages", "sync_usage_offsets"] {
         let count: i64 = library
             .conn
             .query_row(
@@ -328,7 +327,7 @@ fn failed_commit_preserves_metadata_and_files() {
     assert!(library.purge_sticker("one").is_err());
     let after = library.sticker("one").unwrap();
     assert!(after.deleted_at.is_some());
-    assert_eq!(after.tags, sticker.tags);
+    assert_eq!(after.category, sticker.category);
     assert_eq!(after.usage_count, sticker.usage_count);
     assert!(sticker.object_path.is_file());
     assert!(sticker.thumbnail_path.is_file());
@@ -352,7 +351,7 @@ fn importing_after_purge_creates_a_new_sticker_without_old_metadata() {
     assert_eq!((report.added, report.existing, report.restored), (1, 0, 0));
     let after = library.list_stickers(LibraryView::All).unwrap().remove(0);
     assert_ne!(after.id, before.id);
-    assert!(after.tags.is_empty());
+    assert!(after.category.is_none());
     assert!(!after.favorite);
     assert_eq!(after.caption, None);
     assert_eq!((after.usage_count, after.last_used_at), (0, None));

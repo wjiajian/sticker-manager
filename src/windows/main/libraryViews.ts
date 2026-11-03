@@ -12,6 +12,6 @@ export const LIBRARY_VIEWS: { view: FixedLibraryView; label: string; icon: Icon 
   { view: "all", label: "全部表情", icon: SquaresFourIcon },
   { view: "recent", label: "最近使用", icon: ClockCounterClockwiseIcon },
   { view: "favorites", label: "收藏", icon: StarIcon },
-  { view: "untagged", label: "未打标签", icon: TrayIcon },
+  { view: "uncategorized", label: "未分类", icon: TrayIcon },
   { view: "recentlyDeleted", label: "最近删除", icon: TrashIcon },
 ];

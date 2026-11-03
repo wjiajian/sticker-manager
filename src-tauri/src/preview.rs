@@ -15,7 +15,7 @@ const HEIGHT: f64 = 232.0 + INSET * 2.0 + 32.0;
 pub struct PreviewSticker {
     name: String,
     usage_count: u64,
-    tags: Vec<String>,
+    category: Option<String>,
     thumbnail_path: String,
     object_path: String,
 }
@@ -376,7 +376,7 @@ mod tests {
             sticker: PreviewSticker {
                 name: "猫猫".into(),
                 usage_count: 0,
-                tags: vec![],
+                category: None,
                 thumbnail_path: "thumb".into(),
                 object_path: "original".into(),
             },

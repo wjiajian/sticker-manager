@@ -10,6 +10,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_init.sql"),
     include_str!("migrations/0002_sync.sql"),
     include_str!("migrations/0003_sync_presence.sql"),
+    include_str!("migrations/0004_categories.sql"),
 ];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 
@@ -95,5 +96,59 @@ mod tests {
         std::fs::write(&path, bytes).unwrap();
         assert!(open(&path).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn migration_to_categories_keeps_the_first_tag_and_drops_old_sync_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..3] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        conn.execute_batch(
+            "INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at) VALUES
+                ('multi', 'h1', 'png', 'a', 1, 1, 1, 1),
+                ('single', 'h2', 'png', 'b', 1, 1, 1, 2),
+                ('none', 'h3', 'png', 'c', 1, 1, 1, 3);
+             INSERT INTO tag_groups VALUES ('g', '分组', 0);
+             INSERT INTO tags VALUES ('late', '后面', '#F2B705', 'g', 5), ('early', '前面', '#3E7BFA', NULL, 1);
+             INSERT INTO sticker_tags VALUES ('multi', 'late'), ('multi', 'early'), ('single', 'late');
+             INSERT INTO sync_model VALUES (1, 0, '{}');
+             UPDATE sync_meta SET recording = 1;",
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        let category = |id: &str| -> Option<String> {
+            conn.query_row("SELECT category_id FROM stickers WHERE id = ?1", [id], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(category("multi").as_deref(), Some("early"));
+        assert_eq!(category("single").as_deref(), Some("late"));
+        assert_eq!(category("none"), None);
+        let names: Vec<String> = conn
+            .prepare("SELECT name FROM categories ORDER BY position")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(names, ["前面", "后面"]);
+        for table in ["tags", "tag_groups", "sticker_tags"] {
+            assert!(conn.prepare(&format!("SELECT 1 FROM {table}")).is_err());
+        }
+        let stale: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sync_model", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stale, 0);
+        // 迁移期间的改动不能写进旧的操作日志。
+        let logged: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(logged, 0);
     }
 }

@@ -1,100 +1,58 @@
-import { GearIcon, CaretDownIcon, CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
+import { GearIcon, PlusIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { TagDot } from "../../components/TagDot";
-import { ipc, type TagGroup, type TagSummary, type SyncStatus } from "../../lib/ipc";
-import { useLibraryMutation, useLibraryOverview, useTagSidebar } from "../../lib/queries";
+import { CategoryDot } from "../../components/CategoryDot";
+import { ipc, type CategorySummary, type SyncStatus } from "../../lib/ipc";
+import { useCategories, useLibraryMutation, useLibraryOverview } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { LIBRARY_VIEWS } from "./libraryViews";
-import { TagCreateDialog, type TagCreation } from "./TagCreateDialog";
-import { useTagMenu, type RenameTarget } from "./useTagMenu";
+import { CategoryCreateDialog } from "./CategoryCreateDialog";
+import { useCategoryMenu, type RenameTarget } from "./useCategoryMenu";
 import { SyncCard } from "./SyncCard";
-import { TagSkeleton, useDelayedLoading } from "../../components/Skeleton";
+import { CategorySkeleton, useDelayedLoading } from "../../components/Skeleton";
 
 const navigation = "interactive relative flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover active:scale-98";
 const selectedNavigation = "bg-surface font-semibold windows:before:absolute windows:before:top-2 windows:before:left-0 windows:before:h-3 windows:before:w-0.75 windows:before:rounded-full windows:before:bg-accent";
 
 export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => void; onSync: (button: HTMLButtonElement) => void; sync?: SyncStatus }) {
   const { data: overview } = useLibraryOverview();
-  const tags = useTagSidebar();
-  const { data: sidebar, error, isPending } = tags;
+  const categories = useCategories();
+  const { data: list, error, isPending } = categories;
   const skeleton = useDelayedLoading(isPending);
   const view = useUiStore((s) => s.view);
   const searching = useUiStore((s) => !!s.searchQuery);
   const setView = useUiStore((s) => s.setView);
-  const [collapsed, setCollapsed] = useState<Set<string | null>>(() => new Set());
-  const [creation, setCreation] = useState<TagCreation | null>(null);
+  const [creating, setCreating] = useState(false);
   const [rename, setRename] = useState<RenameTarget | null>(null);
-  const menus = useTagMenu(sidebar?.groups ?? [], setCreation, setRename);
-
-  function toggleGroup(id: string | null) {
-    setCollapsed((previous) => {
-      const next = new Set(previous);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const menus = useCategoryMenu(setRename);
 
   function finishRename(restoreFocus: boolean) {
     const target = rename;
     setRename(null);
-    if (restoreFocus && target) requestAnimationFrame(() => document.getElementById(`sidebar-${target.kind}-${target.id}`)?.focus());
+    if (restoreFocus && target) requestAnimationFrame(() => document.getElementById(`sidebar-category-${target.id}`)?.focus());
   }
 
-  function tagRow(tag: TagSummary) {
-    const selected = !searching && typeof view !== "string" && view.tag === tag.id;
-    return rename?.kind === "tag" && rename.id === tag.id ? (
-      <div key={tag.id} className="py-1 pr-2 pl-6">
-        <InlineName key={tag.id} target={rename} onFinish={finishRename} />
+  function categoryRow(category: CategorySummary) {
+    const selected = !searching && typeof view !== "string" && view.category === category.id;
+    return rename?.id === category.id ? (
+      <div key={category.id} className="px-2 py-1">
+        <InlineName key={category.id} target={rename} onFinish={finishRename} />
       </div>
     ) : (
       <button
-        key={tag.id}
-        id={`sidebar-tag-${tag.id}`}
+        key={category.id}
+        id={`sidebar-category-${category.id}`}
         type="button"
         aria-current={selected ? "page" : undefined}
         aria-haspopup="menu"
-        title={tag.name}
-        onClick={() => setView({ tag: tag.id })}
-        {...menuEvents((x, y) => menus.tagMenu(tag, x, y))}
-        className={`${navigation} pl-6 ${selected ? selectedNavigation : ""}`}
+        title={category.name}
+        onClick={() => setView({ category: category.id })}
+        {...menuEvents((x, y) => menus.categoryMenu(category, x, y))}
+        className={`${navigation} ${selected ? selectedNavigation : ""}`}
       >
-        <TagDot color={tag.color} />
-        <span className="min-w-0 flex-1 truncate">{tag.name}</span>
-        <span className="shrink-0 text-xs font-normal text-ink-secondary">{tag.stickerCount}</span>
+        <CategoryDot color={category.color} />
+        <span className="min-w-0 flex-1 truncate">{category.name}</span>
+        <span className="shrink-0 text-xs font-normal text-ink-secondary">{category.stickerCount}</span>
       </button>
-    );
-  }
-
-  function groupSection(group: TagGroup | null, tags: TagSummary[]) {
-    const id = group?.id ?? null;
-    const expanded = !collapsed.has(id);
-    const name = group?.name ?? "未分组";
-    const contentId = `tags-${id ?? "ungrouped"}`;
-    return (
-      <div key={id ?? "ungrouped"} className="flex min-w-0 flex-col gap-0.5">
-        {group && rename?.kind === "group" && rename.id === group.id ? (
-          <div className="px-2 py-1"><InlineName key={group.id} target={rename} onFinish={finishRename} /></div>
-        ) : (
-          <button
-            id={`sidebar-group-${id ?? "ungrouped"}`}
-            type="button"
-            title={name}
-            aria-expanded={expanded}
-            aria-controls={contentId}
-            aria-haspopup="menu"
-            onClick={() => toggleGroup(id)}
-            {...menuEvents((x, y) => menus.groupMenu(group, x, y))}
-            className={`${navigation} gap-1 text-xs font-semibold text-ink-tertiary`}
-          >
-            {expanded ? <CaretDownIcon size={12} className="shrink-0" aria-hidden /> : <CaretRightIcon size={12} className="shrink-0" aria-hidden />}
-            <span className="truncate">{name}</span>
-          </button>
-        )}
-        <div id={contentId} hidden={!expanded} className="min-w-0">
-          {tags.map(tagRow)}
-        </div>
-      </div>
     );
   }
 
@@ -120,36 +78,30 @@ export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => 
         })}
       </Section>
 
-      <section aria-label="标签分组" className="flex min-w-0 flex-col gap-0.5" aria-busy={isPending || menus.busy}>
+      <section aria-label="分类" className="flex min-w-0 flex-col gap-0.5" aria-busy={isPending || menus.busy}>
         <div className="flex items-center justify-between px-2 py-1">
-          <h2 tabIndex={0} aria-haspopup="menu" {...menuEvents((x, y) => menus.groupMenu(null, x, y))} className="rounded-control text-xs font-semibold text-ink-secondary">标签分组</h2>
+          <h2 className="text-xs font-semibold text-ink-secondary">分类</h2>
           <button
             type="button"
-            aria-label="新建标签"
-            onClick={() => setCreation({ kind: "tag", groupId: null })}
+            aria-label="新建分类"
+            onClick={() => setCreating(true)}
             className="interactive flex rounded-sm p-0.5 text-ink-secondary hover:opacity-82 active:scale-98"
           >
             <PlusIcon size={16} aria-hidden />
           </button>
         </div>
-        {error ? <p role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-ink-secondary">读取标签失败<button type="button" disabled={tags.isFetching} onClick={() => { void tags.refetch(); }} className="rounded-sm underline underline-offset-4 hover:opacity-82 disabled:opacity-50">重试</button></p>
-          : isPending ? skeleton ? <TagSkeleton /> : null
+        {error ? <p role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-ink-secondary">读取分类失败<button type="button" disabled={categories.isFetching} onClick={() => { void categories.refetch(); }} className="rounded-sm underline underline-offset-4 hover:opacity-82 disabled:opacity-50">重试</button></p>
+          : isPending ? skeleton ? <CategorySkeleton /> : null
           : <>
-            {sidebar.groups.length === 0 && sidebar.ungrouped.length === 0 && <p className="px-2 py-1 text-xs text-ink-secondary">还没有标签</p>}
-            {sidebar.groups.map((group) => groupSection(group, group.tags))}
-            {sidebar.ungrouped.length > 0 && groupSection(null, sidebar.ungrouped)}
+            {list.length === 0 && <p className="px-2 py-1 text-xs text-ink-secondary">还没有分类</p>}
+            {list.map(categoryRow)}
           </>}
         {menus.error && <p role="alert" className="px-2 py-1 text-xs text-ink-secondary">{menus.error}</p>}
       </section>
       </div>
       <SyncCard status={sync} onClick={onSync} />
       <button type="button" onClick={onPreferences} className={`${navigation} mt-4 shrink-0 text-ink-tertiary`}><GearIcon size={16} aria-hidden />偏好设置</button>
-      {creation && <TagCreateDialog
-        creation={creation}
-        groups={sidebar?.groups ?? []}
-        onClose={() => setCreation(null)}
-        onCreated={(groupId) => setCollapsed((previous) => { const next = new Set(previous); next.delete(groupId); return next; })}
-      />}
+      {creating && <CategoryCreateDialog onClose={() => setCreating(false)} />}
     </nav>
   );
 }
@@ -159,7 +111,7 @@ function InlineName({ target, onFinish }: { target: RenameTarget; onFinish: (res
   const input = useRef<HTMLInputElement>(null);
   const working = useRef(false);
   const finished = useRef(false);
-  const mutation = useLibraryMutation((value: string) => target.kind === "tag" ? ipc.renameTag(target.id, value) : ipc.renameTagGroup(target.id, value));
+  const mutation = useLibraryMutation((value: string) => ipc.renameCategory(target.id, value));
 
   useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
 
@@ -181,7 +133,7 @@ function InlineName({ target, onFinish }: { target: RenameTarget; onFinish: (res
     <div className="flex min-w-0 flex-col gap-1">
       <input
         ref={input}
-        aria-label={target.kind === "tag" ? "标签名称" : "标签分组名称"}
+        aria-label="分类名称"
         aria-invalid={!!mutation.error}
         value={name}
         readOnly={mutation.isPending}

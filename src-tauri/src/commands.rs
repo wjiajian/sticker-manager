@@ -7,8 +7,8 @@ use std::sync::Mutex;
 
 use serde::{Serialize, Serializer};
 use sticker_core::{
-    ImportReport, Library, LibraryOverview, LibraryView, Sticker, StickerCursor, StickerPage, Tag,
-    TagGroup, TagSidebar,
+    ImportReport, Library, LibraryOverview, LibraryView, Sticker, StickerCursor, StickerPage,
+    Category, CategorySummary,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -134,97 +134,48 @@ pub async fn purge_deleted_stickers(app: AppHandle, ids: Vec<String>) -> Command
 }
 
 #[tauri::command]
-pub async fn tag_sidebar(app: AppHandle) -> CommandResult<TagSidebar> {
-    with_library(app, |library| Ok(library.tag_sidebar()?)).await
+pub async fn categories(app: AppHandle) -> CommandResult<Vec<CategorySummary>> {
+    with_library(app, |library| Ok(library.categories()?)).await
 }
 
 #[tauri::command]
-pub async fn create_tag(
+pub async fn create_category(
     app: AppHandle,
     name: String,
     color: Option<String>,
-    group_id: Option<String>,
-) -> CommandResult<Tag> {
+) -> CommandResult<Category> {
     with_library(app, move |library| {
-        Ok(library.create_tag(&name, color.as_deref(), group_id.as_deref())?)
+        Ok(library.create_category(&name, color.as_deref())?)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn rename_tag(app: AppHandle, id: String, name: String) -> CommandResult<()> {
-    with_library(app, move |library| Ok(library.rename_tag(&id, &name)?)).await
+pub async fn rename_category(app: AppHandle, id: String, name: String) -> CommandResult<()> {
+    with_library(app, move |library| Ok(library.rename_category(&id, &name)?)).await
 }
 
 #[tauri::command]
-pub async fn set_tag_color(app: AppHandle, id: String, color: String) -> CommandResult<()> {
-    with_library(app, move |library| Ok(library.set_tag_color(&id, &color)?)).await
-}
-
-#[tauri::command]
-pub async fn move_tag(app: AppHandle, id: String, group_id: Option<String>) -> CommandResult<()> {
+pub async fn set_category_color(app: AppHandle, id: String, color: String) -> CommandResult<()> {
     with_library(app, move |library| {
-        Ok(library.move_tag(&id, group_id.as_deref())?)
+        Ok(library.set_category_color(&id, &color)?)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn delete_tag(app: AppHandle, id: String) -> CommandResult<()> {
-    with_library(app, move |library| Ok(library.delete_tag(&id)?)).await
+pub async fn delete_category(app: AppHandle, id: String) -> CommandResult<()> {
+    with_library(app, move |library| Ok(library.delete_category(&id)?)).await
 }
 
 #[tauri::command]
-pub async fn create_tag_group(app: AppHandle, name: String) -> CommandResult<TagGroup> {
-    with_library(app, move |library| Ok(library.create_tag_group(&name)?)).await
-}
-
-#[tauri::command]
-pub async fn rename_tag_group(app: AppHandle, id: String, name: String) -> CommandResult<()> {
-    with_library(
-        app,
-        move |library| Ok(library.rename_tag_group(&id, &name)?),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn delete_tag_group(app: AppHandle, id: String) -> CommandResult<()> {
-    with_library(app, move |library| Ok(library.delete_tag_group(&id)?)).await
-}
-
-#[tauri::command]
-pub async fn add_sticker_tag(
+pub async fn set_sticker_category(
     app: AppHandle,
     sticker_id: String,
-    tag_id: String,
+    category_id: Option<String>,
 ) -> CommandResult<()> {
     with_library(app, move |library| {
-        Ok(library.add_sticker_tag(&sticker_id, &tag_id)?)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn remove_sticker_tag(
-    app: AppHandle,
-    sticker_id: String,
-    tag_id: String,
-) -> CommandResult<()> {
-    with_library(app, move |library| {
-        Ok(library.remove_sticker_tag(&sticker_id, &tag_id)?)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn create_tag_and_add(
-    app: AppHandle,
-    sticker_id: String,
-    name: String,
-) -> CommandResult<Tag> {
-    with_library(app, move |library| {
-        Ok(library.create_tag_and_add(&sticker_id, &name)?)
+        Ok(library.set_sticker_category(&sticker_id, category_id.as_deref())?)
     })
     .await
 }
@@ -254,24 +205,24 @@ pub fn cancel_import(app: AppHandle) {
     crate::imports::cancel(&app);
 }
 #[tauri::command]
-pub async fn add_tag_to_stickers(
+pub async fn set_stickers_category(
     app: AppHandle,
     ids: Vec<String>,
-    tag_id: String,
+    category_id: Option<String>,
 ) -> CommandResult<usize> {
     with_library(app, move |library| {
-        Ok(library.add_tag_to_stickers(&ids, &tag_id)?)
+        Ok(library.set_stickers_category(&ids, category_id.as_deref())?)
     })
     .await
 }
 #[tauri::command]
-pub async fn create_tag_and_add_to_stickers(
+pub async fn create_category_and_set_stickers(
     app: AppHandle,
     ids: Vec<String>,
     name: String,
-) -> CommandResult<(Tag, usize)> {
+) -> CommandResult<(Category, usize)> {
     with_library(app, move |library| {
-        Ok(library.create_tag_and_add_to_stickers(&ids, &name)?)
+        Ok(library.create_category_and_set_stickers(&ids, &name)?)
     })
     .await
 }

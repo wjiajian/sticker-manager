@@ -238,10 +238,9 @@ impl Library {
                 (
                     Kind::Sticker,
                     "stickers",
-                    "id,hash,ext,animated,width,height,byte_size,added_at,name,caption,favorite,deleted_at",
+                    "id,hash,ext,animated,width,height,byte_size,added_at,name,caption,favorite,deleted_at,category_id",
                 ),
-                (Kind::Tag, "tags", "id,name,color,group_id,position"),
-                (Kind::Group, "tag_groups", "id,name,position"),
+                (Kind::Category, "categories", "id,name,color,position"),
             ] {
                 let mut stmt = tx.prepare(&format!("SELECT {columns} FROM {table}"))?;
                 let mut rows = stmt.query([])?;
@@ -258,15 +257,11 @@ impl Library {
                                 byte_size: row.get(6)?,
                                 added_at: row.get(7)?,
                             }),
-                            json!({"name":row.get::<_,String>(8)?,"caption":row.get::<_,Option<String>>(9)?,"favorite":row.get::<_,i64>(10)?,"deleted_at":row.get::<_,Option<i64>>(11)?}),
+                            json!({"name":row.get::<_,String>(8)?,"caption":row.get::<_,Option<String>>(9)?,"favorite":row.get::<_,i64>(10)?,"deleted_at":row.get::<_,Option<i64>>(11)?,"category_id":row.get::<_,Option<String>>(12)?}),
                         ),
-                        Kind::Tag => (
+                        Kind::Category => (
                             None,
-                            json!({"name":row.get::<_,String>(1)?,"color":row.get::<_,String>(2)?,"group_id":row.get::<_,Option<String>>(3)?,"position":row.get::<_,i64>(4)?}),
-                        ),
-                        Kind::Group => (
-                            None,
-                            json!({"name":row.get::<_,String>(1)?,"position":row.get::<_,i64>(2)?}),
+                            json!({"name":row.get::<_,String>(1)?,"color":row.get::<_,String>(2)?,"position":row.get::<_,i64>(3)?}),
                         ),
                     };
                     let fields = values
@@ -292,19 +287,6 @@ impl Library {
                         },
                     );
                 }
-            }
-            let mut stmt = tx.prepare("SELECT sticker_id,tag_id FROM sticker_tags")?;
-            for row in
-                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-            {
-                let (s, t) = row?;
-                model.links.entry(s).or_default().insert(
-                    t,
-                    Register {
-                        value: json!(1),
-                        stamp: stamp.clone(),
-                    },
-                );
             }
             let mut stmt =
                 tx.prepare("SELECT sticker_id,device_id,count,last_used_at FROM usages")?;
@@ -396,65 +378,29 @@ pub(super) fn enqueue(conn: &Connection, library: &str, change: Change) -> Resul
 
 pub(super) fn project(conn: &Connection, model: &Model) -> Result<()> {
     conn.execute("UPDATE sync_meta SET recording=0", [])?;
-    conn.execute_batch("DELETE FROM sticker_tags; DELETE FROM usages; DELETE FROM tags; DELETE FROM tag_groups; DELETE FROM stickers;")?;
-    let groups = model.projected(Kind::Group);
-    let tags = model.projected(Kind::Tag);
+    conn.execute_batch("DELETE FROM usages; DELETE FROM categories; DELETE FROM stickers;")?;
+    let categories = model.projected(Kind::Category);
     let stickers = model.projected(Kind::Sticker);
-    let group_ids = model.representatives(Kind::Group);
-    let tag_ids = model.representatives(Kind::Tag);
+    let category_ids = model.representatives(Kind::Category);
     let sticker_ids = model.representatives(Kind::Sticker);
-    for (id, e) in &groups {
+    for (id, e) in &categories {
         conn.execute(
-            "INSERT INTO tag_groups VALUES(?1,?2,?3)",
-            params![
-                id,
-                value(e, "name").as_str().unwrap_or(""),
-                value(e, "position").as_i64().unwrap_or(0)
-            ],
-        )?;
-    }
-    for (id, e) in &tags {
-        let group = value(e, "group_id")
-            .as_str()
-            .and_then(|g| model.representative(&group_ids, Kind::Group, g))
-            .filter(|g| groups.contains_key(g));
-        conn.execute(
-            "INSERT INTO tags VALUES(?1,?2,?3,?4,?5)",
+            "INSERT INTO categories VALUES(?1,?2,?3,?4)",
             params![
                 id,
                 value(e, "name").as_str().unwrap_or(""),
                 value(e, "color").as_str().unwrap_or("#8A8A8A"),
-                group,
                 value(e, "position").as_i64().unwrap_or(0)
             ],
         )?;
     }
     for (id, e) in &stickers {
         let Some(o) = &e.data else { continue };
-        conn.execute("INSERT INTO stickers(id,hash,ext,name,caption,favorite,animated,width,height,byte_size,added_at,deleted_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![id,o.hash,o.ext,value(e,"name").as_str().unwrap_or(""),value(e,"caption").as_str(),value(e,"favorite").as_i64().unwrap_or(0),o.animated,o.width,o.height,o.byte_size,o.added_at,value(e,"deleted_at").as_i64()])?;
-    }
-    let mut links: BTreeMap<(String, String), Register> = BTreeMap::new();
-    for (s, ts) in &model.links {
-        for (t, v) in ts {
-            let (Some(s), Some(t)) = (
-                model.representative(&sticker_ids, Kind::Sticker, s),
-                model.representative(&tag_ids, Kind::Tag, t),
-            ) else {
-                continue;
-            };
-            if !stickers.contains_key(&s) || !tags.contains_key(&t) {
-                continue;
-            }
-            let key = (s, t);
-            if links.get(&key).is_none_or(|old| v.stamp > old.stamp) {
-                links.insert(key, v.clone());
-            }
-        }
-    }
-    for ((s, t), v) in links {
-        if v.value.as_i64() == Some(1) {
-            conn.execute("INSERT INTO sticker_tags VALUES(?1,?2)", params![s, t])?;
-        }
+        let category = value(e, "category_id")
+            .as_str()
+            .and_then(|c| model.representative(&category_ids, Kind::Category, c))
+            .filter(|c| categories.contains_key(c));
+        conn.execute("INSERT INTO stickers(id,hash,ext,name,caption,favorite,animated,width,height,byte_size,added_at,deleted_at,category_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![id,o.hash,o.ext,value(e,"name").as_str().unwrap_or(""),value(e,"caption").as_str(),value(e,"favorite").as_i64().unwrap_or(0),o.animated,o.width,o.height,o.byte_size,o.added_at,value(e,"deleted_at").as_i64(),category])?;
     }
     let mut usages: BTreeMap<(String, String), (i64, i64, i64)> = BTreeMap::new();
     for (original, devices) in &model.usages {

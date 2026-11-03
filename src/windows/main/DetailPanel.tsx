@@ -9,7 +9,7 @@ import { DetailSkeleton, useDelayedLoading } from "../../components/Skeleton";
 import { ReadError } from "../../components/ReadError";
 import { useUiStore } from "../../stores/ui";
 import { CaptionEditor } from "./CaptionEditor";
-import { StickerTags } from "./StickerTags";
+import { StickerCategory } from "./StickerCategory";
 import { StickerImage } from "./StickerImage";
 import { useDragOut } from "./useDragOut";
 import { usePurgeDays } from "./usePurgeDays";
@@ -110,7 +110,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
               <StarIcon size={16} weight={sticker.favorite ? "fill" : "regular"} className={sticker.favorite ? "text-accent" : ""} aria-hidden />
             </Button>
           </div>}
-          <StickerTags key={`tags-${sticker.id}`} sticker={sticker} />
+          <StickerCategory key={`category-${sticker.id}`} sticker={sticker} />
           <CaptionEditor key={`caption-${sticker.id}`} sticker={sticker} />
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
             <dt className="text-ink-secondary">使用次数</dt>

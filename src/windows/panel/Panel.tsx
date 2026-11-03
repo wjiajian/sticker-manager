@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { useSyncStatus, syncLabel, deviceTime, syncStateLabel, restoringLibrary } from "../main/useSyncStatus";
 import { SyncIcon } from "../main/SyncIcon";
 import { ipc, type Sticker } from "../../lib/ipc";
-import { keepFirstStickerPage, useLibraryChangedEvents, useLibraryOverview, useStickerPages, useStickers, useTagSidebar } from "../../lib/queries";
+import { keepFirstStickerPage, useLibraryChangedEvents, useLibraryOverview, useStickerPages, useStickers, useCategories } from "../../lib/queries";
 import { StickerImage } from "../main/StickerImage";
 import { sortStickers, useUsageSnapshot } from "../main/stickerList";
 import { useDragOut } from "../main/useDragOut";
@@ -36,7 +36,7 @@ export function Panel() {
   const overview = useLibraryOverview();
   const recentQuery = useStickers("recent");
   const pages = useStickerPages();
-  const sidebar = useTagSidebar();
+  const categories = useCategories();
   const eventError = useLibraryChangedEvents();
   const actions = usePanelActions();
   const resetActions = actions.reset;
@@ -74,7 +74,7 @@ export function Panel() {
   const allSkeleton = useDelayedLoading(pages.isPending);
   const previews = new Map((empty ? [] : searching ? choices.map((sticker) => ["search", sticker] as const)
     : [...recent.map((sticker) => ["recent", sticker] as const), ...all.map((sticker) => ["all", sticker] as const)])
-    .map(([prefix, sticker]) => [`${prefix}-${sticker.id}`, previewSticker(sticker, sidebar.data)]));
+    .map(([prefix, sticker]) => [`${prefix}-${sticker.id}`, previewSticker(sticker)]));
   const preview = usePreview(previews, actions.busy, text, setError);
 
   useEffect(() => {
@@ -150,11 +150,11 @@ export function Panel() {
     return <PanelTile key={key} id={key} sticker={sticker} number={index === undefined ? undefined : index + 1}
       selectable={prefix !== "all"} selected={activeId === key} copied={actions.copiedKey === key}
       busy={actions.busy} onCopy={() => { void actions.copy(sticker, key); }}
-      preview={preview.tile(key)} description={previewDescription(previewSticker(sticker, sidebar.data))}
+      preview={preview.tile(key)} description={previewDescription(previewSticker(sticker))}
       onDrag={(isPressed) => actions.drag(sticker, isPressed)} />;
   }
 
-  const problem = error ?? actions.error ?? eventError ?? [overview, recentQuery, pages, sidebar, search].find((result) => result.error)?.error;
+  const problem = error ?? actions.error ?? eventError ?? [overview, recentQuery, pages, categories, search].find((result) => result.error)?.error;
 
   return (
     <main className="relative grid h-full w-full grid-cols-1 grid-rows-[36px_minmax(0,1fr)_32px] gap-3 rounded-3xl bg-surface p-3 [&_button]:cursor-pointer" aria-label="表情面板"

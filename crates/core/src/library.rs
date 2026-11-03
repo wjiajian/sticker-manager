@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, Row, params_from_iter};
 use serde::{Deserialize, Serialize};
 
-use crate::{Device, Error, Result, Tag, db, deletion::RETENTION_MS};
+use crate::{Category, Device, Error, Result, db, deletion::RETENTION_MS};
 
 const STICKER_COLUMNS: &str = "s.id, s.name, s.width, s.height, s.byte_size, s.animated,
     s.added_at, s.hash, s.ext, s.favorite, s.deleted_at,
@@ -34,9 +34,9 @@ pub enum LibraryView {
     All,
     Recent,
     Favorites,
-    Untagged,
+    Uncategorized,
     RecentlyDeleted,
-    Tag(String),
+    Category(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -56,7 +56,7 @@ pub struct Sticker {
     pub usage_devices: usize,
     pub last_used_at: Option<i64>,
     pub caption: Option<String>,
-    pub tags: Vec<Tag>,
+    pub category: Option<Category>,
     pub object_path: PathBuf,
     pub thumbnail_path: PathBuf,
 }
@@ -86,7 +86,7 @@ pub struct LibraryOverview {
     pub all: u32,
     pub recent: u32,
     pub favorites: u32,
-    pub untagged: u32,
+    pub uncategorized: u32,
     pub recently_deleted: u32,
 }
 
@@ -133,13 +133,9 @@ impl Library {
                 "s.deleted_at IS NULL AND EXISTS (SELECT 1 FROM usages u WHERE u.sticker_id = s.id)"
             }
             LibraryView::Favorites => "s.deleted_at IS NULL AND s.favorite = 1",
-            LibraryView::Untagged => {
-                "s.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sticker_tags st WHERE st.sticker_id = s.id)"
-            }
+            LibraryView::Uncategorized => "s.deleted_at IS NULL AND s.category_id IS NULL",
             LibraryView::RecentlyDeleted => "s.deleted_at IS NOT NULL",
-            LibraryView::Tag(_) => {
-                "s.deleted_at IS NULL AND EXISTS (SELECT 1 FROM sticker_tags st WHERE st.sticker_id = s.id AND st.tag_id = ?1)"
-            }
+            LibraryView::Category(_) => "s.deleted_at IS NULL AND s.category_id = ?1",
         };
         let order = match view {
             LibraryView::Recent => {
@@ -148,11 +144,11 @@ impl Library {
             LibraryView::RecentlyDeleted => "s.deleted_at DESC, s.added_at DESC, s.rowid DESC",
             _ => "s.added_at DESC, s.rowid DESC",
         };
-        let tag_id = match &view {
-            LibraryView::Tag(id) => Some(id.as_str()),
+        let category_id = match &view {
+            LibraryView::Category(id) => Some(id.as_str()),
             _ => None,
         };
-        self.query_stickers(filter, order, tag_id.as_slice())
+        self.query_stickers(filter, order, category_id.as_slice())
     }
 
     /// 按添加时间倒序分页列出未删除的表情，`after` 为空时从第一页开始。
@@ -184,7 +180,7 @@ impl Library {
         let more = stickers.len() > limit;
         stickers.truncate(limit);
         let ids = serde_json::to_string(&stickers.iter().map(|s| &s.id).collect::<Vec<_>>())?;
-        self.attach_tags(
+        self.attach_categories(
             &mut stickers,
             "s.id IN (SELECT value FROM json_each(?1))",
             [ids],
@@ -210,12 +206,12 @@ impl Library {
                 Sticker::from_row(row, &self.root)
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        self.attach_tags(&mut stickers, filter, params_from_iter(parameters))?;
+        self.attach_categories(&mut stickers, filter, params_from_iter(parameters))?;
         Ok(stickers)
     }
 
-    /// 一次读取这批表情的标签，避免为每张表情单独查询。`scope` 是限定表情 `s` 的条件。
-    fn attach_tags(
+    /// 一次读取这批表情的分类，避免为每张表情单独查询。`scope` 是限定表情 `s` 的条件。
+    fn attach_categories(
         &self,
         stickers: &mut [Sticker],
         scope: &str,
@@ -230,18 +226,17 @@ impl Library {
             .map(|(i, sticker)| (sticker.id.clone(), i))
             .collect();
         let mut statement = self.conn.prepare(&format!(
-            "SELECT t.id, t.name, t.color, t.group_id, t.position, st.sticker_id
-             FROM tags t JOIN sticker_tags st ON st.tag_id = t.id
-             JOIN stickers s ON s.id = st.sticker_id
-             WHERE {scope} ORDER BY t.position, t.id"
+            "SELECT c.id, c.name, c.color, c.position, s.id
+             FROM categories c JOIN stickers s ON s.category_id = c.id
+             WHERE {scope}"
         ))?;
-        let tags = statement.query_map(parameters, |row| {
-            Ok((row.get::<_, String>(5)?, Tag::from_row(row)?))
+        let categories = statement.query_map(parameters, |row| {
+            Ok((row.get::<_, String>(4)?, Category::from_row(row)?))
         })?;
-        for tag in tags {
-            let (sticker_id, tag) = tag?;
+        for category in categories {
+            let (sticker_id, category) = category?;
             if let Some(&index) = indexes.get(&sticker_id) {
-                stickers[index].tags.push(tag);
+                stickers[index].category = Some(category);
             }
         }
         Ok(())
@@ -258,9 +253,8 @@ impl Library {
             favorites: count(
                 "SELECT COUNT(*) FROM stickers WHERE deleted_at IS NULL AND favorite = 1",
             )?,
-            untagged: count(
-                "SELECT COUNT(*) FROM stickers s WHERE s.deleted_at IS NULL
-                 AND NOT EXISTS (SELECT 1 FROM sticker_tags st WHERE st.sticker_id = s.id)",
+            uncategorized: count(
+                "SELECT COUNT(*) FROM stickers WHERE deleted_at IS NULL AND category_id IS NULL",
             )?,
             recently_deleted: count("SELECT COUNT(*) FROM stickers WHERE deleted_at IS NOT NULL")?,
         })
@@ -287,7 +281,7 @@ impl Sticker {
             usage_devices: row.get::<_, u32>(14)? as usize,
             last_used_at: row.get(12)?,
             caption: row.get(13)?,
-            tags: Vec::new(),
+            category: None,
             object_path: root.join("objects").join(format!("{hash}.{ext}")),
             thumbnail_path: root.join("thumbs").join(format!("{hash}.png")),
         })
@@ -342,10 +336,10 @@ mod tests {
             "INSERT INTO stickers (id, hash, ext, name, favorite, width, height, byte_size, added_at, deleted_at) VALUES
                 ('plain', 'h1', 'png', '收到', 0, 1, 1, 1, 30, NULL),
                 ('fav', 'h2', 'gif', '晚安', 1, 1, 1, 1, 20, NULL),
-                ('tagged', 'h3', 'png', '打工', 0, 1, 1, 1, 10, NULL),
+                ('categorized', 'h3', 'png', '打工', 0, 1, 1, 1, 10, NULL),
                 ('deleted', 'h4', 'png', '无语', 1, 1, 1, 1, 40, 50);
-             INSERT INTO tags (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
-             INSERT INTO sticker_tags VALUES ('tagged', 'work');
+             INSERT INTO categories (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
+             UPDATE stickers SET category_id = 'work' WHERE id = 'categorized';
              INSERT INTO usages VALUES
                 ('plain', 'mac', 3, 10), ('plain', 'win', 2, 40),
                 ('fav', 'mac', 1, 20), ('fav', 'win', 1, 30),
@@ -359,17 +353,17 @@ mod tests {
                 .map(|s| s.id)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(ids(LibraryView::All), ["plain", "fav", "tagged"]);
+        assert_eq!(ids(LibraryView::All), ["plain", "fav", "categorized"]);
         assert_eq!(ids(LibraryView::Recent), ["plain", "fav"]);
         assert_eq!(ids(LibraryView::Favorites), ["fav"]);
-        assert_eq!(ids(LibraryView::Untagged), ["plain", "fav"]);
+        assert_eq!(ids(LibraryView::Uncategorized), ["plain", "fav"]);
         assert_eq!(ids(LibraryView::RecentlyDeleted), ["deleted"]);
         let overview = library.overview().unwrap();
         for (view, count) in [
             (LibraryView::All, overview.all),
             (LibraryView::Recent, overview.recent),
             (LibraryView::Favorites, overview.favorites),
-            (LibraryView::Untagged, overview.untagged),
+            (LibraryView::Uncategorized, overview.uncategorized),
             (LibraryView::RecentlyDeleted, overview.recently_deleted),
         ] {
             assert_eq!(ids(view).len(), count as usize);
@@ -388,8 +382,8 @@ mod tests {
                 ('gone', 'h4', 'png', 'gone', 1, 1, 1, 35, 60),
                 ('d', 'h5', 'png', 'd', 1, 1, 1, 30, NULL),
                 ('e', 'h6', 'png', 'e', 1, 1, 1, 20, NULL);
-             INSERT INTO tags (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
-             INSERT INTO sticker_tags VALUES ('b', 'work');",
+             INSERT INTO categories (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
+             UPDATE stickers SET category_id = 'work' WHERE id = 'b';",
         ).unwrap();
         let ids = |page: &StickerPage| {
             page.stickers
@@ -407,7 +401,7 @@ mod tests {
         ).unwrap();
         let second = library.list_stickers_page(first.next.as_ref(), 2).unwrap();
         assert_eq!(ids(&second), ["b", "d"]);
-        assert_eq!(second.stickers[0].tags[0].name, "打工");
+        assert_eq!(second.stickers[0].category.as_ref().unwrap().name, "打工");
         let last = library.list_stickers_page(second.next.as_ref(), 2).unwrap();
         assert_eq!(ids(&last), ["e"]);
         assert_eq!(last.next, None);
@@ -425,10 +419,10 @@ mod tests {
                 "INSERT INTO stickers (id, hash, ext, name, favorite, width, height, byte_size, added_at, deleted_at) VALUES
                      ('plain',   'h1', 'png', '收到',   0, 1, 1, 1, 0, NULL),
                      ('fav',     'h2', 'gif', '晚安',   1, 1, 1, 1, 0, NULL),
-                     ('tagged',  'h3', 'png', '打工',   0, 1, 1, 1, 0, NULL),
+                     ('categorized',  'h3', 'png', '打工',   0, 1, 1, 1, 0, NULL),
                      ('deleted', 'h4', 'png', '无语',   1, 1, 1, 1, 0, 1000);
-                 INSERT INTO tags (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
-                 INSERT INTO sticker_tags VALUES ('tagged', 'work'), ('deleted', 'work');
+                 INSERT INTO categories (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
+                 UPDATE stickers SET category_id = 'work' WHERE id IN ('categorized', 'deleted');
                  INSERT INTO usages VALUES
                      ('plain',   'mac', 3, 10), ('plain', 'win', 2, 20),
                      ('deleted', 'mac', 1, 30);",
@@ -441,7 +435,7 @@ mod tests {
                 all: 3,
                 recent: 1,
                 favorites: 1,
-                untagged: 2,
+                uncategorized: 2,
                 recently_deleted: 1
             }
         );

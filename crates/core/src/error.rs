@@ -35,14 +35,17 @@ pub enum Error {
     #[error("已存在同名{0}，请使用其他名称")]
     DuplicateName(&'static str),
 
-    #[error("标签不存在")]
-    TagUnavailable,
+    #[error("分类不存在")]
+    CategoryUnavailable,
 
-    #[error("标签分组不存在")]
-    TagGroupUnavailable,
+    #[error("“未分类”是保留名称，请使用其他名称")]
+    ReservedCategoryName,
 
-    #[error("请选择八种标签颜色之一")]
-    InvalidTagColor,
+    #[error("分类名称不能以点开头，也不能包含斜杠")]
+    InvalidCategoryName,
+
+    #[error("请选择八种分类颜色之一")]
+    InvalidCategoryColor,
 
     #[error("图片没有可读取的帧")]
     EmptyImage,

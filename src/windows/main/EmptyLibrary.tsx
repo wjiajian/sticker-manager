@@ -27,8 +27,8 @@ export function EmptyLibrary({ view, label, all, sync, busy, onChoose, onSyncSet
     {shortcutAvailable && <p className="text-xs text-ink-secondary">导入后按 {platform === "macos" ? "⌃⌥E" : "Ctrl+Alt+E"} 打开表情面板取用</p>}
   </div>;
 
-  const [title, note] = typeof view === "object" ? [`“${label ?? "标签"}”下还没有表情`, "选中表情后，在详情栏添加这个标签"]
-    : view === "untagged" ? all === 0 ? ["还没有表情", "导入的表情会先出现在这里"] : ["所有表情都打上标签了", null]
+  const [title, note] = typeof view === "object" ? [`“${label ?? "分类"}”下还没有表情`, "选中表情后，在详情栏设置为这个分类"]
+    : view === "uncategorized" ? all === 0 ? ["还没有表情", "导入的表情会先出现在这里"] : ["所有表情都已分类", null]
     : view === "favorites" ? ["还没有收藏的表情", "在右侧详情栏点星标收藏"]
     : view === "recent" ? ["还没有用过表情", "复制或拖出表情后会出现在这里"]
     : view === "recentlyDeleted" ? ["最近删除里没有表情", "删除的表情会在这里保留 30 天"]

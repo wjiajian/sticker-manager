@@ -64,8 +64,8 @@ fn restores_deleted_sticker_without_losing_metadata() {
     let before = library.list_stickers(LibraryView::All).unwrap().remove(0);
     library.conn.execute_batch(
         "UPDATE stickers SET name = '手动名称', caption = '配文', favorite = 1, deleted_at = 10;
-         INSERT INTO tags (id, name, color, position) VALUES ('t', '开心', '#F2B705', 0);
-         INSERT INTO sticker_tags SELECT id, 't' FROM stickers;
+         INSERT INTO categories (id, name, color, position) VALUES ('t', '开心', '#F2B705', 0);
+         UPDATE stickers SET category_id = 't';
          INSERT INTO usages SELECT id, 'mac', 3, 20 FROM stickers;"
     ).unwrap();
 
@@ -82,7 +82,7 @@ fn restores_deleted_sticker_without_losing_metadata() {
             overview.all,
             overview.favorites,
             overview.recent,
-            overview.untagged,
+            overview.uncategorized,
             overview.recently_deleted
         ),
         (1, 1, 1, 0, 0)
