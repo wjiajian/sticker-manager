@@ -1,6 +1,27 @@
 # Windows 构建与验收
 
-## 六项反馈修复（当前产物）
+## 代码审查修复与构建流程调整
+
+2026-11-04，按用户要求移除原“Windows 构建与平台回归”的 push 触发和 macOS 回归作业，改为独立、手动触发的“构建 Windows 安装包”。原 `build-macos.yml` 和 macOS 更新清单脚本未修改。Windows 默认流程与 macOS 对齐：安装依赖、类型检查、版本校验、构建、可选签名、上传产物；勾选 `release` 才发布，`validate` 可额外运行回归检查。Windows 更新使用 `latest-windows.json`，不覆盖 macOS 清单。
+
+| 审查项 | 处理 |
+|---|---|
+| 1、3、5：仓库迁移 | 空当前目录不遮住更早仓库；Windows 通过跨进程文件锁串行化迁移；元数据和目录读取错误向上传递，避免打开空仓库。补充空目录、并发启动、旧路径不是目录的回归测试。 |
+| 2：总路径过长 | 只有存在非法或超长组件时才把对应名称错误视作旧路径不存在；合法组件组成的总路径过长仍报错，读、删、路径检查使用同一判断。 |
+| 4：控制台保留名 | 拒绝 `CONIN$`／`CONOUT$`，测试覆盖写入前拒绝、同步日志尚未生成以及旧日志改名恢复。 |
+| 6：慢拖入来源 | 数据提取与流读取转入 COM 后台线程，通过 `AgileReference` 封送并保留对象。支持异步的来源配对调用 `StartOperation`／`EndOperation`；旧同步来源保留 Drop 生命周期，以 OLE modal wait 派发窗口消息。补充慢源、原引用释放、失败通知及同步来源后台读取测试。 |
+| 7：拖入登记失败 | 自定义拖入登记为可选能力，失败时撤销已登记目标并记录日志，继续创建应用。 |
+| 8：自动触发范围 | 与用户本次明确要求冲突，因此不增加 push／PR 触发；改为两个独立手动构建，不再依赖特性分支自动回归。 |
+| 9：IStream 覆盖 | mock 同时匹配格式、索引和 `tymed`，新增仅提供 IStream 的虚拟文件完整接收测试，错误请求 HGLOBAL 会失败。 |
+| 10：路径文档 | 更新 ADR、README 和打包说明，记录安装版路径、迁移顺序和便携版例外。 |
+
+OLE 生命周期依据：[异步 Shell 数据传输](https://learn.microsoft.com/en-us/windows/win32/shell/datascenarios#dragging-and-dropping-shell-objects-asynchronously)、[等待期间派发窗口消息](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/ne-combaseapi-cowait_flags)。本轮没有操作真实仓库、修改系统设置或执行真实拖拽；此前用户验收属于下述旧构建，不替代本轮自动回归。
+
+验证记录：应用提交 `2fae5c5` 的 [Windows 手动构建](https://github.com/wjiajian/sticker-manager/actions/runs/41841578684) 已通过类型检查、格式、Clippy、全量 Rust 测试和更新清单脚本测试，成功生成带更新签名的 NSIS、便携 ZIP 和 `latest-windows.json`。原 [macOS 工作流](https://github.com/wjiajian/sticker-manager/actions/runs/41840837983) 在 `833bb06` 上通过类型检查并生成 DMG、更新包和 macOS 清单；其后代码修改仅涉及 Windows 分支及测试。两次运行均设置 `release=false`，没有创建或修改 Release。
+
+Windows 产物已下载到 `target/windows-review-artifacts/`：`sticker-manager_0.1.5_x64-setup.exe`（7,645,131 字节）、`sticker-manager_0.1.5_windows-x64-portable.zip`（11,213,517 字节）及独立更新清单。已检查 ZIP 包含 EXE、`portable.flag`、使用说明，清单仅包含 `windows-x86_64`，安装包 URL 与 ASCII 文件名对应。后续收尾提交只调整文档和工作流运行标题，构建步骤未变。
+
+## 六项反馈修复（此前已验收产物）
 
 2026-11-04，用户确认本轮六项反馈均已完成实际测试验收，包括微信／QQ 等聊天软件拖入。下表保留代理执行检查时的证据和范围；其中实际拖拽及任务栏外观现已由用户验收补齐。
 
