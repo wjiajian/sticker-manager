@@ -1,4 +1,4 @@
-# 打包（macOS 14.0 起）
+# 打包
 
 从源码打包。目前只验证过 macOS，没有 Apple 签名和公证。
 
@@ -43,3 +43,30 @@ env HOME="$release_home" TMPDIR="$release_home/tmp" \
 使用二进制的完整路径启动，不通过 Dock 或访达首次启动测试副本，避免丢失隔离环境。偏好设置中的仓库路径应在 `release_home` 下；不要在测试副本中配置同步或凭据，凭据存在仓库的 local 文件夹里，随隔离 HOME 走，但仍不要用测试副本填真实账号。退出测试进程后才清理隔离目录。
 
 挂载检查可用 `hdiutil attach -nobrowse -readonly <DMG路径>`，检查后立即 `hdiutil detach <挂载点>`。DMG、App Translocation 和系统临时目录中的应用不会自动登记自启，也不会消耗首次登记机会；要验证搬到稳定位置后再登记，可用 `ditto` 复制到 `/Users/Shared/` 下专用目录的 `Applications/` 中，仍用上述隔离 HOME 启动，测试完退出并删除副本。不要把验收副本装进 `/Applications`。
+
+## Windows x64 构建与验收
+
+「Windows 构建与平台回归」工作流在 `codex/windows-platform` 分支推送时运行，也支持手动触发。Windows 作业运行前端构建、Rust 格式检查、Clippy 和现有测试，然后上传按提交 SHA 命名的 Debug 程序与 NSIS 安装包，保留 14 天。macOS 作业运行同一套检查并构建 `.app`，用于检查共享代码的兼容性。
+
+Windows 构建命令如下，需要 Rust MSVC 工具链、C++ Build Tools、Windows SDK、Node.js 和项目固定版本的 pnpm。
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm tauri build --debug --no-bundle --target x86_64-pc-windows-msvc -- --locked
+pnpm tauri build --bundles nsis --target x86_64-pc-windows-msvc -- --locked
+```
+
+调试程序位于 `target/x86_64-pc-windows-msvc/debug/sticker-manager.exe`，内嵌构建好的前端，可以直接运行。安装包位于 `target/x86_64-pc-windows-msvc/release/bundle/nsis/`。这条工作流提供构建产物，正式 Release 和自动更新沿用各自的发布流程。
+
+本机要求所有新增环境安装文件位于 D 盘时，开发工具及可配置缓存使用 `D:\Environment`。微软安装器的一部分组件会安装到系统盘，因此本机使用前端检查及 CI 下载产物进行验收，MSVC 编译使用远端 runner。便携 GitHub CLI 的配置目录通过 `GH_CONFIG_DIR` 指向 D 盘；环境激活脚本只为当前进程设置路径和缓存。
+
+真实窗口验收使用 Debug 程序，并设置独立的绝对路径仓库。
+
+```powershell
+$env:STICKER_LIBRARY_DIR = Join-Path 'D:\Environment\sticker-manager-tests' ([guid]::NewGuid().ToString())
+& .\target\x86_64-pc-windows-msvc\debug\sticker-manager.exe
+```
+
+发布版忽略 `STICKER_LIBRARY_DIR`，首次启动还会初始化开机自启，发布版的安装运行验收应单独安排。拖拽功能采用代码检查；系统设置相关场景由用户切换后验证。
+
+Windows 同步文件夹会对非法字符、结尾空格或句点、设备保留名和过长名称给出错误提示。原有名称保留，用户可修改对应的表情名或分类名后重试；网络存储使用原有命名规则。

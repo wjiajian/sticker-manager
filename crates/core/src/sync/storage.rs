@@ -40,6 +40,35 @@ pub fn validate_key(key: &str) -> Result<()> {
     Ok(())
 }
 
+// 仅限制实际写入 Windows 文件系统的路径；网络存储继续使用原有同步名称。
+#[cfg(target_os = "windows")]
+fn validate_windows_file_name(key: &str) -> Result<()> {
+    for name in key.trim_end_matches('/').split('/') {
+        let base = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
+        let base = base.to_ascii_uppercase();
+        let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || base
+                .strip_prefix("COM")
+                .or_else(|| base.strip_prefix("LPT"))
+                .is_some_and(|suffix| {
+                    matches!(
+                        suffix,
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    )
+                });
+        if reserved
+            || name.ends_with([' ', '.'])
+            || name.chars().any(|c| c < ' ' || "<>:\"\\|?*".contains(c))
+            || name.encode_utf16().count() > 255
+        {
+            return Err(Error::Sync(format!(
+                "Windows 同步文件夹不支持名称“{name}”（路径：{key}），请修改该表情或分类的名称后重试"
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct FolderStorage {
     root: PathBuf,
@@ -58,6 +87,8 @@ impl FolderStorage {
     }
     fn path(&self, key: &str) -> Result<PathBuf> {
         validate_key(key)?;
+        #[cfg(target_os = "windows")]
+        validate_windows_file_name(key)?;
         let mut path = self.root.clone();
         for part in Path::new(key).components() {
             path.push(part);

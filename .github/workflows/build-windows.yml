@@ -1,0 +1,81 @@
+name: Windows 构建与平台回归
+
+on:
+  push:
+    branches: [codex/windows-platform]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: 检查版本号一致
+        run: |
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoVersion = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ($packageVersion -ne $tauriVersion -or $packageVersion -ne $cargoVersion) {
+            throw "版本号不一致：package.json $packageVersion，tauri.conf.json $tauriVersion，Cargo.toml $cargoVersion"
+          }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: 构建隔离验收用 Debug 程序
+        run: pnpm tauri build --debug --no-bundle --target x86_64-pc-windows-msvc -- --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sticker-manager-windows-debug-${{ github.sha }}
+          path: target/x86_64-pc-windows-msvc/debug/sticker-manager.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: 构建 NSIS 安装包
+        run: pnpm tauri build --bundles nsis --target x86_64-pc-windows-msvc -- --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sticker-manager-windows-nsis-${{ github.sha }}
+          path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: 构建 macOS 应用验证兼容性
+        run: pnpm tauri build --bundles app -- --locked

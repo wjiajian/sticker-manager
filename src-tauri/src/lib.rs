@@ -304,6 +304,9 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
         .hidden_title(true)
         .traffic_light_position(tauri::LogicalPosition::new(16.0, 33.0));
 
+    #[cfg(target_os = "windows")]
+    let builder = builder.decorations(false);
+
     builder.build()?;
     Ok(())
 }
