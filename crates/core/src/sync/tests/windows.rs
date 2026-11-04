@@ -90,7 +90,7 @@ fn incompatible_destination_is_rejected_before_journaling_and_renaming_recovers(
     let folder = FolderStorage::new(directory.path()).unwrap();
     let manifest = Manifest::create(&folder).unwrap();
     let id = site.import(77);
-    let category = site.lib.lock().unwrap().categorize(&id, "CON").unwrap();
+    let category = site.lib.lock().unwrap().categorize(&id, "CONIN$").unwrap();
     assert!(synchronize(&site.lib, &folder, &manifest.id).is_err());
     let pending: i64 = site
         .lib
@@ -132,7 +132,7 @@ fn renaming_replans_an_incompatible_destination_left_by_an_older_client() {
     let legacy = Legacy(FolderStorage::new(directory.path()).unwrap());
     let manifest = Manifest::create(&legacy).unwrap();
     let id = site.import(78);
-    let category = site.lib.lock().unwrap().categorize(&id, "CON").unwrap();
+    let category = site.lib.lock().unwrap().categorize(&id, "CONOUT$").unwrap();
     assert!(synchronize(&site.lib, &legacy, &manifest.id).is_err());
     let pending: i64 = site
         .lib

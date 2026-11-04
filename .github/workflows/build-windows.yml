@@ -39,6 +39,8 @@ jobs:
 
       - if: inputs.validate
         run: |
+          node --test .github/scripts/windows-updater-manifest.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustup component add rustfmt clippy
           cargo fmt --all --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -54,7 +56,8 @@ jobs:
           RELEASE: ${{ inputs.release }}
         run: |
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-            pnpm tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":true}}'
+            '{"bundle":{"createUpdaterArtifacts":true}}' | Set-Content -LiteralPath updater-build.json -Encoding utf8
+            pnpm tauri build --bundles nsis --config updater-build.json
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             'updater=true' >> $env:GITHUB_OUTPUT
           } elseif ($env:RELEASE -eq 'true') {

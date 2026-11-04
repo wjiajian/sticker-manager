@@ -209,6 +209,11 @@ fn receive_in_background(
         .cast::<IDataObjectAsyncCapability>()
         .ok()
         .filter(|operation| unsafe { operation.GetAsyncMode().is_ok_and(|mode| mode.as_bool()) });
+    let operation_reference = asynchronous
+        .as_ref()
+        .map(AgileReference::new)
+        .transpose()
+        .map_err(|e| e.to_string())?;
     if let Some(operation) = &asynchronous {
         unsafe {
             operation.StartOperation(None).map_err(|e| e.to_string())?;
@@ -220,12 +225,19 @@ fn receive_in_background(
         .spawn(move || {
             let result = (|| {
                 let _apartment = ComApartment::enter().map_err(|e| e.to_string())?;
-                let data = reference.resolve().map_err(|e| e.to_string())?;
-                let result = receive(&data);
-                if is_async {
-                    let operation = data
-                        .cast::<IDataObjectAsyncCapability>()
-                        .map_err(|e| e.to_string())?;
+                // 局部绑定保证错误返回时封送引用也先于 apartment 释放。
+                let reference = reference;
+                let operation_reference = operation_reference;
+                let operation = operation_reference
+                    .as_ref()
+                    .map(AgileReference::resolve)
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
+                let result = reference
+                    .resolve()
+                    .map_err(|e| e.to_string())
+                    .and_then(|data| receive(&data));
+                if let Some(operation) = operation {
                     unsafe {
                         operation
                             .EndOperation(
@@ -237,7 +249,6 @@ fn receive_in_background(
                     }
                 }
                 // reference 也必须在 CoUninitialize 之前释放。
-                drop(data);
                 drop(reference);
                 result
             })();
@@ -757,6 +768,61 @@ mod tests {
             .unwrap();
         assert_eq!(std::fs::read(&received.paths[0]).unwrap(), b"GIF89a");
         assert_eq!(state.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn background_receive_reports_failures_and_finishes_async_operation() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let _apartment = ComApartment::enter().unwrap();
+        let state = Arc::new(AtomicUsize::new(0));
+        let data: IDataObject = Sample {
+            async_state: Some(state.clone()),
+            ..Default::default()
+        }
+        .into();
+        let (send, receive) = std::sync::mpsc::channel();
+        receive_in_background(&data, move |result| {
+            send.send(result.err()).unwrap();
+        })
+        .unwrap();
+        assert!(
+            receive
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .unwrap()
+                .contains("没有提供")
+        );
+        assert_eq!(state.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn synchronous_source_is_read_on_worker_before_drop_returns() {
+        let _apartment = ComApartment::enter().unwrap();
+        let data: IDataObject = Sample {
+            formats: vec![(
+                registered("PNG"),
+                -1,
+                b"png bytes".to_vec(),
+                TYMED_HGLOBAL.0 as u32,
+            )],
+            ..Default::default()
+        }
+        .into();
+        let caller = std::thread::current().id();
+        let (send, receive) = std::sync::mpsc::channel();
+        receive_in_background(&data, move |result| {
+            send.send((std::thread::current().id(), result)).unwrap();
+        })
+        .unwrap();
+        let (worker, received) = receive.try_recv().unwrap();
+        assert_ne!(caller, worker);
+        assert_eq!(
+            std::fs::read(&received.unwrap().paths[0]).unwrap(),
+            b"png bytes"
+        );
     }
 
     #[test]
