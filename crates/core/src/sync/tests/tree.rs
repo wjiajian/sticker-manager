@@ -1106,3 +1106,36 @@ fn devices_seeing_different_versions_do_not_keep_appending_file_ops() {
         5
     );
 }
+
+#[test]
+fn manual_jpeg_extension_is_imported_and_keeps_its_remote_name() {
+    let (s, m) = backend();
+    let a = Site::new();
+    let jpeg = |color: u8| {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            8,
+            6,
+            image::Rgb([color, 9, 9]),
+        ))
+        .write_to(&mut bytes, image::ImageFormat::Jpeg)
+        .unwrap();
+        bytes.into_inner()
+    };
+    s.write("看戏/截图.jpeg", &jpeg(10)).unwrap();
+    s.write("照片.JPEG", &jpeg(200)).unwrap();
+    settle(&[&a], &s, &m);
+    let l = a.lib.lock().unwrap();
+    let all = l.list_stickers(LibraryView::All).unwrap();
+    assert_eq!(all.len(), 2);
+    let shot = all.iter().find(|x| x.name == "截图").unwrap();
+    assert_eq!(shot.category.as_ref().unwrap().name, "看戏");
+    let photo = all.iter().find(|x| x.name == "照片").unwrap();
+    assert!(photo.category.is_none());
+    let mut keys = remote_images(&s)
+        .into_iter()
+        .map(|f| f.key)
+        .collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(keys, ["照片.JPEG", "看戏/截图.jpeg"]);
+}

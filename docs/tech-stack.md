@@ -75,7 +75,7 @@
 
 ## 仓库与数据
 
-- 仓库位置固定：macOS `~/Library/Application Support/com.shaojian.sticker-manager/`，Windows `%APPDATA%\com.shaojian.sticker-manager\`，文件夹名是应用标识符（[ADR 0002](adr/0002-managed-library.md)）。
+- 仓库位置固定：macOS `~/Library/Application Support/com.wjiajian.sticker-manager/`，Windows `%APPDATA%\com.wjiajian.sticker-manager\`，文件夹名是应用标识符（[ADR 0002](adr/0002-managed-library.md)）。
 - 表情文件按内容哈希存放；导入已有的图会合并，提示"新增 N 张，M 张已存在"。
 - 第一版支持的格式：PNG、JPG、WebP（含动图）、GIF、APNG；不支持视频。
 - 支持直接选中或拖入 `.zip`（zip 9.2.2，关闭默认 features、仅 `deflate`，纯 Rust）。包内递归识别图片，隐藏 / 系统文件和 `__MACOSX/` 忽略；嵌套压缩包及其他格式跳过，文件夹中的 `.zip` 不展开。文件名优先 UTF-8，非 UTF-8 用 GB18030 解码（encoding_rs）。不支持加密及 Deflate / Stored 以外的压缩方式；实际解压量限制为单条目 100 MB、整包 2 GB、10000 条目。

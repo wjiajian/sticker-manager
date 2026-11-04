@@ -6,7 +6,7 @@
 
 把表情集中收进一个仓库，归类、快速取用，并在自己的设备之间同步。
 
-![版本 0.1.3](https://img.shields.io/badge/版本-0.1.3-blue)
+![版本 0.1.4](https://img.shields.io/badge/版本-0.1.4-blue)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
 
@@ -34,7 +34,7 @@
 3. 在任何应用里按 `⌃⌥E` 呼出面板，搜索后单击表情复制，再粘贴到聊天里。
 4. 有多台设备的话，在“偏好设置 › 同步”里选一种存储，另一台设备连到同一个地方就会合并。
 
-仓库默认放在 `~/Library/Application Support/com.shaojian.sticker-manager/`，同步只传表情和它的整理信息，不上传到任何第三方服务，除非你自己选了某个云存储。
+仓库默认放在 `~/Library/Application Support/com.wjiajian.sticker-manager/`，同步只传表情和它的整理信息，不上传到任何第三方服务，除非你自己选了某个云存储。
 
 ## 开发
 

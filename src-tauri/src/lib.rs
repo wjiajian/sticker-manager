@@ -15,6 +15,7 @@ mod credentials;
 mod desktop;
 mod export;
 mod geometry;
+mod identifier;
 mod imports;
 #[cfg(target_os = "macos")]
 mod menu;
@@ -252,6 +253,22 @@ fn open_library(app: &tauri::App) -> Result<(Library, PathBuf), (PathBuf, String
         .path()
         .app_data_dir()
         .map_err(|error| (PathBuf::from("（无法确定仓库路径）"), error.to_string()))?;
+    // 搬不过来就停在启动失败页：直接打开空的新仓库会像是表情全丢了，写入后也没法再自动搬。
+    match identifier::migrate_previous_library(&root) {
+        Ok(true) => eprintln!(
+            "已把旧仓库从 {} 搬到 {}",
+            identifier::PREVIOUS_IDENTIFIER,
+            root.display()
+        ),
+        Ok(false) => {}
+        Err(error) => {
+            let reason = format!(
+                "无法把旧仓库（{}）搬到新位置：{error}",
+                identifier::PREVIOUS_IDENTIFIER
+            );
+            return Err((root, reason));
+        }
+    }
     Ok((
         Library::open(&root).map_err(|error| (root.clone(), startup::reason(error)))?,
         root,

@@ -23,7 +23,7 @@ pub(super) fn image(key: &str) -> Option<(Option<&str>, &str, &str)> {
     let (name, ext) = file.rsplit_once('.')?;
     if !matches!(
         ext.to_ascii_lowercase().as_str(),
-        "png" | "jpg" | "gif" | "webp"
+        "png" | "jpg" | "jpeg" | "gif" | "webp"
     ) || name.is_empty()
     {
         return None;
