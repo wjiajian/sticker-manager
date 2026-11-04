@@ -380,7 +380,7 @@ pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
         BOOL(1)
     }
     unsafe {
-        EnumChildWindows(
+        let _ = EnumChildWindows(
             Some(root),
             Some(collect),
             LPARAM(&mut handles as *mut _ as isize),
@@ -419,6 +419,7 @@ pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::windows::ffi::OsStrExt;
     use windows::Win32::{
         Foundation::E_NOTIMPL,
         System::{
@@ -505,11 +506,13 @@ mod tests {
     }
 
     fn file_descriptor(name: &str) -> Vec<u8> {
-        let mut descriptor = FILEDESCRIPTORW::default();
         let name: Vec<_> = name.encode_utf16().collect();
         let mut filename = [0u16; 260];
         filename[..name.len()].copy_from_slice(&name);
-        descriptor.cFileName = filename;
+        let descriptor = FILEDESCRIPTORW {
+            cFileName: filename,
+            ..Default::default()
+        };
         let mut data = 1u32.to_le_bytes().to_vec();
         data.extend_from_slice(unsafe {
             std::slice::from_raw_parts(
@@ -518,6 +521,37 @@ mod tests {
             )
         });
         data
+    }
+
+    #[test]
+    fn file_paths_keep_the_source_file_and_streams_keep_all_chunks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("收到.png");
+        std::fs::write(&path, b"original").unwrap();
+        let mut hdrop = 20u32.to_le_bytes().to_vec();
+        hdrop.extend_from_slice(&[0; 12]);
+        hdrop.extend_from_slice(&1u32.to_le_bytes());
+        for value in path.as_os_str().encode_wide().chain([0, 0]) {
+            hdrop.extend_from_slice(&value.to_le_bytes());
+        }
+        let data: IDataObject = Sample {
+            formats: vec![(15, -1, hdrop)],
+        }
+        .into();
+        let received = receive(&data).unwrap();
+        assert_eq!(received.paths, [path.clone()]);
+        drop(received);
+        assert_eq!(std::fs::read(path).unwrap(), b"original");
+
+        let content: Vec<u8> = (0..150_000).map(|n| (n % 251) as u8).collect();
+        let stream =
+            unsafe { windows::Win32::UI::Shell::SHCreateMemStream(Some(&content)) }.unwrap();
+        let mut medium = Medium(STGMEDIUM {
+            tymed: TYMED_ISTREAM.0 as u32,
+            ..Default::default()
+        });
+        medium.0.u.pstm = std::mem::ManuallyDrop::new(Some(stream));
+        assert_eq!(bytes(&medium).unwrap(), content);
     }
 
     #[test]
