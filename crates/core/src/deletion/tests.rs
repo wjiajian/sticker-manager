@@ -53,7 +53,10 @@ fn deletion_updates_views_search_and_counts_without_removing_the_category() {
     let mut library = library(dir.path());
     add_metadata(&mut library, "one");
     let tag = library.sticker("one").unwrap().category.unwrap();
-    assert_eq!(ids(&library, LibraryView::Category(tag.id.clone())), ["one"]);
+    assert_eq!(
+        ids(&library, LibraryView::Category(tag.id.clone())),
+        ["one"]
+    );
     assert_eq!(library.search_stickers("收到").unwrap().len(), 1);
     assert_eq!(
         library.overview().unwrap(),
@@ -206,17 +209,15 @@ fn purging_cascades_metadata_and_removes_both_files() {
         library.sticker("one"),
         Err(Error::StickerUnavailable)
     ));
-    for table in ["usages"] {
-        let count: i64 = library
-            .conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table} WHERE sticker_id = 'one'"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 0);
-    }
+    let count: i64 = library
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM usages WHERE sticker_id = 'one'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
     assert!(!sticker.object_path.exists());
     assert!(!sticker.thumbnail_path.exists());
     assert_eq!(library.categories().unwrap().len(), 1);

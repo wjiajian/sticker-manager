@@ -42,7 +42,12 @@ impl Library {
 fn match_rank(sticker: &Sticker, query: &str) -> u8 {
     std::iter::once(sticker.name.as_str())
         .chain(sticker.caption.as_deref())
-        .chain(sticker.category.as_ref().map(|category| category.name.as_str()))
+        .chain(
+            sticker
+                .category
+                .as_ref()
+                .map(|category| category.name.as_str()),
+        )
         .map(|value| {
             if value.eq_ignore_ascii_case(query) {
                 0

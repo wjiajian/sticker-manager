@@ -7,8 +7,8 @@ use std::sync::Mutex;
 
 use serde::{Serialize, Serializer};
 use sticker_core::{
-    ImportReport, Library, LibraryOverview, LibraryView, Sticker, StickerCursor, StickerPage,
-    Category, CategorySummary,
+    Category, CategorySummary, ImportReport, Library, LibraryOverview, LibraryView, Sticker,
+    StickerCursor, StickerPage,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -182,7 +182,11 @@ pub async fn set_sticker_category(
 
 #[tauri::command]
 pub async fn set_sticker_name(app: AppHandle, id: String, name: String) -> CommandResult<()> {
-    with_library(app, move |library| Ok(library.set_sticker_name(&id, &name)?)).await
+    with_library(
+        app,
+        move |library| Ok(library.set_sticker_name(&id, &name)?),
+    )
+    .await
 }
 
 #[tauri::command]

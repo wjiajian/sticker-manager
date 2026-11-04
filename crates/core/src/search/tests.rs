@@ -56,7 +56,7 @@ fn treats_wildcards_and_escape_characters_literally_in_every_field() {
         insert(&library, &tag, "标签匹配", None, 3);
         if !literal.contains('\\') {
             library
-                .create_category_and_set_stickers(&[tag.clone()], literal)
+                .create_category_and_set_stickers(std::slice::from_ref(&tag), literal)
                 .unwrap();
         }
     }
@@ -118,7 +118,9 @@ fn returns_the_category_and_the_same_sticker_data_as_listing() {
     let mut library = Library::open(dir.path()).unwrap();
     insert(&library, "one", "表情名称", Some("收到"), 1);
     let category = library.create_category("开心", Some("#F2B705")).unwrap();
-    library.set_sticker_category("one", Some(&category.id)).unwrap();
+    library
+        .set_sticker_category("one", Some(&category.id))
+        .unwrap();
     library.record_usage("one").unwrap();
 
     let searched = library.search_stickers("开心 收到").unwrap();

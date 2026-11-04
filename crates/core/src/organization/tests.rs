@@ -41,7 +41,11 @@ fn creates_renames_recolors_and_deletes_categories() {
     let listed = library.categories().unwrap();
     let renamed = &listed[0].category;
     assert_eq!(
-        (renamed.name.as_str(), renamed.color.as_str(), renamed.position),
+        (
+            renamed.name.as_str(),
+            renamed.color.as_str(),
+            renamed.position
+        ),
         ("Happy", CATEGORY_COLORS[3], category.position)
     );
     library.delete_category(&category.id).unwrap();
@@ -105,9 +109,7 @@ fn assigns_only_palette_colors_in_order_and_wraps() {
     let dir = tempfile::tempdir().unwrap();
     let mut library = library(dir.path());
     for i in 0..10 {
-        let category = library
-            .create_category(&format!("分类{i}"), None)
-            .unwrap();
+        let category = library.create_category(&format!("分类{i}"), None).unwrap();
         assert_eq!(category.color, CATEGORY_COLORS[i % CATEGORY_COLORS.len()]);
         assert_eq!(category.position, i as i64);
     }
@@ -202,7 +204,10 @@ fn categories_are_ordered_by_position_and_exclude_deleted_from_counts() {
         .map(|c| c.category.id.as_str())
         .collect::<Vec<_>>();
     assert_eq!(order, [earlier.id, shared.id, unused.id]);
-    assert_eq!((listed[1].sticker_count, listed[1].total_sticker_count), (2, 3));
+    assert_eq!(
+        (listed[1].sticker_count, listed[1].total_sticker_count),
+        (2, 3)
+    );
     assert_eq!(listed[2].sticker_count, 0);
 }
 
@@ -212,7 +217,9 @@ fn category_view_lists_only_active_matches_with_category_and_caption() {
     let mut library = library(dir.path());
     let category = library.create_category("回复", None).unwrap();
     for id in ["one", "two", "deleted"] {
-        library.set_sticker_category(id, Some(&category.id)).unwrap();
+        library
+            .set_sticker_category(id, Some(&category.id))
+            .unwrap();
     }
     library.set_sticker_caption("two", "  收到  ").unwrap();
     mark_deleted(&library);
@@ -335,7 +342,10 @@ fn creating_and_setting_is_atomic_and_survives_reopening() {
         .create_category_and_set_stickers(&["one".into()], "  回复 ")
         .unwrap();
     assert_eq!(count, 1);
-    assert_eq!(library.sticker("one").unwrap().category, Some(category.clone()));
+    assert_eq!(
+        library.sticker("one").unwrap().category,
+        Some(category.clone())
+    );
     assert_eq!(library.overview().unwrap().uncategorized, 2);
     // 同名分类复用，不报重名。
     let (same, count) = library
@@ -359,7 +369,13 @@ fn creating_and_setting_is_atomic_and_survives_reopening() {
 
 #[test]
 fn library_view_wire_format_preserves_fixed_views_and_accepts_category_ids() {
-    for value in ["all", "recent", "favorites", "uncategorized", "recentlyDeleted"] {
+    for value in [
+        "all",
+        "recent",
+        "favorites",
+        "uncategorized",
+        "recentlyDeleted",
+    ] {
         let view: LibraryView = serde_json::from_value(serde_json::json!(value)).unwrap();
         assert!(!matches!(view, LibraryView::Category(_)));
     }
@@ -383,7 +399,9 @@ fn batch_set_is_atomic_idempotent_skips_deleted_and_records_operations() {
     assert_eq!(library.local_revision().unwrap(), before + 3); // 分类 create + 两条表情设置
     let revision = library.local_revision().unwrap();
     assert_eq!(
-        library.set_stickers_category(&ids, Some(&category.id)).unwrap(),
+        library
+            .set_stickers_category(&ids, Some(&category.id))
+            .unwrap(),
         0
     );
     let (same, count) = library
@@ -392,7 +410,11 @@ fn batch_set_is_atomic_idempotent_skips_deleted_and_records_operations() {
     assert_eq!((same.id, count), (category.id.clone(), 0));
     assert_eq!(library.local_revision().unwrap(), revision);
     assert!(library.sticker("deleted").unwrap().category.is_none());
-    assert!(library.set_stickers_category(&ids, Some("missing")).is_err());
+    assert!(
+        library
+            .set_stickers_category(&ids, Some("missing"))
+            .is_err()
+    );
     assert!(library.create_category_and_set_stickers(&ids, " ").is_err());
     assert_eq!(library.local_revision().unwrap(), revision);
     library.conn.execute_batch("CREATE TRIGGER reject_second BEFORE UPDATE OF category_id ON stickers WHEN NEW.id='two' BEGIN SELECT RAISE(ABORT,'test rollback'); END;").unwrap();

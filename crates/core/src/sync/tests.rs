@@ -66,10 +66,23 @@ impl Site {
     }
 }
 fn remote_images(s: &dyn Storage) -> Vec<storage::FileEntry> {
-    s.list("").unwrap().into_iter().filter(|f| paths::image(&f.key).is_some()).collect()
+    s.list("")
+        .unwrap()
+        .into_iter()
+        .filter(|f| paths::image(&f.key).is_some())
+        .collect()
 }
 fn remote_key(site: &Site, id: &str) -> String {
-    site.lib.lock().unwrap().conn.query_row("SELECT path FROM sync_path_cache WHERE sticker_id=?1 ORDER BY path LIMIT 1", [id], |r|r.get(0)).unwrap()
+    site.lib
+        .lock()
+        .unwrap()
+        .conn
+        .query_row(
+            "SELECT path FROM sync_path_cache WHERE sticker_id=?1 ORDER BY path LIMIT 1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
 }
 fn backend() -> (MemoryStorage, Manifest) {
     let s = MemoryStorage::default();
@@ -141,10 +154,8 @@ fn remote_category(device: &str, id: &str, at: i64, name: &str) -> Change {
             entity: Kind::Category,
             id: id.into(),
             data: None,
-            fields: serde_json::from_value(
-                json!({"name":name,"color":"#F2B705","position":0}),
-            )
-            .unwrap(),
+            fields: serde_json::from_value(json!({"name":name,"color":"#F2B705","position":0}))
+                .unwrap(),
         },
     )
 }
@@ -185,20 +196,8 @@ fn two_library_end_to_end(s: &dyn Storage) {
     a.lib.lock().unwrap().restore_sticker(&y).unwrap();
     a.sync(s, &m);
     b.sync(s, &m);
-    let t1 = a
-        .lib
-        .lock()
-        .unwrap()
-        .categorize(&x, "Shared")
-        .unwrap()
-        .id;
-    let t2 = b
-        .lib
-        .lock()
-        .unwrap()
-        .categorize(&y, "shared")
-        .unwrap()
-        .id;
+    let t1 = a.lib.lock().unwrap().categorize(&x, "Shared").unwrap().id;
+    let t2 = b.lib.lock().unwrap().categorize(&y, "shared").unwrap().id;
     for _ in 0..3 {
         a.sync(s, &m);
         b.sync(s, &m);
@@ -212,7 +211,11 @@ fn two_library_end_to_end(s: &dyn Storage) {
     assert_eq!(l.sticker(&x).unwrap().category.as_ref().unwrap().id, merged);
     let emptied = l.categories().unwrap();
     assert_eq!(
-        emptied.iter().find(|c| c.category.id == tag).unwrap().sticker_count,
+        emptied
+            .iter()
+            .find(|c| c.category.id == tag)
+            .unwrap()
+            .sticker_count,
         0
     );
     drop(l);
@@ -368,12 +371,19 @@ fn missing_objects_and_cross_device_dependencies_wait_and_retry_without_new_segm
     let report = c.sync(&s, &m);
     assert!(report.pending > 0);
     assert_eq!(c.lib.lock().unwrap().overview().unwrap().all, 0);
-    s.write(&key, b"truncated image")
-        .unwrap();
+    s.write(&key, b"truncated image").unwrap();
     assert!(c.sync(&s, &m).pending > 0);
     s.write(&key, &object).unwrap();
     assert_eq!(c.sync(&s, &m).pending, 0);
-    assert_eq!(c.lib.lock().unwrap().sticker(&id).unwrap().category.is_some(), true);
+    assert!(
+        c.lib
+            .lock()
+            .unwrap()
+            .sticker(&id)
+            .unwrap()
+            .category
+            .is_some()
+    );
 }
 
 #[test]
@@ -475,8 +485,11 @@ fn newer_format_and_cloned_device_identity_stop_before_writes() {
     ));
     let mut newer = m.clone();
     newer.format = 3;
-    s.write(".sticker-manager/library.json", &serde_json::to_vec(&newer).unwrap())
-        .unwrap();
+    s.write(
+        ".sticker-manager/library.json",
+        &serde_json::to_vec(&newer).unwrap(),
+    )
+    .unwrap();
     assert!(matches!(
         synchronize(&a.lib, &s, &m.id),
         Err(Error::SyncUpgrade(_))
@@ -502,16 +515,48 @@ fn categories_fields_delete_and_sticker_category_dependency() {
         .set_category_color(&category, "#E5484D")
         .unwrap();
     settle(&[&a, &b], &s, &m);
-    let c = a.lib.lock().unwrap().categories().unwrap().remove(0).category;
+    let c = a
+        .lib
+        .lock()
+        .unwrap()
+        .categories()
+        .unwrap()
+        .remove(0)
+        .category;
     assert_eq!(c.name, "新名字");
     assert_eq!(c.color, "#E5484D");
     a.lib.lock().unwrap().delete_category(&category).unwrap();
     let delayed_device = Uuid::new_v4().to_string();
-    write_ops(&s, &delayed_device, 1, &[change(unix_millis().unwrap()+1000, &delayed_device,
-        Action::Set {entity:Kind::Category,id:category.clone(),field:"name".into(),value:json!("迟到改名")})]);
+    write_ops(
+        &s,
+        &delayed_device,
+        1,
+        &[change(
+            unix_millis().unwrap() + 1000,
+            &delayed_device,
+            Action::Set {
+                entity: Kind::Category,
+                id: category.clone(),
+                field: "name".into(),
+                value: json!("迟到改名"),
+            },
+        )],
+    );
     settle(&[&b, &a], &s, &m);
-    assert!(a.lib.lock().unwrap().sticker(&id).unwrap().category.is_none());
-    assert!(a.lib.lock().unwrap().categories().unwrap().is_empty(), "{:?}",a.state());
+    assert!(
+        a.lib
+            .lock()
+            .unwrap()
+            .sticker(&id)
+            .unwrap()
+            .category
+            .is_none()
+    );
+    assert!(
+        a.lib.lock().unwrap().categories().unwrap().is_empty(),
+        "{:?}",
+        a.state()
+    );
     assert_eq!(a.state(), b.state());
 }
 
@@ -526,13 +571,18 @@ fn baseline_migration_clocks_zero_snapshot_retains_stamps_and_switches_library()
     c.execute_batch(include_str!("../migrations/0001_init.sql"))
         .unwrap();
     c.pragma_update(None, "user_version", 1).unwrap();
-    c.execute("INSERT INTO tags VALUES('old','旧分类','#F2B705',NULL,0)", [])
-        .unwrap();
+    c.execute(
+        "INSERT INTO tags VALUES('old','旧分类','#F2B705',NULL,0)",
+        [],
+    )
+    .unwrap();
     drop(c);
     let mut l = Library::open(&root).unwrap();
     let (_, model) = store::load(&l.conn).unwrap();
     assert_eq!(
-        model.entities[&Kind::Category]["old"].fields["name"].stamp.at,
+        model.entities[&Kind::Category]["old"].fields["name"]
+            .stamp
+            .at,
         0
     );
     l.rename_category("old", "新分类").unwrap();
@@ -583,8 +633,11 @@ fn every_public_mutation_is_captured_and_transaction_rollback_has_no_log() {
     changed!(l.delete_sticker(&id));
     changed!(l.purge_sticker(&id));
     let tx = l.conn.unchecked_transaction().unwrap();
-    tx.execute("INSERT INTO categories VALUES('rollback','回滚','#F2B705',0)", [])
-        .unwrap();
+    tx.execute(
+        "INSERT INTO categories VALUES('rollback','回滚','#F2B705',0)",
+        [],
+    )
+    .unwrap();
     drop(tx);
     assert_eq!(l.local_revision().unwrap(), last);
     drop(l);
@@ -625,18 +678,33 @@ fn folder_validation_atomic_files_and_original_repair() {
     s.write("a/file", b"first").unwrap();
     s.write("a/file", b"second").unwrap();
     assert_eq!(s.read("a/file").unwrap().unwrap(), b"second");
-    assert_eq!(s.list("").unwrap().into_iter().filter(|f|!f.key.ends_with('/')).count(), 1);
+    assert_eq!(
+        s.list("")
+            .unwrap()
+            .into_iter()
+            .filter(|f| !f.key.ends_with('/'))
+            .count(),
+        1
+    );
     assert!(s.write("../outside", b"no").is_err());
     let (s, m) = backend();
     let id = a.import(7);
     a.sync(&s, &m);
-    let key = remote_key(&a,&id);
+    let key = remote_key(&a, &id);
     s.delete(&key).unwrap();
-    a.sync(&s,&m);
-    assert!(a.lib.lock().unwrap().sticker(&id).unwrap().deleted_at.is_some());
+    a.sync(&s, &m);
+    assert!(
+        a.lib
+            .lock()
+            .unwrap()
+            .sticker(&id)
+            .unwrap()
+            .deleted_at
+            .is_some()
+    );
     assert!(s.read(&key).unwrap().is_none());
     a.lib.lock().unwrap().restore_sticker(&id).unwrap();
-    a.sync(&s,&m);
+    a.sync(&s, &m);
     assert!(s.read(&key).unwrap().is_some());
 }
 
@@ -659,7 +727,9 @@ fn backend_io_never_holds_library_lock_and_failure_retries_the_same_segment() {
         fn write(&self, k: &str, b: &[u8]) -> Result<()> {
             assert!(self.lib.try_lock().is_ok());
             self.inner.write(k, b)?;
-            if k.starts_with(".sticker-manager/ops/") && self.fail.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            if k.starts_with(".sticker-manager/ops/")
+                && self.fail.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
                 return Err(Error::Sync("模拟写成后未记账".into()));
             }
             Ok(())
@@ -702,7 +772,11 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
             for color in 10..13 {
                 a.import(color);
             }
-            a.lib.lock().unwrap().create_category("共同分类", None).unwrap();
+            a.lib
+                .lock()
+                .unwrap()
+                .create_category("共同分类", None)
+                .unwrap();
         }
         s.hold(true);
         for _ in 0..120 {
@@ -712,24 +786,35 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
             if action == 0 {
                 site.import((10 + next() % 3) as u8);
             } else if action >= 14 {
-                let files=remote_images(&s);
-                if action==17 {
-                    let path=format!("手建/{}.png",next()%3);
-                    s.write(&path,&tree::png((50+next()%3) as u8)).unwrap();s.deliver(&path);
-                } else if let Some(file)=files.get(next() as usize % files.len().max(1)) {
-                    let bytes=s.read(&file.key).unwrap().unwrap();
-                    if action==14 {
-                        let path=format!("远端移动/{}.png",next()%5);
-                        s.write(&path,&bytes).unwrap();s.deliver(&path);
-                        s.delete(&file.key).unwrap();s.deliver(&file.key);
-                    } else if action==15 {
-                        s.delete(&file.key).unwrap();s.deliver(&file.key);
-                    } else if let Some((folder,_))=file.key.split_once('/') {
-                        let new_folder=format!("整目录{}",next()%3);
-                        for file in files.iter().filter(|f|f.key.starts_with(&format!("{folder}/"))) {
-                            let path=format!("{new_folder}/{}",file.key.split_once('/').unwrap().1);
-                            s.write(&path,&s.read(&file.key).unwrap().unwrap()).unwrap();s.deliver(&path);
-                            s.delete(&file.key).unwrap();s.deliver(&file.key);
+                let files = remote_images(&s);
+                if action == 17 {
+                    let path = format!("手建/{}.png", next() % 3);
+                    s.write(&path, &tree::png((50 + next() % 3) as u8)).unwrap();
+                    s.deliver(&path);
+                } else if let Some(file) = files.get(next() as usize % files.len().max(1)) {
+                    let bytes = s.read(&file.key).unwrap().unwrap();
+                    if action == 14 {
+                        let path = format!("远端移动/{}.png", next() % 5);
+                        s.write(&path, &bytes).unwrap();
+                        s.deliver(&path);
+                        s.delete(&file.key).unwrap();
+                        s.deliver(&file.key);
+                    } else if action == 15 {
+                        s.delete(&file.key).unwrap();
+                        s.deliver(&file.key);
+                    } else if let Some((folder, _)) = file.key.split_once('/') {
+                        let new_folder = format!("整目录{}", next() % 3);
+                        for file in files
+                            .iter()
+                            .filter(|f| f.key.starts_with(&format!("{folder}/")))
+                        {
+                            let path =
+                                format!("{new_folder}/{}", file.key.split_once('/').unwrap().1);
+                            s.write(&path, &s.read(&file.key).unwrap().unwrap())
+                                .unwrap();
+                            s.deliver(&path);
+                            s.delete(&file.key).unwrap();
+                            s.deliver(&file.key);
                         }
                     }
                 }
@@ -742,8 +827,7 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
                     .map(|v| v.id.clone());
                 match (action, id) {
                     (1, Some(id)) => {
-                        let _ = l
-                            .categorize(&id, if next() % 2 == 0 { "same" } else { "SAME" });
+                        let _ = l.categorize(&id, if next() % 2 == 0 { "same" } else { "SAME" });
                     }
                     (2, Some(id)) => {
                         l.set_sticker_caption(&id, &format!("配文{}", next() % 5))
@@ -777,10 +861,24 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
                     (9, Some(id)) => {
                         l.set_sticker_category(&id, None).unwrap();
                     }
-                    (10, _) => { let _ = l.create_category("共同分类", None); }
-                    (11, Some(id)) => {l.set_sticker_name(&id,&format!("名称 {}",next()%3)).unwrap();}
-                    (12, _) => {if let Some(c)=l.categories().unwrap().first() {let _=l.rename_category(&c.category.id,&format!("分类 {}",next()%3));}}
-                    (13, _) => {if let Some(c)=l.categories().unwrap().first() {l.delete_category(&c.category.id).unwrap();}}
+                    (10, _) => {
+                        let _ = l.create_category("共同分类", None);
+                    }
+                    (11, Some(id)) => {
+                        l.set_sticker_name(&id, &format!("名称 {}", next() % 3))
+                            .unwrap();
+                    }
+                    (12, _) => {
+                        if let Some(c) = l.categories().unwrap().first() {
+                            let _ =
+                                l.rename_category(&c.category.id, &format!("分类 {}", next() % 3));
+                        }
+                    }
+                    (13, _) => {
+                        if let Some(c) = l.categories().unwrap().first() {
+                            l.delete_category(&c.category.id).unwrap();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -859,13 +957,7 @@ fn tie_breaker_field_positions_and_relationship_lww_are_order_independent() {
     let a = Site::new();
     let b = Site::new();
     let id = a.import(31);
-    let tag = a
-        .lib
-        .lock()
-        .unwrap()
-        .categorize(&id, "关系")
-        .unwrap()
-        .id;
+    let tag = a.lib.lock().unwrap().categorize(&id, "关系").unwrap().id;
     settle(&[&a, &b], &s, &m);
     a.lib
         .lock()
@@ -873,14 +965,30 @@ fn tie_breaker_field_positions_and_relationship_lww_are_order_independent() {
         .set_sticker_category(&id, None)
         .unwrap();
     settle(&[&a, &b], &s, &m);
-    assert!(b.lib.lock().unwrap().sticker(&id).unwrap().category.is_none());
+    assert!(
+        b.lib
+            .lock()
+            .unwrap()
+            .sticker(&id)
+            .unwrap()
+            .category
+            .is_none()
+    );
     b.lib
         .lock()
         .unwrap()
         .set_sticker_category(&id, Some(&tag))
         .unwrap();
     settle(&[&b, &a], &s, &m);
-    assert!(a.lib.lock().unwrap().sticker(&id).unwrap().category.is_some());
+    assert!(
+        a.lib
+            .lock()
+            .unwrap()
+            .sticker(&id)
+            .unwrap()
+            .category
+            .is_some()
+    );
 }
 
 #[test]
@@ -955,9 +1063,7 @@ fn pending_reference_can_arrive_before_its_creation_on_another_device() {
     write_ops(&s, &e, 1, &[remote_category(&e, "late", 1, "创建晚到")]);
     assert_eq!(a.sync(&s, &m).pending, 0);
     assert_eq!(
-        a.lib.lock().unwrap().categories().unwrap()[0]
-            .category
-            .name,
+        a.lib.lock().unwrap().categories().unwrap()[0].category.name,
         "修改先到"
     );
 }
@@ -1034,7 +1140,10 @@ fn reimport_on_another_device_survives_merge_with_delayed_purge() {
     b.sync(&s, &m);
     let a_device = a.lib.lock().unwrap().device.id.clone();
     let mut delayed = Vec::new();
-    for f in s.list(&format!(".sticker-manager/ops/{a_device}/")).unwrap() {
+    for f in s
+        .list(&format!(".sticker-manager/ops/{a_device}/"))
+        .unwrap()
+    {
         if !before.contains(&f.key) {
             delayed.push((f.key.clone(), s.read(&f.key).unwrap().unwrap()));
             s.delete(&f.key).unwrap();
@@ -1109,11 +1218,7 @@ fn late_joiner_keeps_its_copy_of_an_image_purged_after_sync() {
     let a = Site::new();
     let b = Site::new();
     let old = b.import(35);
-    b.lib
-        .lock()
-        .unwrap()
-        .categorize(&old, "删除前")
-        .unwrap();
+    b.lib.lock().unwrap().categorize(&old, "删除前").unwrap();
     b.sync(&s, &m);
     {
         let mut l = b.lib.lock().unwrap();
@@ -1188,10 +1293,16 @@ fn incomplete_manifest_and_device_wait_without_applying_partial_data() {
     assert_eq!(report.pending, 1);
     assert!(storage.list(".sticker-manager/ops/").unwrap().is_empty());
     storage
-        .write(".sticker-manager/library.json", &serde_json::to_vec(&manifest).unwrap())
+        .write(
+            ".sticker-manager/library.json",
+            &serde_json::to_vec(&manifest).unwrap(),
+        )
         .unwrap();
     storage
-        .write(&format!(".sticker-manager/devices/{}.json", Uuid::new_v4()), b"{")
+        .write(
+            &format!(".sticker-manager/devices/{}.json", Uuid::new_v4()),
+            b"{",
+        )
         .unwrap();
     site.sync(&storage, &manifest);
     assert_eq!(inspect(&storage).unwrap().devices, 1);

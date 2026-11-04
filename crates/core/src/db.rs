@@ -125,8 +125,12 @@ mod tests {
 
         let conn = open(&path).unwrap();
         let category = |id: &str| -> Option<String> {
-            conn.query_row("SELECT category_id FROM stickers WHERE id = ?1", [id], |r| r.get(0))
-                .unwrap()
+            conn.query_row(
+                "SELECT category_id FROM stickers WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap()
         };
         assert_eq!(category("multi").as_deref(), Some("early"));
         assert_eq!(category("single").as_deref(), Some("late"));

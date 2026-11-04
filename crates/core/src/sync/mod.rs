@@ -335,10 +335,18 @@ fn read_devices(storage: &dyn Storage) -> Result<Vec<RemoteDevice>> {
     Ok(result)
 }
 pub(crate) fn validate_sticker_name(name: &str) -> Result<()> {
-    if name.trim().is_empty() {return Err(Error::EmptyName("表情"));}
-    if name.contains(['/', '\\']) {return Err(Error::Sync("表情名称不能包含斜杠或反斜杠".into()));}
-    if name.chars().any(char::is_control) {return Err(Error::Sync("表情名称不能包含控制字符".into()));}
-    if name.trim().starts_with('.') || name.contains("..") {return Err(Error::Sync("表情名称不能以点开头，也不能包含 ..".into()));}
+    if name.trim().is_empty() {
+        return Err(Error::EmptyName("表情"));
+    }
+    if name.contains(['/', '\\']) {
+        return Err(Error::Sync("表情名称不能包含斜杠或反斜杠".into()));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(Error::Sync("表情名称不能包含控制字符".into()));
+    }
+    if name.trim().starts_with('.') || name.contains("..") {
+        return Err(Error::Sync("表情名称不能以点开头，也不能包含 ..".into()));
+    }
     Ok(())
 }
 

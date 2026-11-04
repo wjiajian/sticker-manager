@@ -175,22 +175,21 @@ pub(super) fn scan(
             current.insert(file.key.clone(), entry.clone());
             continue;
         }
-        if !old.contains_key(&file.key) {
-            if let Some((id, location)) = by_path
+        if !old.contains_key(&file.key)
+            && let Some((id, location)) = by_path
                 .get(&file.key)
                 .filter(|(_, l)| l.data.byte_size as u64 == file.size && l.version == file.version)
-            {
-                current.insert(
-                    file.key.clone(),
-                    Entry {
-                        file,
-                        id: id.clone(),
-                        object: location.data.clone(),
-                        managed: false,
-                    },
-                );
-                continue;
-            }
+        {
+            current.insert(
+                file.key.clone(),
+                Entry {
+                    file,
+                    id: id.clone(),
+                    object: location.data.clone(),
+                    managed: false,
+                },
+            );
+            continue;
         }
         downloaded(false);
         let Some(bytes) = storage.read(&file.key)? else {
@@ -379,10 +378,10 @@ pub(super) fn reconcile(library: &Mutex<Library>, target: &str, scan: &mut Scan)
         if let (Some((Some(old), _, _)), Some((Some(new), _, _))) = (
             paths::image(oldpath),
             chosen.get(hash).and_then(|p| paths::image(p)),
-        ) {
-            if old != new && !scan.folders.contains(old) {
-                renamed.entry(old.into()).or_default().insert(new.into());
-            }
+        ) && old != new
+            && !scan.folders.contains(old)
+        {
+            renamed.entry(old.into()).or_default().insert(new.into());
         }
     }
     for (old, names) in renamed {
@@ -427,13 +426,11 @@ pub(super) fn reconcile(library: &Mutex<Library>, target: &str, scan: &mut Scan)
         if let (Some(id), Some(location)) = (
             model.representative(&sticker_reps, Kind::Sticker, owner),
             h.live.as_ref(),
-        ) {
-            if live_paths
-                .get(&id)
-                .is_none_or(|old| (&location.stamp, &location.path) > (&old.stamp, &old.path))
-            {
-                live_paths.insert(id, location.clone());
-            }
+        ) && live_paths
+            .get(&id)
+            .is_none_or(|old| (&location.stamp, &location.path) > (&old.stamp, &old.path))
+        {
+            live_paths.insert(id, location.clone());
         }
     }
     let mut deleted_ids = stickers
@@ -505,10 +502,10 @@ pub(super) fn reconcile(library: &Mutex<Library>, target: &str, scan: &mut Scan)
                 },
             )?;
             model_changed = true;
-            if !trash(path) {
-                if let Some(location) = model.file_history.get(&id).and_then(|h| h.live.clone()) {
-                    live_paths.insert(id.clone(), location);
-                }
+            if !trash(path)
+                && let Some(location) = model.file_history.get(&id).and_then(|h| h.live.clone())
+            {
+                live_paths.insert(id.clone(), location);
             }
         }
         let live_path = if trash(path) {
@@ -578,26 +575,25 @@ pub(super) fn reconcile(library: &Mutex<Library>, target: &str, scan: &mut Scan)
         if chosen.contains_key(hash) || scan.moving.contains(oldpath) || trash(oldpath) {
             continue;
         }
-        if let Some(id) = hashes.get(hash) {
-            if stickers[id]
+        if let Some(id) = hashes.get(hash)
+            && stickers[id]
                 .fields
                 .get("deleted_at")
                 .is_none_or(|r| r.value.is_null())
-            {
-                append_apply(
-                    &tx,
-                    &mut model,
-                    &device,
-                    Action::Set {
-                        entity: Kind::Sticker,
-                        id: id.clone(),
-                        field: "deleted_at".into(),
-                        value: json!(unix_millis()?),
-                    },
-                )?;
-                deleted_ids.insert(id.clone());
-                projected = true;
-            }
+        {
+            append_apply(
+                &tx,
+                &mut model,
+                &device,
+                Action::Set {
+                    entity: Kind::Sticker,
+                    id: id.clone(),
+                    field: "deleted_at".into(),
+                    value: json!(unix_millis()?),
+                },
+            )?;
+            deleted_ids.insert(id.clone());
+            projected = true;
         }
     }
     // 最近删除的名称和分类也统一由同一条正常路径声明推导，不保留各设备不同的旧投影。
@@ -665,11 +661,11 @@ pub(super) fn reconcile(library: &Mutex<Library>, target: &str, scan: &mut Scan)
         )?;
     }
     for entry in scan.current.values_mut() {
-        if !scan.moving.contains(&entry.file.key) {
-            if let Some(id) = hashes.get(&entry.object.hash) {
-                entry.id = id.clone();
-                entry.managed = chosen.get(&entry.object.hash) == Some(&entry.file.key);
-            }
+        if !scan.moving.contains(&entry.file.key)
+            && let Some(id) = hashes.get(&entry.object.hash)
+        {
+            entry.id = id.clone();
+            entry.managed = chosen.get(&entry.object.hash) == Some(&entry.file.key);
         }
         if scan.old.get(&entry.file.key).is_none_or(|old| {
             old.file != entry.file
@@ -954,13 +950,11 @@ pub(super) fn push_files(
             let ours = cache.get(&task.source).is_some_and(|e| {
                 e.object.hash == task.object.hash && after.get(&task.source) == Some(&e.file)
             });
-            if ours {
-                if let Err(e) = storage.delete(&task.source) {
-                    if first_error.is_none() {
-                        first_error = Some(e);
-                    }
-                    continue;
+            if ours && let Err(e) = storage.delete(&task.source) {
+                if first_error.is_none() {
+                    first_error = Some(e);
                 }
+                continue;
             }
         }
         completed.insert(task.id.clone());

@@ -1060,8 +1060,14 @@ fn devices_seeing_different_versions_do_not_keep_appending_file_ops() {
     for n in 0..5 {
         a.import(n);
     }
-    let sa = Skewed { inner: &s, tag: "a" };
-    let sb = Skewed { inner: &s, tag: "b" };
+    let sa = Skewed {
+        inner: &s,
+        tag: "a",
+    };
+    let sb = Skewed {
+        inner: &s,
+        tag: "b",
+    };
     let last_seqs = || {
         let mut result = BTreeMap::<String, u64>::new();
         for f in s.list(".sticker-manager/ops/").unwrap() {

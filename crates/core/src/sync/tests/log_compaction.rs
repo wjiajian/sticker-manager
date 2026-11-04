@@ -169,7 +169,9 @@ fn listed_source_removed_before_read_waits_for_next_round_merged_segment() {
             self.s.list(p)
         }
         fn read(&self, k: &str) -> Result<Option<Vec<u8>>> {
-            if k.starts_with(".sticker-manager/ops/") && !std::mem::replace(&mut *self.once.lock().unwrap(), true) {
+            if k.starts_with(".sticker-manager/ops/")
+                && !std::mem::replace(&mut *self.once.lock().unwrap(), true)
+            {
                 compaction::compact(self.s, own(self.s, self.a), &|| true)?;
             }
             self.s.read(k)
@@ -309,7 +311,10 @@ fn broken_leftovers_from_interrupted_puts_do_not_block_merging_forever() {
     compaction::compact(&s, own(&s, &a), &|| true).unwrap();
     assert_eq!(own(&s, &a).len(), 1);
     // 推送写到一半的残段，之后被完整段覆盖：残段删掉，完整段不动。
-    let leftover = format!(".sticker-manager/ops/{device}/{first:012}-{:012}.jsonl", first + 1);
+    let leftover = format!(
+        ".sticker-manager/ops/{device}/{first:012}-{:012}.jsonl",
+        first + 1
+    );
     s.write(&leftover, b"{\"seq\":").unwrap();
     compaction::compact(&s, own(&s, &a), &|| true).unwrap();
     assert!(s.read(&leftover).unwrap().is_none());
