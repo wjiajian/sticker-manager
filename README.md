@@ -4,10 +4,11 @@
 
 # 表情管理器
 
-macOS 上的表情包管理器：把表情收进一个仓库，分类整理，用的时候随手就能取。
+macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分类整理，用的时候随手就能取。
 
 [![版本 0.1.5](https://img.shields.io/badge/版本-0.1.5-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
+![平台 Windows x64](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
 
 [下载](https://github.com/wjiajian/sticker-manager/releases/latest) · [用户篇](#用户篇) · [开发者篇](#开发者篇) · [更新记录](CHANGELOG.md)
@@ -16,15 +17,14 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 
 表情包散落在聊天记录、下载文件夹和各种相册里，想用的时候要翻半天。表情管理器是一个个人桌面应用：所有表情放进一个本地仓库，按分类、名称和配文来找；在任何应用里按一下快捷键呼出表情面板，单击复制或者直接拖出去发送。有多台电脑的话，可以通过自己的网盘或云存储同步，不需要服务器。
 
-> [!NOTE]
-> 目前只在 macOS 14 及以上验证过，安装包只有 Apple Silicon 版本。代码里保留了 Windows 的分支，但还没有在 Windows 上编译和运行过。
-
 - [用户篇](#用户篇)：[安装](#安装) · [快速上手](#快速上手) · [功能](#功能) · [数据存放位置](#数据存放位置) · [常见问题](#常见问题)
 - [开发者篇](#开发者篇)：[技术栈](#技术栈) · [目录结构](#目录结构) · [本地开发](#本地开发) · [提交前检查](#提交前检查) · [文档地图](#文档地图) · [发布流程](#发布流程) · [贡献约定](#贡献约定)
 
 ## 用户篇
 
 ### 安装
+
+#### macOS
 
 1. 打开 [GitHub Releases](https://github.com/wjiajian/sticker-manager/releases/latest)，下载 `sticker-manager_<版本>_<架构>.dmg`。目前只发布 Apple Silicon 版本，文件名形如 `sticker-manager_0.1.5_aarch64.dmg`。
 2. 双击打开 DMG，把「表情管理器」拖进「应用程序」文件夹。
@@ -42,12 +42,20 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 
 系统提示的具体措辞随 macOS 版本略有不同。如果提示的是「已损坏」，看[常见问题](#提示已损坏或者打不开怎么办)。
 
+#### Windows
+
+- **安装版**：下载 `sticker-manager-<版本>-windows-x64`，解压后运行其中的安装程序。
+- **便携版**：下载同一份 `sticker-manager-<版本>-windows-x64` 产物，解开产物中的便携 ZIP，将整个 `sticker-manager` 文件夹放到可写位置，运行 `sticker-manager.exe`。需要 WebView2 Runtime；程序旁的 `portable.flag` 用于启用便携模式，`data` 保存仓库，`webview` 保存缓存。
+- 便携版不登记开机自启，不使用安装式更新。升级时从菜单退出，再替换 EXE，保留 `portable.flag`、`data` 和 `webview`；搬迁时移动整个文件夹。
+
 ### 快速上手
+
+下文快捷键按 macOS 标记；Windows 的面板快捷键是 `Ctrl+Alt+E`，搜索、复制和多选使用 `Ctrl` 替代 `⌘`。
 
 1. 点主窗口里的「导入表情」选择图片或 `.zip`，或者点它旁边的箭头选「导入文件夹」；也可以直接把图片、文件夹或 `.zip` 拖进窗口。
 2. 选中一张表情，在右侧详情栏里设分类、写配文、点星标收藏。
 3. 在任何应用里按 `⌃⌥E` 呼出表情面板，输入文字搜索，单击表情复制，回到聊天窗口粘贴发送。
-4. 有多台 Mac 的话，在「偏好设置 › 同步」里选一种存储；另一台电脑连到同一个位置，两边的表情就会合并。
+4. 有多台电脑的话，在「偏好设置 › 同步」里选一种存储；另一台电脑连到同一个位置，两边的表情就会合并。
 
 ### 功能
 
@@ -99,6 +107,7 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 
 - **悬浮球**常驻屏幕边缘，初始在主显示器右侧。单击展开表情面板，右键打开菜单：打开主窗口、偏好设置、隐藏悬浮球、暂停或继续同步、退出。可以拖到别的位置；静止 3 秒后收到屏幕边缘，也可以在偏好设置里改成 10 秒或不收起。
 - 把图片、文件夹或 `.zip` 拖到悬浮球上也能导入。
+- Windows 也支持从微信、QQ 等聊天软件拖入图片或虚拟文件；来源没有提供可读取数据时会提示先保存图片再导入。
 - **菜单栏托盘**提供：显示表情面板、打开主窗口、显示悬浮球、偏好设置、暂停或继续同步、退出。有新版本时，菜单最上面会多一项「更新到 x.y.z…」。
 - 关闭主窗口只是把它隐藏，应用会继续在后台运行。要完全退出，用托盘或悬浮球菜单里的「退出」，或者按 `⌘Q`。
 
@@ -143,8 +152,16 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 
 所有表情和整理信息都在一个文件夹里（在「偏好设置 › 仓库」里点「打开所在位置」可以直接找到）：
 
+| 运行方式 | 仓库目录 |
+|---|---|
+| macOS | `~/Library/Application Support/com.wjiajian.sticker-manager/` |
+| Windows 安装版 | `%APPDATA%\sticker-manager\` |
+| Windows 便携版 | 程序所在目录的 `data\` |
+
+Windows 安装版首次使用新路径时，会在目标目录为空的情况下迁移旧的 `com.wjiajian.sticker-manager` 仓库，并兼容更早的 `com.shaojian.sticker-manager` 目录。各平台仓库内部结构相同：
+
 ```text
-~/Library/Application Support/com.wjiajian.sticker-manager/
+仓库目录/
 ├── library.db      表情、分类、配文、使用记录等元数据（SQLite）
 ├── objects/        原图，按内容哈希命名
 ├── thumbs/         缩略图，每台电脑各自生成，不同步
@@ -187,7 +204,7 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 
 | 部分 | 选择 |
 |---|---|
-| 应用外壳 | [Tauri 2](https://tauri.app/)（理由见 [ADR 0001](docs/adr/0001-tauri-2.md)） |
+| 应用外壳 | [Tauri 2](https://tauri.app/) |
 | 核心库 | Rust，`crates/core`（crate 名 `sticker-core`）：仓库、分类、导入、搜索、删除、同步和合并规则。不依赖 Tauri，可以单独测试 |
 | 桌面壳 | `src-tauri`：Tauri 命令、窗口、托盘、悬浮球、表情面板、悬停预览、剪贴板、开机自启和应用内更新 |
 | 前端 | React + TypeScript + Vite，Tailwind CSS v4，Zustand（界面状态）+ TanStack Query（调用 Rust 命令取数据），Phosphor Icons |
@@ -237,14 +254,14 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 │   └── tauri.conf.json
 ├── design/README.md             界面设计规范
 ├── docs/                        技术文档、ADR、术语表、测试、打包、待办
-└── .github/                     macOS 构建与发布 workflow、更新清单脚本
+└── .github/                     macOS／Windows 独立构建与发布 workflow、更新清单脚本
 ```
 
 ### 本地开发
 
 #### 环境要求
 
-- macOS 14 及以上，装好 Xcode 命令行工具
+- macOS 14 及以上，装好 Xcode 命令行工具；或 Windows x64，装好 C++ Build Tools、Windows SDK 和 WebView2 Runtime（见[打包说明](docs/packaging.md#windows-x64-构建与验收)）
 - Rust stable（workspace 使用 edition 2024）
 - Node.js（CI 用 22）
 - pnpm 11（`package.json` 的 `packageManager` 固定为 `pnpm@11.22.0`）
@@ -275,7 +292,7 @@ pnpm tauri dev
 #### 用 `STICKER_LIBRARY_DIR` 隔离仓库
 
 > [!WARNING]
-> 开发构建默认打开的是真实仓库 `~/Library/Application Support/com.wjiajian.sticker-manager`。调试和测试时请换成临时仓库。
+> 开发构建默认打开的是真实仓库（见[数据存放位置](#数据存放位置)）。调试和测试时请换成临时仓库。
 
 ```bash
 STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm tauri dev
@@ -283,7 +300,7 @@ STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm tauri dev
 
 - 必须是绝对路径。相对路径会直接报启动错误，因为它会落在 `src-tauri/` 下，写入的文件又会触发 `tauri dev` 重新编译。
 - 目录不存在时会自动新建。
-- 只在开发构建里生效；release 构建会忽略这个变量，直接打开真实仓库。要试运行打包版，需要隔离 `HOME`，做法见 [docs/packaging.md](docs/packaging.md)。
+- 只在开发构建里生效；release 构建会忽略这个变量。macOS 打包版通过隔离 `HOME` 验收；Windows 便携版通过程序旁的 `portable.flag` 和临时程序目录隔离，做法见 [docs/packaging.md](docs/packaging.md)。
 
 另外两个只在开发构建里生效的调试变量：
 
@@ -318,11 +335,11 @@ pnpm build
 git diff --check
 ```
 
-CI 只跑 `pnpm typecheck` 和打包（打包里包含 `pnpm build`），不跑 Rust 的格式、lint 和测试，所以这些要在本地跑过再提交。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
+macOS 与 Windows 分别使用独立、手动触发的安装包构建工作流，均运行 `pnpm typecheck` 和打包；Windows 可勾选 `validate` 额外运行 Rust 格式、Clippy 和测试。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
 
 ### 发布流程
 
-发布通过 GitHub Actions 的「构建 macOS 安装包」workflow（[`.github/workflows/build-macos.yml`](.github/workflows/build-macos.yml)）完成，只能手动触发。
+macOS 继续使用「构建 macOS 安装包」（[build-macos.yml](.github/workflows/build-macos.yml)）；Windows 使用独立的「构建 Windows 安装包」（[build-windows.yml](.github/workflows/build-windows.yml)）。两者均手动触发，默认只生成构建产物，勾选 `release` 才发布。下列步骤以 macOS 为例。
 
 1. **写更新记录**：在 [CHANGELOG.md](CHANGELOG.md) 里写好这个版本的 `## <版本号>` 小节。写法见文件开头的注释：面向用户，只写能感知到的变化，每条一句话，升级须知放在最前面，不用 `###` 标题。这个小节会原样显示在应用的更新对话框里，也会用作 Release 说明；找不到对应版本时退回「未发布」小节。
 2. **改版本号**：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三处必须一致，不一致时 workflow 直接失败。`crates/core/Cargo.toml` 的版本号习惯上一起改。
@@ -330,6 +347,8 @@ CI 只跑 `pnpm typecheck` 和打包（打包里包含 `pnpm build`），不跑 
 4. **触发构建**：在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow。`release` 勾选项（「发布到 Release」）决定发不发版：
    - 不勾选：只构建，DMG 在运行详情页的 Artifacts 里下载，保留 14 天。
    - 勾选：以 `v<版本号>` 为 tag 创建 Release，tag 指向所选分支的最新提交。附件是 `sticker-manager_<版本>_aarch64.dmg`、更新包 `sticker-manager_<版本>_aarch64.app.tar.gz` 和 `latest.json`。如果这个 tag 的 Release 已经存在，只覆盖上传这三个文件，不改说明。
+
+Windows 采用相同的版本检查、可选更新签名和 Release 上传流程，附件为 NSIS 安装包、便携 ZIP 和独立的 `latest-windows.json`，不覆盖 macOS 的 `latest.json`。便携版始终手动升级。
 
 附件都用 ASCII 文件名，因为 GitHub 会去掉附件名里的中文。
 

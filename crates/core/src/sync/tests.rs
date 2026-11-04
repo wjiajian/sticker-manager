@@ -5,6 +5,9 @@ use crate::LibraryView;
 use image::{Rgba, RgbaImage};
 use serde_json::{Value, json};
 
+#[cfg(target_os = "windows")]
+mod windows;
+
 struct Site {
     dir: tempfile::TempDir,
     lib: Mutex<Library>,

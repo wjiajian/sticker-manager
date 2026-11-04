@@ -283,7 +283,7 @@ mod native {
     use super::*;
 
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
-        let window = tauri::WebviewWindowBuilder::new(
+        let builder = tauri::WebviewWindowBuilder::new(
             app,
             "preview",
             tauri::WebviewUrl::App("preview.html".into()),
@@ -301,8 +301,13 @@ mod native {
         .transparent(true)
         .shadow(false)
         .minimizable(false)
-        .maximizable(false)
-        .build()?;
+        .maximizable(false);
+        #[cfg(target_os = "windows")]
+        let builder = match crate::portable::root(app.handle()) {
+            Some(root) => builder.data_directory(root.join("webview")),
+            None => builder,
+        };
+        let window = builder.build()?;
         window.set_ignore_cursor_events(true)
     }
 
@@ -354,14 +359,22 @@ mod native {
                 point.y.round() as i32,
             ))
             .map_err(|e| e.to_string())?;
+        #[cfg(target_os = "windows")]
+        {
+            crate::desktop::set_preview_visible(&window, true)
+        }
+        #[cfg(not(target_os = "windows"))]
         window.show().map_err(|e| e.to_string())
     }
 
     pub fn hide(app: &AppHandle) -> Result<(), String> {
-        app.get_webview_window("preview")
-            .ok_or("预览窗口不可用")?
-            .hide()
-            .map_err(|e| e.to_string())
+        let window = app.get_webview_window("preview").ok_or("预览窗口不可用")?;
+        #[cfg(target_os = "windows")]
+        {
+            crate::desktop::set_preview_visible(&window, false)
+        }
+        #[cfg(not(target_os = "windows"))]
+        window.hide().map_err(|e| e.to_string())
     }
 }
 

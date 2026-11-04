@@ -1,6 +1,25 @@
 //! 只在主线程调用的桌面坐标适配。
 use crate::geometry::{Display, Point, Rect};
 use tauri::AppHandle;
+
+/// 预览的显示与隐藏使用同一原生入口，避免通用 show 激活窗口。
+#[cfg(target_os = "windows")]
+pub fn set_preview_visible(window: &tauri::WebviewWindow, visible: bool) -> Result<(), String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow};
+    let handle = window.hwnd().map_err(|error| error.to_string())?.0 as isize;
+    window
+        .run_on_main_thread(move || {
+            // SAFETY: HWND 属于仍由应用持有的预览窗口，在 UI 线程调用。
+            // ShowWindow 的返回值表示之前是否可见，不表示操作是否成功。
+            unsafe {
+                ShowWindow(
+                    handle as _,
+                    if visible { SW_SHOWNOACTIVATE } else { SW_HIDE },
+                );
+            }
+        })
+        .map_err(|error| error.to_string())
+}
 #[cfg(target_os = "macos")]
 pub fn displays(_app: &AppHandle) -> Result<Vec<Display>, String> {
     use objc2::{MainThreadMarker, msg_send};

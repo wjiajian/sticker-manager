@@ -17,6 +17,10 @@ pub struct FileEntry {
 /// 后端只中转文件。写入可被读到一部分，读取方须校验完整性后再应用。
 /// read 的 NotFound 通过 Ok(None) 表达；delete 不存在的文件应成功。
 pub trait Storage: Send + Sync {
+    /// 静态校验目标路径，供移动意图持久化前检查。
+    fn validate_write(&self, _key: &str) -> Result<()> {
+        Ok(())
+    }
     fn list(&self, prefix: &str) -> Result<Vec<FileEntry>>;
     fn read(&self, key: &str) -> Result<Option<Vec<u8>>>;
     fn write(&self, key: &str, bytes: &[u8]) -> Result<()>;
@@ -38,6 +42,67 @@ pub fn validate_key(key: &str) -> Result<()> {
         return Err(Error::Sync("无效的存储文件名".into()));
     }
     Ok(())
+}
+
+// 仅限制实际写入 Windows 文件系统的路径；网络存储继续使用原有同步名称。
+#[cfg(target_os = "windows")]
+fn validate_windows_file_name(key: &str) -> Result<()> {
+    for name in key.trim_end_matches('/').split('/') {
+        let base = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
+        let base = base.to_ascii_uppercase();
+        let reserved = matches!(
+            base.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || base
+            .strip_prefix("COM")
+            .or_else(|| base.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                matches!(
+                    suffix,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            });
+        if reserved
+            || name.ends_with([' ', '.'])
+            || name.chars().any(|c| c < ' ' || "<>:\"\\|?*".contains(c))
+            || name.encode_utf16().count() > 255
+        {
+            return Err(Error::Sync(format!(
+                "Windows 同步文件夹不支持名称“{name}”（路径：{key}），请修改该表情或分类的名称后重试"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_missing_file(error: &std::io::Error, _path: &Path) -> bool {
+    // Windows 的非法或超长名称不能作为旧移动源，允许改名后重试。
+    // 保留其他错误（例如无权限），避免把不可访问的文件误认为已删除。
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    if matches!(error.raw_os_error(), Some(123 | 206)) {
+        // 只能忽略确实非法的组件；合法组件组成的总路径过长仍是访问错误。
+        return _path.components().any(|component| match component {
+            Component::Normal(name) => validate_windows_file_name(&name.to_string_lossy()).is_err(),
+            _ => false,
+        });
+    }
+    false
+}
+
+#[cfg(all(test, target_os = "windows"))]
+#[test]
+fn total_path_length_errors_are_not_missing_files() {
+    let error = std::io::Error::from_raw_os_error(206);
+    let valid = PathBuf::from("valid-component".repeat(10)).join("another-component".repeat(10));
+    assert!(!is_missing_file(&error, &valid));
+    assert!(is_missing_file(&error, Path::new(&"长".repeat(256))));
+    assert!(!is_missing_file(
+        &std::io::Error::from_raw_os_error(5),
+        Path::new("CON")
+    ));
 }
 
 #[derive(Clone)]
@@ -65,7 +130,7 @@ impl FolderStorage {
                 Ok(m) if m.file_type().is_symlink() => {
                     return Err(Error::Sync("同步文件夹内不能使用符号链接".into()));
                 }
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                Err(e) if !is_missing_file(&e, &path) => return Err(e.into()),
                 _ => {}
             }
         }
@@ -73,6 +138,11 @@ impl FolderStorage {
     }
 }
 impl Storage for FolderStorage {
+    fn validate_write(&self, _key: &str) -> Result<()> {
+        #[cfg(target_os = "windows")]
+        validate_windows_file_name(_key)?;
+        Ok(())
+    }
     fn list(&self, prefix: &str) -> Result<Vec<FileEntry>> {
         let mut pending = vec![self.root.clone()];
         let mut result = Vec::new();
@@ -127,13 +197,15 @@ impl Storage for FolderStorage {
         Ok(result)
     }
     fn read(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        match fs::read(self.path(key)?) {
+        let path = self.path(key)?;
+        match fs::read(&path) {
             Ok(bytes) => Ok(Some(bytes)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) if is_missing_file(&e, &path) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
     fn write(&self, key: &str, bytes: &[u8]) -> Result<()> {
+        self.validate_write(key)?;
         let path = self.path(key)?;
         if key.ends_with('/') && bytes.is_empty() {
             fs::create_dir_all(path)?;
@@ -155,13 +227,13 @@ impl Storage for FolderStorage {
     fn delete(&self, key: &str) -> Result<()> {
         let path = self.path(key)?;
         let result = if key.ends_with('/') {
-            fs::remove_dir(path)
+            fs::remove_dir(&path)
         } else {
-            fs::remove_file(path)
+            fs::remove_file(&path)
         };
         match result {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) if is_missing_file(&e, &path) => Ok(()),
             Err(e) => Err(e.into()),
         }
     }

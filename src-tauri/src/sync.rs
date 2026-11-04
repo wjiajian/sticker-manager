@@ -691,6 +691,9 @@ impl ActiveStorage<'_> {
     }
 }
 impl Storage for ActiveStorage<'_> {
+    fn validate_write(&self, key: &str) -> sticker_core::Result<()> {
+        self.inner.validate_write(key)
+    }
     fn list(&self, p: &str) -> sticker_core::Result<Vec<FileEntry>> {
         self.check()?;
         let result = self.inner.list(p)?;

@@ -384,21 +384,30 @@ mod native {
     use super::*;
 
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
-        tauri::WebviewWindowBuilder::new(app, "panel", tauri::WebviewUrl::App("panel.html".into()))
-            .theme(crate::appearance::preference(app.handle()))
-            .title("表情面板")
-            .inner_size(WIDTH, HEIGHT)
-            .decorations(false)
-            .resizable(false)
-            .visible(false)
-            .focused(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .transparent(true)
-            .shadow(true)
-            .minimizable(false)
-            .maximizable(false)
-            .build()?;
+        let builder = tauri::WebviewWindowBuilder::new(
+            app,
+            "panel",
+            tauri::WebviewUrl::App("panel.html".into()),
+        )
+        .theme(crate::appearance::preference(app.handle()))
+        .title("表情面板")
+        .inner_size(WIDTH, HEIGHT)
+        .decorations(false)
+        .resizable(false)
+        .visible(false)
+        .focused(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .transparent(true)
+        .shadow(true)
+        .minimizable(false)
+        .maximizable(false);
+        #[cfg(target_os = "windows")]
+        let builder = match crate::portable::root(app.handle()) {
+            Some(root) => builder.data_directory(root.join("webview")),
+            None => builder,
+        };
+        builder.build()?;
         Ok(())
     }
     pub fn center_at_pointer(app: &AppHandle) -> Result<(), String> {
