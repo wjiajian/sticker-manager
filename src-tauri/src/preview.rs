@@ -283,7 +283,7 @@ mod native {
     use super::*;
 
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
-        let window = tauri::WebviewWindowBuilder::new(
+        let builder = tauri::WebviewWindowBuilder::new(
             app,
             "preview",
             tauri::WebviewUrl::App("preview.html".into()),
@@ -301,8 +301,13 @@ mod native {
         .transparent(true)
         .shadow(false)
         .minimizable(false)
-        .maximizable(false)
-        .build()?;
+        .maximizable(false);
+        #[cfg(target_os = "windows")]
+        let builder = match crate::portable::root(app.handle()) {
+            Some(root) => builder.data_directory(root.join("webview")),
+            None => builder,
+        };
+        let window = builder.build()?;
         window.set_ignore_cursor_events(true)
     }
 

@@ -425,22 +425,31 @@ mod native {
 mod native {
     use super::*;
     pub fn create(app: &tauri::App) -> tauri::Result<()> {
-        tauri::WebviewWindowBuilder::new(app, "ball", tauri::WebviewUrl::App("ball.html".into()))
-            .theme(crate::appearance::preference(app.handle()))
-            .title("悬浮球")
-            .inner_size(300.0, 168.0)
-            .decorations(false)
-            .resizable(false)
-            .visible(false)
-            .focused(false)
-            .focusable(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .transparent(true)
-            .shadow(false)
-            .minimizable(false)
-            .maximizable(false)
-            .build()?;
+        let builder = tauri::WebviewWindowBuilder::new(
+            app,
+            "ball",
+            tauri::WebviewUrl::App("ball.html".into()),
+        )
+        .theme(crate::appearance::preference(app.handle()))
+        .title("悬浮球")
+        .inner_size(300.0, 168.0)
+        .decorations(false)
+        .resizable(false)
+        .visible(false)
+        .focused(false)
+        .focusable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .transparent(true)
+        .shadow(false)
+        .minimizable(false)
+        .maximizable(false);
+        #[cfg(target_os = "windows")]
+        let builder = match crate::portable::root(app.handle()) {
+            Some(root) => builder.data_directory(root.join("webview")),
+            None => builder,
+        };
+        builder.build()?;
         Ok(())
     }
     pub fn set_visible(app: &AppHandle, visible: bool) -> Result<(), String> {

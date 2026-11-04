@@ -297,6 +297,9 @@ fn restart_without_autostart(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn start(app: AppHandle) {
+    if crate::portable::enabled(&app) {
+        return;
+    }
     #[cfg(debug_assertions)]
     if std::env::var_os(ENDPOINT_OVERRIDE).is_none_or(|url| url.is_empty()) {
         return;
@@ -338,12 +341,21 @@ pub fn update_status(app: AppHandle) -> UpdateStatus {
 /// 检查失败时错误记在返回的状态里。
 #[tauri::command]
 pub async fn check_update(app: AppHandle) -> UpdateStatus {
+    if crate::portable::enabled(&app) {
+        modify(&app, |status| {
+            status.error = Some("便携版请下载新版 ZIP，退出后替换程序，保留 data 文件夹".into())
+        });
+        return status(&app);
+    }
     let _ = check(&app, true).await;
     status(&app)
 }
 /// 成功时应用会重启，不会返回。
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    if crate::portable::enabled(&app) {
+        return Err("便携版请退出后手动替换程序，保留 data 文件夹".into());
+    }
     install(&app).await
 }
 #[tauri::command]

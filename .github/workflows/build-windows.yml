@@ -58,6 +58,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: 打包便携版
+        shell: pwsh
+        run: |
+          $portable = 'target/portable/sticker-manager'
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item -LiteralPath 'target/x86_64-pc-windows-msvc/release/sticker-manager.exe' -Destination "$portable/sticker-manager.exe"
+          New-Item -ItemType File -Path "$portable/portable.flag" | Out-Null
+          '便携版需要 WebView2 Runtime。请解压到可写目录后运行。升级时退出程序并替换 EXE，保留 portable.flag、data 和 webview。' | Set-Content -LiteralPath "$portable/使用说明.txt" -Encoding utf8
+          Compress-Archive -Path $portable -DestinationPath 'target/portable/sticker-manager-windows-x64-portable.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sticker-manager-windows-portable-${{ github.sha }}
+          path: target/portable/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
   macos:
     runs-on: macos-latest
     steps:

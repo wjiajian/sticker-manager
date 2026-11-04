@@ -44,8 +44,8 @@ export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onCh
       {/* macOS 的红绿灯按钮浮在这块空白上，位置在 src-tauri/src/lib.rs 里设置 */}
       {platform === "macos" && <div data-tauri-drag-region className="w-50 shrink-0 self-stretch" />}
       {platform === "windows" && <div data-tauri-drag-region className="flex shrink-0 items-center gap-2 self-stretch">
-        <img src={appIcon} alt="" draggable={false} className="pointer-events-none size-6" />
-        <span className="pointer-events-none text-sm font-semibold">表情管理器</span>
+        <img src={appIcon} alt="" draggable={false} className="pointer-events-none size-8" />
+        <span className="pointer-events-none text-base font-semibold">表情管理器</span>
       </div>}
 
       <label className="interactive mx-auto flex max-w-120 flex-1 items-center gap-2 rounded-control border border-line bg-surface px-3 py-2 focus-within:border-accent windows:min-w-0">

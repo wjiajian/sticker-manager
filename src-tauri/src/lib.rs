@@ -21,6 +21,7 @@ mod imports;
 mod menu;
 mod metered;
 mod panel;
+mod portable;
 mod preview;
 mod settings;
 mod startup;
@@ -45,6 +46,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            app.manage(portable::Portable::detect()?);
             let (mut library, root) = match open_library(app) {
                 Ok(library) => library,
                 Err((path, reason)) => {
@@ -252,26 +254,37 @@ fn open_library(app: &tauri::App) -> Result<(Library, PathBuf), (PathBuf, String
         return Ok((library, root));
     }
 
-    // macOS：~/Library/Application Support/<identifier>/；Windows：%APPDATA%\<identifier>\
+    // Windows 使用面向用户的目录名，应用标识符仍用于系统集成。
     let root = app
         .path()
         .app_data_dir()
         .map_err(|error| (PathBuf::from("（无法确定仓库路径）"), error.to_string()))?;
+    #[cfg(target_os = "windows")]
+    let root = portable::root(app.handle())
+        .map(|directory| directory.join("data"))
+        .unwrap_or_else(|| root.with_file_name("sticker-manager"));
+    #[cfg(target_os = "windows")]
+    let migration = if portable::enabled(app.handle()) {
+        Ok(false)
+    } else {
+        identifier::migrate_windows_library(&root)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let migration = identifier::migrate_previous_library(&root);
     // 搬不过来就停在启动失败页：直接打开空的新仓库会像是表情全丢了，写入后也没法再自动搬。
-    match identifier::migrate_previous_library(&root) {
-        Ok(true) => eprintln!(
-            "已把旧仓库从 {} 搬到 {}",
-            identifier::PREVIOUS_IDENTIFIER,
-            root.display()
-        ),
+    match migration {
+        Ok(true) => eprintln!("已把旧仓库搬到 {}", root.display()),
         Ok(false) => {}
         Err(error) => {
-            let reason = format!(
-                "无法把旧仓库（{}）搬到新位置：{error}",
-                identifier::PREVIOUS_IDENTIFIER
-            );
+            let reason = format!("无法把旧仓库搬到新位置：{error}");
             return Err((root, reason));
         }
+    }
+    #[cfg(target_os = "windows")]
+    for directory in ["objects", "thumbs"] {
+        app.asset_protocol_scope()
+            .allow_directory(root.join(directory), false)
+            .map_err(|error| (root.clone(), error.to_string()))?;
     }
     Ok((
         Library::open(&root).map_err(|error| (root.clone(), startup::reason(error)))?,
@@ -310,6 +323,12 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
 
     #[cfg(target_os = "windows")]
     let builder = builder.decorations(false);
+
+    #[cfg(target_os = "windows")]
+    let builder = match portable::root(app.handle()) {
+        Some(root) => builder.data_directory(root.join("webview")),
+        None => builder,
+    };
 
     builder.build()?;
     Ok(())

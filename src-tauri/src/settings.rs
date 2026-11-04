@@ -207,6 +207,9 @@ pub fn set_ball_auto_hide(app: AppHandle, seconds: Option<u32>) -> Result<Settin
 }
 #[tauri::command]
 pub fn get_autostart(app: AppHandle) -> Result<bool, String> {
+    if crate::portable::enabled(&app) {
+        return Ok(false);
+    }
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 #[derive(Serialize)]
@@ -216,6 +219,12 @@ pub struct AutostartResult {
 }
 #[tauri::command]
 pub fn set_autostart(app: AppHandle, enabled: bool) -> AutostartResult {
+    if crate::portable::enabled(&app) {
+        return AutostartResult {
+            enabled: Some(false),
+            error: enabled.then(|| "便携版不登记开机自启".into()),
+        };
+    }
     let result = if enabled {
         app.autolaunch().enable()
     } else {
@@ -246,6 +255,9 @@ pub fn open_library_directory(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn initialize_autostart(app: &AppHandle) {
+    if crate::portable::enabled(app) {
+        return;
+    }
     #[cfg(target_os = "macos")]
     if let Err(error) = crate::autostart::initialize(app) {
         eprintln!("初始化自启失败：{error}");
