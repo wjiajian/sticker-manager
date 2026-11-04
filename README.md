@@ -17,9 +17,6 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 表情包散落在聊天记录、下载文件夹和各种相册里，想用的时候要翻半天。表情管理器是一个个人桌面应用：所有表情放进一个本地仓库，按分类、名称和配文来找；在任何应用里按一下快捷键呼出表情面板，单击复制或者直接拖出去发送。有多台电脑的话，可以通过自己的网盘或云存储同步，不需要服务器。
 
-> [!NOTE]
-> macOS 14 及以上已有运行验证，Releases 提供 Apple Silicon 安装包。Windows x64 已通过构建检查、Windows 11 隔离运行检查及用户实际验收，提供 NSIS 安装包和便携 ZIP；当前从 Actions 构建产物下载，详情见 [Windows 验收报告](docs/windows-validation.md) 和[打包说明](docs/packaging.md#windows-x64-构建与验收)。
-
 - [用户篇](#用户篇)：[安装](#安装) · [快速上手](#快速上手) · [功能](#功能) · [数据存放位置](#数据存放位置) · [常见问题](#常见问题)
 - [开发者篇](#开发者篇)：[技术栈](#技术栈) · [目录结构](#目录结构) · [本地开发](#本地开发) · [提交前检查](#提交前检查) · [文档地图](#文档地图) · [发布流程](#发布流程) · [贡献约定](#贡献约定)
 
@@ -46,8 +43,6 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 系统提示的具体措辞随 macOS 版本略有不同。如果提示的是「已损坏」，看[常见问题](#提示已损坏或者打不开怎么办)。
 
 #### Windows
-
-从 [构建 Windows 安装包](https://github.com/wjiajian/sticker-manager/actions/workflows/build-windows.yml) 最近成功运行的 Artifacts 下载对应产物（需要登录 GitHub，产物保留 14 天）：
 
 - **安装版**：下载 `sticker-manager-<版本>-windows-x64`，解压后运行其中的安装程序。
 - **便携版**：下载同一份 `sticker-manager-<版本>-windows-x64` 产物，解开产物中的便携 ZIP，将整个 `sticker-manager` 文件夹放到可写位置，运行 `sticker-manager.exe`。需要 WebView2 Runtime；程序旁的 `portable.flag` 用于启用便携模式，`data` 保存仓库，`webview` 保存缓存。
@@ -209,7 +204,7 @@ Windows 安装版首次使用新路径时，会在目标目录为空的情况下
 
 | 部分 | 选择 |
 |---|---|
-| 应用外壳 | [Tauri 2](https://tauri.app/)（理由见 [ADR 0001](docs/adr/0001-tauri-2.md)） |
+| 应用外壳 | [Tauri 2](https://tauri.app/) |
 | 核心库 | Rust，`crates/core`（crate 名 `sticker-core`）：仓库、分类、导入、搜索、删除、同步和合并规则。不依赖 Tauri，可以单独测试 |
 | 桌面壳 | `src-tauri`：Tauri 命令、窗口、托盘、悬浮球、表情面板、悬停预览、剪贴板、开机自启和应用内更新 |
 | 前端 | React + TypeScript + Vite，Tailwind CSS v4，Zustand（界面状态）+ TanStack Query（调用 Rust 命令取数据），Phosphor Icons |

@@ -1,5 +1,4 @@
 name: 构建 Windows 安装包
-run-name: 构建 Windows 安装包
 
 on:
   workflow_dispatch:
