@@ -1,6 +1,6 @@
 # 打包
 
-从源码打包。目前只验证过 macOS，没有 Apple 签名和公证。
+从源码打包。macOS 和 Windows x64 均已通过构建，Windows 11 运行验收见 [Windows 验收报告](windows-validation.md)。macOS 沿用临时签名，Windows 安装包未签名。
 
 ```bash
 pnpm tauri build --bundles app
@@ -69,4 +69,4 @@ $env:STICKER_LIBRARY_DIR = Join-Path 'D:\Environment\sticker-manager-tests' ([gu
 
 发布版忽略 `STICKER_LIBRARY_DIR`，首次启动还会初始化开机自启，发布版的安装运行验收应单独安排。拖拽功能采用代码检查；系统设置相关场景由用户切换后验证。
 
-Windows 同步文件夹会对非法字符、结尾空格或句点、设备保留名和过长名称给出错误提示。原有名称保留，用户可修改对应的表情名或分类名后重试；网络存储使用原有命名规则。
+Windows 同步文件夹会在记录移动意图前检查非法字符、结尾空格或句点、设备保留名和过长名称，并给出错误提示。用户可修改对应的表情名或分类名后重试，旧客户端留下的非法目标移动意图也可在改名后重新规划。网络存储沿用原有命名规则。

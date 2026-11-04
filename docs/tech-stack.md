@@ -68,7 +68,7 @@
 ## 外观
 
 - 原生窗口主题是唯一来源（`src-tauri/src/appearance.rs`）：切换时同时调 `AppHandle::set_theme` 和每个窗口的 `set_theme`，跟随系统传 `None`。CSS 只写 `@media (prefers-color-scheme: dark)`，前端不另存主题状态。
-- macOS 上实测 WKWebView 的 `prefers-color-scheme` 跟着窗口主题变，隐藏的窗口也会变。Windows 上按源码是 Tao 的 ThemeChanged → Wry 调 WebView2 的 `SetPreferredColorScheme`，没有编译验证过。
+- macOS 上实测 WKWebView 的 `prefers-color-scheme` 跟着窗口主题变，隐藏的窗口也会变。Windows 11 已验证应用内切换深浅外观可更新主窗口、面板、预览和悬浮球的 WebView2 配色。
 - 主窗口先隐藏创建，原生背景色按当前主题设好，第一次页面载入完成后才显示；之后主题变化时同步更新背景色。面板、预览和悬浮球是透明窗口，不设背景色。
 - 颜色变化不做 CSS 过渡：隐藏的 WebView 会暂停动画，切换外观后再打开，会先看到从旧颜色淡入。
 - 配色、对比度和变量用途见[设计规范](../design/README.md)。
@@ -89,7 +89,7 @@
 
 - **复制**：macOS 统一只写一个含 `public.file-url` 的剪贴板条目，指向按表情名命名的原文件副本。不解码、不取动图首帧、不附 PNG，保留源文件的格式、透明通道和动画数据；目标应用可能呈现为图片或文件卡片，发送后是否播放仍由目标应用决定。主窗口按钮、⌘C 和悬浮面板单击使用同一策略。
 - **复制为文件**：macOS 已合并进“复制”，不再单列菜单项；⌘⇧C 保留为同一操作的快捷键。Windows 的 Ctrl+Shift+C 仍只写文件引用。
-- **Windows 尚未对齐**：未编译验证；“复制”仍同时写 CF_DIB、PNG、CF_HDROP，“复制为文件”只写 CF_HDROP。需单独验证后对齐格式策略。
+- Windows 已验证普通复制写入 CF_DIB、PNG、CF_HDROP，复制为文件只写 CF_HDROP，透明 PNG 的 alpha 和原 GIF 字节均保留。聊天应用内的粘贴与发送效果待人工验收，格式策略沿用现有实现。详见 [Windows 验收报告](windows-validation.md)。
 - **拖出发送**：在系统层发起拖拽，交出副本。
 - **在访达 / 资源管理器中显示**：显示副本。
 - 以上交出的文件引用都指向临时目录里按表情名命名的副本，保留 7 天，不把仓库里按哈希命名的原文件交给其他应用或用户改动。
@@ -110,7 +110,7 @@
   - 启动、从睡眠唤醒、手动点击"立即同步"时各同步一次；
   - 唤醒用每秒墙钟采样检测（相邻样本间隔超过 15 秒）；
   - 单工作线程串行同步，运行中再次触发会接着再跑一次。
-- 同步文件夹由同步盘传递文件；其余后端直接联网并使用 reqwest 的系统代理支持。**按流量计费暂停已实现**：网络后端默认启用，macOS 用 Network.framework 路径监视器读取 isExpensive / isConstrained；Windows 用 Windows.Networking.Connectivity 的连接费用 API（每秒检测，代码尚未在 Windows 编译）。检测失败按非计费处理。计费时跳过自动同步，手动“立即同步”可跑一轮；网络恢复后立即同步。调试版支持 `STICKER_FORCE_METERED=1`，发布版忽略。
+- 同步文件夹由同步盘传递文件；其余后端直接联网并使用 reqwest 的系统代理支持。**按流量计费暂停已实现**：网络后端默认启用，macOS 用 Network.framework 路径监视器读取 isExpensive / isConstrained；Windows 用 Windows.Networking.Connectivity 的连接费用 API（每秒检测，已通过 Windows 编译，系统计费状态切换待人工验收）。检测失败按非计费处理。计费时跳过自动同步，手动“立即同步”可跑一轮；网络恢复后立即同步。调试版支持 `STICKER_FORCE_METERED=1`，发布版忽略。
 - **加入新设备**：在偏好设置的“同步”分组选择同一存储目标；网络连接先探测读、写、删除权限，已有仓库显示设备数、表情数并确认加入。设备名默认用电脑名，可修改，保存在本机 `local/device.json`。分组支持取消连接、重新输入凭据、上传/下载原图进度；标题栏显示同步状态，左栏卡片显示后端名和简短地址。
 - 手动暂停保存在本机设置，重启保留；暂停后取消当前轮次，保留上次同步时间与设备列表，所有自动触发跳过。继续同步立即跑一轮。设备列表和上次同步时间缓存于本机 SQLite 的 `sync_device_cache`；0003 迁移增加每张表情的创建来源，用设备 received 计算实际拥有该表情的设备数。
 - **日志维护**：

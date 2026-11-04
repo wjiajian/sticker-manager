@@ -4,7 +4,7 @@
 
 # 表情管理器
 
-macOS 上的表情包管理器：把表情收进一个仓库，分类整理，用的时候随手就能取。
+macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分类整理，用的时候随手就能取。
 
 [![版本 0.1.5](https://img.shields.io/badge/版本-0.1.5-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
@@ -17,7 +17,7 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 表情包散落在聊天记录、下载文件夹和各种相册里，想用的时候要翻半天。表情管理器是一个个人桌面应用：所有表情放进一个本地仓库，按分类、名称和配文来找；在任何应用里按一下快捷键呼出表情面板，单击复制或者直接拖出去发送。有多台电脑的话，可以通过自己的网盘或云存储同步，不需要服务器。
 
 > [!NOTE]
-> 目前只在 macOS 14 及以上验证过，安装包只有 Apple Silicon 版本。代码里保留了 Windows 的分支，但还没有在 Windows 上编译和运行过。
+> macOS 14 及以上已有运行验证，Releases 提供 Apple Silicon 安装包。Windows x64 已通过双平台 CI 构建与 Windows 11 隔离运行验收，Debug 程序和 NSIS 安装包可从构建产物下载，详情见 [Windows 验收报告](docs/windows-validation.md) 和[打包说明](docs/packaging.md#windows-x64-构建与验收)。
 
 - [用户篇](#用户篇)：[安装](#安装) · [快速上手](#快速上手) · [功能](#功能) · [数据存放位置](#数据存放位置) · [常见问题](#常见问题)
 - [开发者篇](#开发者篇)：[技术栈](#技术栈) · [目录结构](#目录结构) · [本地开发](#本地开发) · [提交前检查](#提交前检查) · [文档地图](#文档地图) · [发布流程](#发布流程) · [贡献约定](#贡献约定)
@@ -318,7 +318,7 @@ pnpm build
 git diff --check
 ```
 
-CI 只跑 `pnpm typecheck` 和打包（打包里包含 `pnpm build`），不跑 Rust 的格式、lint 和测试，所以这些要在本地跑过再提交。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
+「Windows 构建与平台回归」CI 在 Windows 和 macOS 上检查前端、Rust 格式、lint、测试及应用构建。原有 macOS 发布工作流运行 `pnpm typecheck` 和打包。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
 
 ### 发布流程
 
