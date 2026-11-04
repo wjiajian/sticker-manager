@@ -32,7 +32,7 @@ export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onCh
       input.current?.focus();
       input.current?.select();
     }
-    // 捕获阶段处理，配文和标签编辑框有焦点时也能跳到搜索。
+    // 捕获阶段处理，配文和分类输入框有焦点时也能跳到搜索。
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
@@ -47,7 +47,7 @@ export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onCh
         <input
           ref={input}
           aria-label="搜索表情"
-          placeholder="搜索表情、标签或配文"
+          placeholder="搜索表情、分类或配文"
           value={searchText}
           onChange={(event) => setSearchText(event.target.value)}
           onCompositionStart={() => setComposing(true)}

@@ -104,8 +104,8 @@ export function useStickerActions(stickers: Sticker[]) {
     const { view, searchQuery } = useUiStore.getState();
     if (operation === "purge" && !await confirm(
       targets.length === 1
-        ? "彻底删除后无法恢复。以后再导入同一张图，会作为一张新表情，标签、配文、收藏和使用次数都不会找回。"
-        : `将彻底删除 ${targets.length} 张表情，无法恢复。以后再导入同一张图，会作为一张新表情，标签、配文、收藏和使用次数都不会找回。已设置同步时，其他设备上也会一起删除。`,
+        ? "彻底删除后无法恢复。以后再导入同一张图，会作为一张新表情，分类、配文、收藏和使用次数都不会找回。"
+        : `将彻底删除 ${targets.length} 张表情，无法恢复。以后再导入同一张图，会作为一张新表情，分类、配文、收藏和使用次数都不会找回。已设置同步时，其他设备上也会一起删除。`,
       { title: targets.length === 1 ? `彻底删除“${targets[0].name}”` : `彻底删除 ${targets.length} 张表情`, kind: "warning", okLabel: "彻底删除", cancelLabel: "取消" },
     )) return;
     if (operation === "purge") {
@@ -151,7 +151,7 @@ export function useStickerActions(stickers: Sticker[]) {
 
   const purgeDeletedStickers = (ids: string[]) => perform(async () => {
     if (!ids.length || !await confirm(
-      `将彻底删除 ${ids.length} 张表情，无法恢复。以后再导入同一张图，会作为一张新表情，标签、配文、收藏和使用次数都不会找回。已设置同步时，其他设备上也会一起删除。`,
+      `将彻底删除 ${ids.length} 张表情，无法恢复。以后再导入同一张图，会作为一张新表情，分类、配文、收藏和使用次数都不会找回。已设置同步时，其他设备上也会一起删除。`,
       { title: "清空最近删除", kind: "warning", okLabel: "全部彻底删除", cancelLabel: "取消" },
     )) return;
     await ipc.purgeDeletedStickers(ids);
