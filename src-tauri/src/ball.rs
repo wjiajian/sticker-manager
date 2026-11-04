@@ -464,8 +464,9 @@ mod native {
         let builder = builder.disable_drag_drop_handler();
         let window = builder.build()?;
         #[cfg(target_os = "windows")]
-        crate::windows_drop::install(&window)
-            .map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
+        if let Err(error) = crate::windows_drop::install(&window) {
+            eprintln!("悬浮球外部拖入不可用，可使用主窗口导入：{error}");
+        }
         #[cfg(not(target_os = "windows"))]
         let _ = window;
         Ok(())

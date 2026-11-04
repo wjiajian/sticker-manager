@@ -1,4 +1,9 @@
 {
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/wjiajian/sticker-manager/releases/latest/download/latest-windows.json"]
+    }
+  },
   "bundle": {
     "icon": ["icons/windows/icon.png", "icons/windows/icon.ico"]
   }

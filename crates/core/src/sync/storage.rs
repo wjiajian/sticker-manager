@@ -50,16 +50,18 @@ fn validate_windows_file_name(key: &str) -> Result<()> {
     for name in key.trim_end_matches('/').split('/') {
         let base = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
         let base = base.to_ascii_uppercase();
-        let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-            || base
-                .strip_prefix("COM")
-                .or_else(|| base.strip_prefix("LPT"))
-                .is_some_and(|suffix| {
-                    matches!(
-                        suffix,
-                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
-                    )
-                });
+        let reserved = matches!(
+            base.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || base
+            .strip_prefix("COM")
+            .or_else(|| base.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                matches!(
+                    suffix,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            });
         if reserved
             || name.ends_with([' ', '.'])
             || name.chars().any(|c| c < ' ' || "<>:\"\\|?*".contains(c))
@@ -73,11 +75,34 @@ fn validate_windows_file_name(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn is_missing_file(error: &std::io::Error) -> bool {
+fn is_missing_file(error: &std::io::Error, _path: &Path) -> bool {
     // Windows 的非法或超长名称不能作为旧移动源，允许改名后重试。
     // 保留其他错误（例如无权限），避免把不可访问的文件误认为已删除。
-    error.kind() == std::io::ErrorKind::NotFound
-        || (cfg!(target_os = "windows") && matches!(error.raw_os_error(), Some(123 | 206)))
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    if matches!(error.raw_os_error(), Some(123 | 206)) {
+        // 只能忽略确实非法的组件；合法组件组成的总路径过长仍是访问错误。
+        return _path.components().any(|component| match component {
+            Component::Normal(name) => validate_windows_file_name(&name.to_string_lossy()).is_err(),
+            _ => false,
+        });
+    }
+    false
+}
+
+#[cfg(all(test, target_os = "windows"))]
+#[test]
+fn total_path_length_errors_are_not_missing_files() {
+    let error = std::io::Error::from_raw_os_error(206);
+    let valid = PathBuf::from("valid-component".repeat(10)).join("another-component".repeat(10));
+    assert!(!is_missing_file(&error, &valid));
+    assert!(is_missing_file(&error, Path::new(&"长".repeat(256))));
+    assert!(!is_missing_file(
+        &std::io::Error::from_raw_os_error(5),
+        Path::new("CON")
+    ));
 }
 
 #[derive(Clone)]
@@ -105,7 +130,7 @@ impl FolderStorage {
                 Ok(m) if m.file_type().is_symlink() => {
                     return Err(Error::Sync("同步文件夹内不能使用符号链接".into()));
                 }
-                Err(e) if !is_missing_file(&e) => return Err(e.into()),
+                Err(e) if !is_missing_file(&e, &path) => return Err(e.into()),
                 _ => {}
             }
         }
@@ -172,9 +197,10 @@ impl Storage for FolderStorage {
         Ok(result)
     }
     fn read(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        match fs::read(self.path(key)?) {
+        let path = self.path(key)?;
+        match fs::read(&path) {
             Ok(bytes) => Ok(Some(bytes)),
-            Err(e) if is_missing_file(&e) => Ok(None),
+            Err(e) if is_missing_file(&e, &path) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
@@ -201,13 +227,13 @@ impl Storage for FolderStorage {
     fn delete(&self, key: &str) -> Result<()> {
         let path = self.path(key)?;
         let result = if key.ends_with('/') {
-            fs::remove_dir(path)
+            fs::remove_dir(&path)
         } else {
-            fs::remove_file(path)
+            fs::remove_file(&path)
         };
         match result {
             Ok(()) => Ok(()),
-            Err(e) if is_missing_file(&e) => Ok(()),
+            Err(e) if is_missing_file(&e, &path) => Ok(()),
             Err(e) => Err(e.into()),
         }
     }

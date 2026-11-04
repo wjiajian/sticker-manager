@@ -47,10 +47,10 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 #### Windows
 
-从 [Windows 构建与平台回归](https://github.com/wjiajian/sticker-manager/actions/workflows/build-windows.yml) 最近成功运行的 Artifacts 下载对应产物（需要登录 GitHub，产物保留 14 天）：
+从 [构建 Windows 安装包](https://github.com/wjiajian/sticker-manager/actions/workflows/build-windows.yml) 最近成功运行的 Artifacts 下载对应产物（需要登录 GitHub，产物保留 14 天）：
 
-- **安装版**：下载 `sticker-manager-windows-nsis-<提交 SHA>`，解压后运行其中的安装程序。
-- **便携版**：下载 `sticker-manager-windows-portable-<提交 SHA>`，解开产物中的便携 ZIP，将整个 `sticker-manager` 文件夹放到可写位置，运行 `sticker-manager.exe`。需要 WebView2 Runtime；程序旁的 `portable.flag` 用于启用便携模式，`data` 保存仓库，`webview` 保存缓存。
+- **安装版**：下载 `sticker-manager-<版本>-windows-x64`，解压后运行其中的安装程序。
+- **便携版**：下载 同一份 `sticker-manager-<版本>-windows-x64` 产物，解开产物中的便携 ZIP，将整个 `sticker-manager` 文件夹放到可写位置，运行 `sticker-manager.exe`。需要 WebView2 Runtime；程序旁的 `portable.flag` 用于启用便携模式，`data` 保存仓库，`webview` 保存缓存。
 - 便携版不登记开机自启，不使用安装式更新。升级时从菜单退出，再替换 EXE，保留 `portable.flag`、`data` 和 `webview`；搬迁时移动整个文件夹。
 
 ### 快速上手
@@ -340,11 +340,11 @@ pnpm build
 git diff --check
 ```
 
-「Windows 构建与平台回归」CI 在 Windows 和 macOS 上检查前端、Rust 格式、lint、测试及应用构建。原有 macOS 发布工作流运行 `pnpm typecheck` 和打包。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
+macOS 与 Windows 分别使用独立、手动触发的安装包构建工作流，均运行 `pnpm typecheck` 和打包；Windows 可勾选 `validate` 额外运行 Rust 格式、Clippy 和测试。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
 
 ### 发布流程
 
-发布通过 GitHub Actions 的「构建 macOS 安装包」workflow（[`.github/workflows/build-macos.yml`](.github/workflows/build-macos.yml)）完成，只能手动触发。
+macOS 继续使用「构建 macOS 安装包」（[build-macos.yml](.github/workflows/build-macos.yml)）；Windows 使用独立的「构建 Windows 安装包」（[build-windows.yml](.github/workflows/build-windows.yml)）。两者均手动触发，默认只生成构建产物，勾选 `release` 才发布。下列步骤以 macOS 为例。
 
 1. **写更新记录**：在 [CHANGELOG.md](CHANGELOG.md) 里写好这个版本的 `## <版本号>` 小节。写法见文件开头的注释：面向用户，只写能感知到的变化，每条一句话，升级须知放在最前面，不用 `###` 标题。这个小节会原样显示在应用的更新对话框里，也会用作 Release 说明；找不到对应版本时退回「未发布」小节。
 2. **改版本号**：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三处必须一致，不一致时 workflow 直接失败。`crates/core/Cargo.toml` 的版本号习惯上一起改。
@@ -352,6 +352,8 @@ git diff --check
 4. **触发构建**：在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow。`release` 勾选项（「发布到 Release」）决定发不发版：
    - 不勾选：只构建，DMG 在运行详情页的 Artifacts 里下载，保留 14 天。
    - 勾选：以 `v<版本号>` 为 tag 创建 Release，tag 指向所选分支的最新提交。附件是 `sticker-manager_<版本>_aarch64.dmg`、更新包 `sticker-manager_<版本>_aarch64.app.tar.gz` 和 `latest.json`。如果这个 tag 的 Release 已经存在，只覆盖上传这三个文件，不改说明。
+
+Windows 采用相同的版本检查、可选更新签名和 Release 上传流程，附件为 NSIS 安装包、便携 ZIP 和独立的 `latest-windows.json`，不覆盖 macOS 的 `latest.json`。便携版始终手动升级。
 
 附件都用 ASCII 文件名，因为 GitHub 会去掉附件名里的中文。
 

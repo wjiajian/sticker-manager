@@ -5,8 +5,22 @@ fn incompatible_folder_names_fail_before_creating_files() {
     let directory = tempfile::tempdir().unwrap();
     let folder = FolderStorage::new(directory.path()).unwrap();
     for name in [
-        "CON", "nul", "Aux.txt", "COM1", "LPT²", "末尾.", "末尾 ", "问?号", "星*号", "冒:号",
-        "小<于", "大>于", "引\"号", "管|道",
+        "CON",
+        "CONIN$",
+        "conout$.txt",
+        "nul",
+        "Aux.txt",
+        "COM1",
+        "LPT²",
+        "末尾.",
+        "末尾 ",
+        "问?号",
+        "星*号",
+        "冒:号",
+        "小<于",
+        "大>于",
+        "引\"号",
+        "管|道",
     ] {
         let key = format!("正常分类/{name}/收到.png");
         let error = folder.write(&key, b"unchanged").unwrap_err().to_string();

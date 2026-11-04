@@ -1,20 +1,22 @@
-name: Windows 构建与平台回归
+name: 构建 Windows 安装包
 
 on:
-  push:
-    branches: [codex/windows-platform]
   workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: windows-platform-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      release:
+        description: 发布到 Release（tag 为 v + package.json 版本号）
+        type: boolean
+        default: false
+      validate:
+        description: 额外运行 Rust 格式、Clippy 和测试
+        type: boolean
+        default: false
 
 jobs:
-  windows:
+  build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -23,75 +25,84 @@ jobs:
           node-version: 22
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-          targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
-      - name: 检查版本号一致
-        run: |
-          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $cargoVersion = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-          if ($packageVersion -ne $tauriVersion -or $packageVersion -ne $cargoVersion) {
-            throw "版本号不一致：package.json $packageVersion，tauri.conf.json $tauriVersion，Cargo.toml $cargoVersion"
-          }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm build
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
-      - name: 构建隔离验收用 Debug 程序
-        run: pnpm tauri build --debug --no-bundle --target x86_64-pc-windows-msvc -- --locked
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sticker-manager-windows-debug-${{ github.sha }}
-          path: target/x86_64-pc-windows-msvc/debug/sticker-manager.exe
-          if-no-files-found: error
-          retention-days: 14
-      - name: 构建 NSIS 安装包
-        run: pnpm tauri build --bundles nsis --target x86_64-pc-windows-msvc -- --locked
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sticker-manager-windows-nsis-${{ github.sha }}
-          path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-          if-no-files-found: error
-          retention-days: 14
 
-      - name: 打包便携版
-        shell: pwsh
+      - id: version
         run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauri = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ($version -ne $tauri -or $version -ne $cargo) { throw '版本号不一致' }
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - if: inputs.validate
+        run: |
+          rustup component add rustfmt clippy
+          cargo fmt --all --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - id: build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            pnpm tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":true}}'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            'updater=true' >> $env:GITHUB_OUTPUT
+          } elseif ($env:RELEASE -eq 'true') {
+            throw '发布到 Release 需要仓库 Secret TAURI_SIGNING_PRIVATE_KEY（更新签名私钥），见 docs/packaging.md'
+          } else {
+            pnpm tauri build --bundles nsis
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: 整理安装包与便携版
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $output = 'target/release/bundle/release'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $installers = @(Get-ChildItem 'target/release/bundle/nsis/*.exe')
+          if ($installers.Count -ne 1) { throw '应该正好有一个 NSIS 安装包' }
+          Copy-Item -LiteralPath $installers[0].FullName -Destination "$output/sticker-manager_$($env:VERSION)_x64-setup.exe"
           $portable = 'target/portable/sticker-manager'
           New-Item -ItemType Directory -Force -Path $portable | Out-Null
-          Copy-Item -LiteralPath 'target/x86_64-pc-windows-msvc/release/sticker-manager.exe' -Destination "$portable/sticker-manager.exe"
+          Copy-Item -LiteralPath 'target/release/sticker-manager.exe' -Destination "$portable/sticker-manager.exe"
           New-Item -ItemType File -Path "$portable/portable.flag" | Out-Null
-          '便携版需要 WebView2 Runtime。请解压到可写目录后运行。升级时退出程序并替换 EXE，保留 portable.flag、data 和 webview。' | Set-Content -LiteralPath "$portable/使用说明.txt" -Encoding utf8
-          Compress-Archive -Path $portable -DestinationPath 'target/portable/sticker-manager-windows-x64-portable.zip'
+          '便携版需要 WebView2 Runtime。解压到可写目录后运行。升级前从菜单退出，替换 EXE，保留 portable.flag、data 和 webview。' | Set-Content -LiteralPath "$portable/使用说明.txt" -Encoding utf8
+          Compress-Archive -Path $portable -DestinationPath "$output/sticker-manager_$($env:VERSION)_windows-x64-portable.zip"
+
+      - if: steps.build.outputs.updater == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.value }}
+        run: node .github/scripts/windows-updater-manifest.mjs
+
       - uses: actions/upload-artifact@v4
         with:
-          name: sticker-manager-windows-portable-${{ github.sha }}
-          path: target/portable/*.zip
+          name: sticker-manager-${{ steps.version.outputs.value }}-windows-x64
+          path: target/release/bundle/release/*
           if-no-files-found: error
           retention-days: 14
 
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm build
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
-      - name: 构建 macOS 应用验证兼容性
-        run: pnpm tauri build --bundles app -- --locked
+      - if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.value }}
+        run: |
+          $files = @(Get-ChildItem 'target/release/bundle/release/*' | ForEach-Object FullName)
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG @files --clobber
+          } else {
+            gh release create $env:TAG @files --target $env:GITHUB_SHA --title $env:TAG --notes-file target/release/bundle/release-notes.md
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -46,7 +46,9 @@ env HOME="$release_home" TMPDIR="$release_home/tmp" \
 
 ## Windows x64 构建与验收
 
-「Windows 构建与平台回归」工作流在 `codex/windows-platform` 分支推送时运行，也支持手动触发。Windows 作业运行前端构建、Rust 格式检查、Clippy 和现有测试，然后上传按提交 SHA 命名的 Debug 程序与 NSIS 安装包，保留 14 天。macOS 作业运行同一套检查并构建 `.app`，用于检查共享代码的兼容性。
+「构建 Windows 安装包」工作流独立于原有 macOS 构建，只能手动触发。默认检查版本号、安装依赖、类型检查，然后构建 NSIS 和便携 ZIP。勾选 `validate` 可额外运行 Rust 格式、Clippy 和测试。产物统一命名为 `sticker-manager-<版本>-windows-x64`，保留 14 天。没有分支限定的 push 或 PR 自动回归任务。
+
+与 macOS 一样，`release` 默认不勾选；勾选后需要 `TAURI_SIGNING_PRIVATE_KEY`，生成更新签名并创建或补充 `v<版本>` Release。已有 Release 不改说明。Windows 使用独立的 `latest-windows.json`，macOS 工作流和 `latest.json` 保持原样。便携 ZIP 不走安装式更新。更新签名不是 Windows 代码签名。
 
 Windows 构建命令如下，需要 Rust MSVC 工具链、C++ Build Tools、Windows SDK、Node.js 和项目固定版本的 pnpm。
 
@@ -56,7 +58,7 @@ pnpm tauri build --debug --no-bundle --target x86_64-pc-windows-msvc -- --locked
 pnpm tauri build --bundles nsis --target x86_64-pc-windows-msvc -- --locked
 ```
 
-调试程序位于 `target/x86_64-pc-windows-msvc/debug/sticker-manager.exe`，内嵌构建好的前端，可以直接运行。安装包位于 `target/x86_64-pc-windows-msvc/release/bundle/nsis/`。这条工作流提供构建产物，正式 Release 和自动更新沿用各自的发布流程。
+上述带 `--target` 的本地命令把 Debug 程序和安装包放在 `target/x86_64-pc-windows-msvc/` 下。工作流使用 runner 默认 Windows 目标，将安装包和便携 ZIP 整理到 `target/release/bundle/release/`，使用 ASCII 文件名上传。Debug 程序内嵌前端，可按上述命令单独构建。
 
 本机要求所有新增环境安装文件位于 D 盘时，开发工具及可配置缓存使用 `D:\Environment`。微软安装器的一部分组件会安装到系统盘，因此本机使用前端检查及 CI 下载产物进行验收，MSVC 编译使用远端 runner。便携 GitHub CLI 的配置目录通过 `GH_CONFIG_DIR` 指向 D 盘；环境激活脚本只为当前进程设置路径和缓存。
 
@@ -73,7 +75,7 @@ Windows 同步文件夹会在记录移动意图前检查非法字符、结尾空
 
 ### Windows 便携版
 
-同一工作流另行上传 `sticker-manager-windows-portable-<SHA>`，其中的 ZIP 包含程序、`portable.flag` 和使用说明。将整个 ZIP 解压到可写目录后运行，首次启动创建旁边的 `data` 仓库和 `webview` 缓存。运行需要 WebView2 Runtime。
+同一工作流的 `sticker-manager-<版本>-windows-x64` 产物包含 NSIS 安装包和 `sticker-manager_<版本>_windows-x64-portable.zip`；便携 ZIP 内有程序、`portable.flag` 和使用说明。将整个 ZIP 解压到可写目录后运行，首次启动创建旁边的 `data` 仓库和 `webview` 缓存。运行需要 WebView2 Runtime。
 
 便携模式由程序所在目录的 `portable.flag` 文件启用，安装版仓库迁移仅在安装模式执行。便携版关闭开机自启登记，检查更新入口提示手动升级。升级时先退出应用，再替换 EXE，保留 `portable.flag`、`data` 和 `webview`。移动到另一位置时一起移动整个目录。
 

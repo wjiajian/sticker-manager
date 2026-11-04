@@ -3,10 +3,12 @@ use std::{cell::Cell, ffi::OsString, os::windows::ffi::OsStringExt, path::PathBu
 use tauri::{Emitter, Manager};
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, POINTL},
+        Foundation::{E_FAIL, HANDLE, HWND, LPARAM, POINTL, S_OK},
         System::{
             Com::{
-                DVASPECT_CONTENT, FORMATETC, IDataObject, STGMEDIUM, TYMED_HGLOBAL, TYMED_ISTREAM,
+                COINIT_MULTITHREADED, COWAIT_DISPATCH_CALLS, COWAIT_DISPATCH_WINDOW_MESSAGES,
+                CoInitializeEx, CoUninitialize, CoWaitForMultipleHandles, DVASPECT_CONTENT,
+                FORMATETC, IDataObject, STGMEDIUM, TYMED_HGLOBAL, TYMED_ISTREAM,
             },
             DataExchange::RegisterClipboardFormatW,
             Memory::{GlobalLock, GlobalSize, GlobalUnlock},
@@ -17,11 +19,11 @@ use windows::{
             SystemServices::MODIFIERKEYS_FLAGS,
         },
         UI::{
-            Shell::{DragQueryFileW, FILEDESCRIPTORW, HDROP},
+            Shell::{DragQueryFileW, FILEDESCRIPTORW, HDROP, IDataObjectAsyncCapability},
             WindowsAndMessaging::EnumChildWindows,
         },
     },
-    core::{BOOL, HSTRING, Ref, implement},
+    core::{AgileReference, BOOL, HSTRING, Interface, Ref, implement},
 };
 
 const MAX_BYTES: usize = 100 * 1024 * 1024;
@@ -182,6 +184,91 @@ struct Received {
     _temporary: Option<tempfile::TempDir>,
 }
 
+struct ComApartment;
+impl ComApartment {
+    fn enter() -> windows::core::Result<Self> {
+        unsafe {
+            CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
+        }
+        Ok(Self)
+    }
+}
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() };
+    }
+}
+
+// AgileReference 持有对象并通过 COM 封送；绝不把 apartment-bound IDataObject 裸指针传给线程。
+fn receive_in_background(
+    data: &IDataObject,
+    complete: impl FnOnce(Result<Received, String>) + Send + 'static,
+) -> Result<(), String> {
+    let reference = AgileReference::new(data).map_err(|e| e.to_string())?;
+    let asynchronous = data
+        .cast::<IDataObjectAsyncCapability>()
+        .ok()
+        .filter(|operation| unsafe { operation.GetAsyncMode().is_ok_and(|mode| mode.as_bool()) });
+    if let Some(operation) = &asynchronous {
+        unsafe {
+            operation.StartOperation(None).map_err(|e| e.to_string())?;
+        }
+    }
+    let is_async = asynchronous.is_some();
+    let worker = std::thread::Builder::new()
+        .name("sticker-drop".into())
+        .spawn(move || {
+            let result = (|| {
+                let _apartment = ComApartment::enter().map_err(|e| e.to_string())?;
+                let data = reference.resolve().map_err(|e| e.to_string())?;
+                let result = receive(&data);
+                if is_async {
+                    let operation = data
+                        .cast::<IDataObjectAsyncCapability>()
+                        .map_err(|e| e.to_string())?;
+                    unsafe {
+                        operation
+                            .EndOperation(
+                                if result.is_ok() { S_OK } else { E_FAIL },
+                                None,
+                                if result.is_ok() { DROPEFFECT_COPY.0 } else { 0 },
+                            )
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+                // reference 也必须在 CoUninitialize 之前释放。
+                drop(data);
+                drop(reference);
+                result
+            })();
+            complete(result);
+        });
+    let worker = match worker {
+        Ok(worker) => worker,
+        Err(error) => {
+            if let Some(operation) = &asynchronous {
+                let _ = unsafe { operation.EndOperation(E_FAIL, None, 0) };
+            }
+            return Err(error.to_string());
+        }
+    };
+    if !is_async {
+        // 旧源未协商异步时，必须保持 Drop 生命周期。OLE modal wait 继续派发
+        // COM 与窗口消息；数据获取和解码仍在线程上运行，窗口不因慢源停止响应。
+        use std::os::windows::io::AsRawHandle;
+        unsafe {
+            CoWaitForMultipleHandles(
+                (COWAIT_DISPATCH_CALLS.0 | COWAIT_DISPATCH_WINDOW_MESSAGES.0) as u32,
+                u32::MAX,
+                &[HANDLE(worker.as_raw_handle())],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        worker.join().map_err(|_| "读取拖入数据的线程异常退出")?;
+    }
+    Ok(())
+}
+
 fn receive(data: &IDataObject) -> Result<Received, String> {
     if let Ok(medium) = get(data, &format(15, -1, TYMED_HGLOBAL.0 as u32)) {
         let drop = unsafe { HDROP(medium.0.u.hGlobal.0) };
@@ -336,31 +423,38 @@ impl IDropTarget_Impl for Target_Impl {
         let result = data
             .as_ref()
             .ok_or_else(|| "拖入数据为空".into())
-            .and_then(receive);
-        match result {
-            Ok(received) => {
-                unsafe {
-                    *effect = DROPEFFECT_COPY;
-                }
+            .and_then(|data| {
                 let app = self.app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let result =
-                        crate::imports::run(app.clone(), received.paths.clone(), true).await;
-                    match result {
-                        Ok(report) => {
-                            let _ = app.emit_to("ball", "external-drop-result", report);
+                receive_in_background(data, move |received| {
+                    tauri::async_runtime::spawn(async move {
+                        let result = match &received {
+                            Ok(received) => {
+                                crate::imports::run(app.clone(), received.paths.clone(), true).await
+                            }
+                            Err(error) => Err(error.clone()),
+                        };
+                        match result {
+                            Ok(report) => {
+                                let _ = app.emit_to("ball", "external-drop-result", report);
+                            }
+                            Err(error) => {
+                                let handle = app.clone();
+                                let _ = app.run_on_main_thread(move || {
+                                    let _ = crate::ball::ball_message(
+                                        handle,
+                                        format!("导入失败：{error}"),
+                                    );
+                                });
+                            }
                         }
-                        Err(error) => {
-                            let handle = app.clone();
-                            let _ = app.run_on_main_thread(move || {
-                                let _ =
-                                    crate::ball::ball_message(handle, format!("导入失败：{error}"));
-                            });
-                        }
-                    }
-                    drop(received);
-                });
-            }
+                        drop(received);
+                    });
+                })
+            });
+        match result {
+            Ok(()) => unsafe {
+                *effect = DROPEFFECT_COPY;
+            },
             Err(error) => {
                 let _ = crate::ball::ball_message(self.app.clone(), error);
             }
@@ -428,21 +522,89 @@ mod tests {
         },
     };
 
-    #[implement(IDataObject)]
+    #[derive(Default)]
+    #[implement(IDataObject, IDataObjectAsyncCapability)]
     struct Sample {
-        formats: Vec<(u16, i32, Vec<u8>)>,
+        formats: Vec<(u16, i32, Vec<u8>, u32)>,
+        async_state: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+        release_data: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    }
+
+    #[allow(non_snake_case)]
+    impl windows::Win32::UI::Shell::IDataObjectAsyncCapability_Impl for Sample_Impl {
+        fn SetAsyncMode(&self, _: BOOL) -> windows::core::Result<()> {
+            Ok(())
+        }
+        fn GetAsyncMode(&self) -> windows::core::Result<BOOL> {
+            Ok(BOOL(self.async_state.is_some() as i32))
+        }
+        fn StartOperation(
+            &self,
+            _: Ref<windows::Win32::System::Com::IBindCtx>,
+        ) -> windows::core::Result<()> {
+            self.async_state
+                .as_ref()
+                .unwrap()
+                .store(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        fn InOperation(&self) -> windows::core::Result<BOOL> {
+            Ok(BOOL(
+                self.async_state
+                    .as_ref()
+                    .is_some_and(|s| s.load(std::sync::atomic::Ordering::SeqCst) == 1)
+                    as i32,
+            ))
+        }
+        fn EndOperation(
+            &self,
+            result: windows::core::HRESULT,
+            _: Ref<windows::Win32::System::Com::IBindCtx>,
+            _: u32,
+        ) -> windows::core::Result<()> {
+            self.async_state.as_ref().unwrap().store(
+                if result.is_ok() { 2 } else { 3 },
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            Ok(())
+        }
     }
 
     #[allow(non_snake_case)]
     impl IDataObject_Impl for Sample_Impl {
         fn GetData(&self, request: *const FORMATETC) -> windows::core::Result<STGMEDIUM> {
             let request = unsafe { &*request };
-            let (_, _, bytes) = self
+            if request.cfFormat == registered("FileContents") {
+                if let Some(release) = &self.release_data {
+                    let start = std::time::Instant::now();
+                    while !release.load(std::sync::atomic::Ordering::SeqCst) {
+                        if start.elapsed() > std::time::Duration::from_secs(3) {
+                            return Err(E_FAIL.into());
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+            }
+            let (_, _, bytes, medium) = self
                 .formats
                 .iter()
-                .find(|(id, index, _)| *id == request.cfFormat && *index == request.lindex)
+                .find(|(id, index, _, medium)| {
+                    *id == request.cfFormat
+                        && *index == request.lindex
+                        && request.tymed & medium != 0
+                })
                 .ok_or_else(|| windows::core::Error::from_hresult(E_NOTIMPL))?;
             unsafe {
+                if *medium == TYMED_ISTREAM.0 as u32 {
+                    let stream = windows::Win32::UI::Shell::SHCreateMemStream(Some(bytes))
+                        .ok_or_else(|| windows::core::Error::from_hresult(E_FAIL))?;
+                    let mut result = STGMEDIUM {
+                        tymed: *medium,
+                        ..Default::default()
+                    };
+                    result.u.pstm = std::mem::ManuallyDrop::new(Some(stream));
+                    return Ok(result);
+                }
                 let handle = GlobalAlloc(GMEM_MOVEABLE, bytes.len())?;
                 let pointer = GlobalLock(handle);
                 assert!(!pointer.is_null());
@@ -458,11 +620,9 @@ mod tests {
         }
         fn QueryGetData(&self, request: *const FORMATETC) -> windows::core::HRESULT {
             let request = unsafe { &*request };
-            if self
-                .formats
-                .iter()
-                .any(|(id, index, _)| *id == request.cfFormat && *index == request.lindex)
-            {
+            if self.formats.iter().any(|(id, index, _, medium)| {
+                *id == request.cfFormat && *index == request.lindex && request.tymed & medium != 0
+            }) {
                 windows::core::HRESULT(0)
             } else {
                 E_NOTIMPL
@@ -524,6 +684,82 @@ mod tests {
     }
 
     #[test]
+    fn virtual_file_receive_negotiates_stream_only_contents() {
+        let original: Vec<u8> = (0..150_000).map(|n| (n % 251) as u8).collect();
+        let data: IDataObject = Sample {
+            formats: vec![
+                (
+                    registered("FileGroupDescriptorW"),
+                    -1,
+                    file_descriptor("收到.gif"),
+                    TYMED_HGLOBAL.0 as u32,
+                ),
+                (
+                    registered("FileContents"),
+                    0,
+                    original.clone(),
+                    TYMED_ISTREAM.0 as u32,
+                ),
+            ],
+            ..Default::default()
+        }
+        .into();
+        let wrong = format(registered("FileContents"), 0, TYMED_HGLOBAL.0 as u32);
+        assert!(unsafe { data.QueryGetData(&wrong) }.is_err());
+        assert!(get(&data, &wrong).is_err());
+        let received = receive(&data).unwrap();
+        assert_eq!(std::fs::read(&received.paths[0]).unwrap(), original);
+        let path = received.paths[0].clone();
+        drop(received);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn slow_async_source_returns_before_data_is_available() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        let _apartment = ComApartment::enter().unwrap();
+        let state = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new(AtomicBool::new(false));
+        let data: IDataObject = Sample {
+            formats: vec![
+                (
+                    registered("FileGroupDescriptorW"),
+                    -1,
+                    file_descriptor("收到.gif"),
+                    TYMED_HGLOBAL.0 as u32,
+                ),
+                (
+                    registered("FileContents"),
+                    0,
+                    b"GIF89a".to_vec(),
+                    TYMED_ISTREAM.0 as u32,
+                ),
+            ],
+            async_state: Some(state.clone()),
+            release_data: Some(release.clone()),
+        }
+        .into();
+        let (send, receive) = std::sync::mpsc::channel();
+        receive_in_background(&data, move |result| {
+            send.send(result).unwrap();
+        })
+        .unwrap();
+        assert_eq!(state.load(Ordering::SeqCst), 1);
+        assert!(receive.try_recv().is_err());
+        drop(data); // 后台持有封送引用，原调用方的引用可以释放。
+        release.store(true, Ordering::SeqCst);
+        let received = receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(std::fs::read(&received.paths[0]).unwrap(), b"GIF89a");
+        assert_eq!(state.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
     fn file_paths_keep_the_source_file_and_streams_keep_all_chunks() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("收到.png");
@@ -535,7 +771,8 @@ mod tests {
             hdrop.extend_from_slice(&value.to_le_bytes());
         }
         let data: IDataObject = Sample {
-            formats: vec![(15, -1, hdrop)],
+            formats: vec![(15, -1, hdrop, TYMED_HGLOBAL.0 as u32)],
+            ..Default::default()
         }
         .into();
         let received = receive(&data).unwrap();
@@ -563,9 +800,16 @@ mod tests {
                     registered("FileGroupDescriptorW"),
                     -1,
                     file_descriptor("收到.gif"),
+                    TYMED_HGLOBAL.0 as u32,
                 ),
-                (registered("FileContents"), 0, original.clone()),
+                (
+                    registered("FileContents"),
+                    0,
+                    original.clone(),
+                    TYMED_HGLOBAL.0 as u32,
+                ),
             ],
+            ..Default::default()
         }
         .into();
         let received = receive(&data).unwrap();
@@ -588,12 +832,18 @@ mod tests {
         image.write_to(&mut png, image::ImageFormat::Png).unwrap();
         let original = png.into_inner();
         let data: IDataObject = Sample {
-            formats: vec![(registered("PNG"), -1, original.clone())],
+            formats: vec![(
+                registered("PNG"),
+                -1,
+                original.clone(),
+                TYMED_HGLOBAL.0 as u32,
+            )],
+            ..Default::default()
         }
         .into();
         let received = receive(&data).unwrap();
         assert_eq!(std::fs::read(&received.paths[0]).unwrap(), original);
-        let unsupported: IDataObject = Sample { formats: vec![] }.into();
+        let unsupported: IDataObject = Sample::default().into();
         assert!(receive(&unsupported).err().unwrap().contains("没有提供"));
     }
 

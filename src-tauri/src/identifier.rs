@@ -14,6 +14,16 @@ pub fn migrate_previous_library(root: &Path) -> std::io::Result<bool> {
 
 #[cfg(target_os = "windows")]
 pub fn migrate_windows_library(root: &Path) -> std::io::Result<bool> {
+    let Some(parent) = root.parent() else {
+        return Ok(false);
+    };
+    // 跨进程串行化检查、移除空目标和改名，避免两个启动实例互相删除目标。
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(parent.join(".sticker-manager-migration.lock"))?;
+    lock.lock()?;
     if migrate_named_library(root, "com.wjiajian.sticker-manager")? {
         return Ok(true);
     }
@@ -24,12 +34,22 @@ fn migrate_named_library(root: &Path, previous_name: &str) -> std::io::Result<bo
     let Some(previous) = root.parent().map(|parent| parent.join(previous_name)) else {
         return Ok(false);
     };
-    if previous == root || !previous.is_dir() {
+    if previous == root {
+        return Ok(false);
+    }
+    match fs::metadata(&previous) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return Err(std::io::Error::other("旧仓库路径不是目录")),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    // 空目录不代表已有仓库，不能遮住更早版本仍有数据的仓库。
+    if fs::read_dir(&previous)?.next().transpose()?.is_none() {
         return Ok(false);
     }
     match fs::read_dir(root) {
         Ok(mut entries) => {
-            if entries.next().is_some() {
+            if entries.next().transpose()?.is_some() {
                 return Ok(false);
             }
             fs::remove_dir(root)?;
@@ -44,6 +64,53 @@ fn migrate_named_library(root: &Path, previous_name: &str) -> std::io::Result<bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn empty_current_directory_does_not_hide_legacy_data() {
+        let (parent, previous, current) = setup();
+        fs::create_dir(&current).unwrap();
+        let root = parent.path().join("sticker-manager");
+        assert!(migrate_windows_library(&root).unwrap());
+        assert_eq!(fs::read(root.join("library.db")).unwrap(), b"db");
+        assert!(!previous.exists());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn concurrent_windows_migrations_preserve_the_library() {
+        let (parent, _, _) = setup();
+        let root = parent.path().join("sticker-manager");
+        fs::create_dir(&root).unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        migrate_windows_library(&root).unwrap()
+                    })
+                })
+                .collect();
+            assert_eq!(
+                jobs.into_iter()
+                    .map(|job| job.join().unwrap() as usize)
+                    .sum::<usize>(),
+                1
+            );
+        });
+        assert_eq!(fs::read(root.join("library.db")).unwrap(), b"db");
+    }
+
+    #[test]
+    fn invalid_source_is_not_treated_as_absence() {
+        let parent = tempfile::tempdir().unwrap();
+        let file = parent.path().join(PREVIOUS_IDENTIFIER);
+        fs::write(&file, b"existing").unwrap();
+        let root = parent.path().join("new");
+        assert!(migrate_previous_library(&root).is_err());
+        assert!(!root.exists());
+    }
 
     #[cfg(target_os = "windows")]
     #[test]
