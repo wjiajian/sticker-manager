@@ -226,14 +226,14 @@ fn receive_in_background(
             let result = (|| {
                 let _apartment = ComApartment::enter().map_err(|e| e.to_string())?;
                 // 局部绑定保证错误返回时封送引用也先于 apartment 释放。
-                let reference = reference;
-                let operation_reference = operation_reference;
-                let operation = operation_reference
+                let data_reference = reference;
+                let completion_reference = operation_reference;
+                let operation = completion_reference
                     .as_ref()
                     .map(AgileReference::resolve)
                     .transpose()
                     .map_err(|e| e.to_string())?;
-                let result = reference
+                let result = data_reference
                     .resolve()
                     .map_err(|e| e.to_string())
                     .and_then(|data| receive(&data));
@@ -249,7 +249,7 @@ fn receive_in_background(
                     }
                 }
                 // reference 也必须在 CoUninitialize 之前释放。
-                drop(reference);
+                drop(data_reference);
                 result
             })();
             complete(result);
@@ -585,15 +585,15 @@ mod tests {
     impl IDataObject_Impl for Sample_Impl {
         fn GetData(&self, request: *const FORMATETC) -> windows::core::Result<STGMEDIUM> {
             let request = unsafe { &*request };
-            if request.cfFormat == registered("FileContents") {
-                if let Some(release) = &self.release_data {
-                    let start = std::time::Instant::now();
-                    while !release.load(std::sync::atomic::Ordering::SeqCst) {
-                        if start.elapsed() > std::time::Duration::from_secs(3) {
-                            return Err(E_FAIL.into());
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(5));
+            if request.cfFormat == registered("FileContents")
+                && let Some(release) = &self.release_data
+            {
+                let start = std::time::Instant::now();
+                while !release.load(std::sync::atomic::Ordering::SeqCst) {
+                    if start.elapsed() > std::time::Duration::from_secs(3) {
+                        return Err(E_FAIL.into());
                     }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
                 }
             }
             let (_, _, bytes, medium) = self
