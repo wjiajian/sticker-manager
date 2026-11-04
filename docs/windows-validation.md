@@ -1,5 +1,34 @@
 # Windows 构建与验收
 
+## 六项反馈修复（当前产物）
+
+2026-11-04，应用提交 `607817288a412a9c80c1be1d4aa2a925536fbce1`。[双平台 CI](https://github.com/wjiajian/sticker-manager/actions/runs/41836309925) 全部通过：Windows 203 项测试、macOS 195 项测试，各有原有 8 项网络／容器测试忽略；两边的类型检查、前端构建、格式检查、Clippy 和应用构建通过。版本仍为 0.1.5。
+
+| 反馈 | 实现与验证 |
+|---|---|
+| Windows 仓库路径 | 安装模式使用 `%APPDATA%\sticker-manager`，目标为空时自动迁移现有标识符目录，并兼容更早的目录。临时目录测试验证优先级与已有数据保护；没有操作用户真实 AppData 仓库。 |
+| 便携版 | ZIP 内含 EXE、`portable.flag` 与说明，仓库为旁边的 `data`，WebView 缓存为 `webview`。实际 Release 程序验证空仓库启动、导入一张测试图、整目录搬迁后重启，数据与缩略图保留；自启请求被拒绝，更新入口提示手动替换程序。需要已有 WebView2 Runtime。 |
+| 悬停预览关闭面板 | Windows 预览改为不激活窗口的原生显示／隐藏，悬浮球穿透样式更新不再触发激活。实际 Debug 实例在未固定状态连续验证 5 次预览，预览显示、图片解码成功，面板始终可见并保持焦点，预览不获得焦点。 |
+| 左上角标题 | 仅 Windows 图标由 24 增至 32 CSS 像素，标题由 14 增至 16；真实程序截图与 960×600 布局检查通过。 |
+| 任务栏图标 | Windows 专用 ICO／PNG 减少图案留白，主窗口与打包配置使用新图标，macOS 原图标未修改。已检查图标资源及构建配置；未截取用户整个任务栏作视觉验收。 |
+| 聊天软件拖入 | Windows 悬浮球登记原生 OLE 接收器，支持本地文件、虚拟文件／文件流、PNG、DIB／DIBV5，复用现有导入和结果提示。实际程序初始化成功；5 项数据格式测试通过，覆盖源文件保留、虚拟 GIF 字节保留、流分块、PNG、位图转换、异常数据与临时文件清理。按项目约定没有进行微信／QQ 的真实拖拽，具体客户端仍以用户使用反馈为准。 |
+
+测试均使用 `D:\Environment\sticker-manager-tests\followup-6fbd34c947d24ea7bdb6de6ef3de1a0d` 下的临时数据，并设置绝对路径 `STICKER_LIBRARY_DIR`。Release 便携版通过标记文件实际隔离数据。窗口检查通过指定 WebView 后台执行；为验证焦点短暂显示了测试面板，没有移动用户鼠标或接管整个屏幕。测试实例均已关闭。强制终止后 WebView 缓存曾短暂被子进程占用，等待其退出后整目录搬迁成功，日常移动前应从菜单正常退出。
+
+当前产物（已替换工作区同名旧构建）：
+
+| 产物 | 路径 | SHA-256 |
+|---|---|---|
+| Debug | `target/x86_64-pc-windows-msvc/debug/sticker-manager.exe` | `98af50bb1a8d3faed69ebe363ba5e634b1dba5f7aad959890c50d5011ccf5560` |
+| NSIS | `target/x86_64-pc-windows-msvc/release/bundle/nsis/表情管理器_0.1.5_x64-setup.exe` | `0b82b4379fe5daa591fc3c7f130908bf91c30dc87f9845ef9fc0f28c53c10c14` |
+| 便携 ZIP | `target/portable/sticker-manager-windows-x64-portable.zip` | `c8cc8b9ed0283cfd5302886f14115f93b2e2f33a50a184fb041ae6e5c56fe416` |
+
+验收记录与截图位于 `target/windows-validation/followup-results.json`、`followup-main.png`、`followup-preview.png`。本轮新增依赖只在 Windows 目标启用；锁文件只增加已有版本 `windows-core 0.62.2` 的直接依赖关系，没有升级依赖版本。macOS 保持原仓库路径、窗口分支、图标和发布流程；本轮未执行 macOS 真实窗口验收。
+
+## 初次 Windows 构建（历史记录）
+
+以下记录对应旧提交，产物已由上面的当前构建替换。
+
 2026-11-04 完成 Windows x64 构建与隔离运行验收。应用代码为 `2ed0317179786eb07f2b8d3031a3a54f8bfeac50`，分支为 `codex/windows-platform`，后续文档提交沿用这份构建产物。
 
 ## 初始情况与实现范围
