@@ -539,7 +539,7 @@ mod tests {
         }
         .into();
         let received = receive(&data).unwrap();
-        assert_eq!(received.paths, [path.clone()]);
+        assert_eq!(received.paths.as_slice(), std::slice::from_ref(&path));
         drop(received);
         assert_eq!(std::fs::read(path).unwrap(), b"original");
 
