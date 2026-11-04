@@ -6,7 +6,7 @@
 
 macOS 上的表情包管理器：把表情收进一个仓库，分类整理，用的时候随手就能取。
 
-[![版本 0.1.4](https://img.shields.io/badge/版本-0.1.4-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
+[![版本 0.1.5](https://img.shields.io/badge/版本-0.1.5-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
 
@@ -26,7 +26,7 @@ macOS 上的表情包管理器：把表情收进一个仓库，分类整理，�
 
 ### 安装
 
-1. 打开 [GitHub Releases](https://github.com/wjiajian/sticker-manager/releases/latest)，下载 `sticker-manager_<版本>_<架构>.dmg`。目前只发布 Apple Silicon 版本，文件名形如 `sticker-manager_0.1.4_aarch64.dmg`。
+1. 打开 [GitHub Releases](https://github.com/wjiajian/sticker-manager/releases/latest)，下载 `sticker-manager_<版本>_<架构>.dmg`。目前只发布 Apple Silicon 版本，文件名形如 `sticker-manager_0.1.5_aarch64.dmg`。
 2. 双击打开 DMG，把「表情管理器」拖进「应用程序」文件夹。
 3. 按下一节的步骤放行，然后打开。
 
