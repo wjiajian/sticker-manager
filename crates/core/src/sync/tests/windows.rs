@@ -12,8 +12,39 @@ fn incompatible_folder_names_fail_before_creating_files() {
         let error = folder.write(&key, b"unchanged").unwrap_err().to_string();
         assert!(error.contains("Windows"), "{key}: {error}");
         assert!(error.contains(name), "{key}: {error}");
+        // 未发布成功的旧路径不应阻止用户改名后重试。
+        assert!(folder.read(&key).unwrap().is_none(), "{key}");
+        folder.delete(&key).unwrap();
     }
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn overlong_missing_paths_do_not_block_rename_retries() {
+    let directory = tempfile::tempdir().unwrap();
+    let folder = FolderStorage::new(directory.path()).unwrap();
+    let key = format!("{}/收到.png", "长".repeat(256));
+    assert!(folder.write(&key, b"original").is_err());
+    assert!(folder.read(&key).unwrap().is_none());
+    folder.delete(&key).unwrap();
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn existing_reserved_paths_can_be_read_and_removed_during_a_rename() {
+    let directory = tempfile::tempdir().unwrap();
+    let folder = FolderStorage::new(directory.path()).unwrap();
+    // verbatim 路径可访问外部程序已创建的保留名文件夹。
+    fs::create_dir(folder.root().join("CON")).unwrap();
+    fs::write(folder.root().join("CON/收到.png"), b"original").unwrap();
+    assert_eq!(folder.read("CON/收到.png").unwrap().unwrap(), b"original");
+    folder.write("兼容分类/收到.png", b"original").unwrap();
+    folder.delete("CON/收到.png").unwrap();
+    folder.delete("CON/").unwrap();
+    assert_eq!(
+        folder.read("兼容分类/收到.png").unwrap().unwrap(),
+        b"original"
+    );
 }
 
 #[test]

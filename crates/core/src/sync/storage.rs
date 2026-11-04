@@ -69,6 +69,13 @@ fn validate_windows_file_name(key: &str) -> Result<()> {
     Ok(())
 }
 
+fn is_missing_file(error: &std::io::Error) -> bool {
+    // Windows 的非法或超长名称不能作为旧移动源，允许改名后重试。
+    // 保留其他错误（例如无权限），避免把不可访问的文件误认为已删除。
+    error.kind() == std::io::ErrorKind::NotFound
+        || (cfg!(target_os = "windows") && matches!(error.raw_os_error(), Some(123 | 206)))
+}
+
 #[derive(Clone)]
 pub struct FolderStorage {
     root: PathBuf,
@@ -87,8 +94,6 @@ impl FolderStorage {
     }
     fn path(&self, key: &str) -> Result<PathBuf> {
         validate_key(key)?;
-        #[cfg(target_os = "windows")]
-        validate_windows_file_name(key)?;
         let mut path = self.root.clone();
         for part in Path::new(key).components() {
             path.push(part);
@@ -96,7 +101,7 @@ impl FolderStorage {
                 Ok(m) if m.file_type().is_symlink() => {
                     return Err(Error::Sync("同步文件夹内不能使用符号链接".into()));
                 }
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                Err(e) if !is_missing_file(&e) => return Err(e.into()),
                 _ => {}
             }
         }
@@ -160,11 +165,13 @@ impl Storage for FolderStorage {
     fn read(&self, key: &str) -> Result<Option<Vec<u8>>> {
         match fs::read(self.path(key)?) {
             Ok(bytes) => Ok(Some(bytes)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) if is_missing_file(&e) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
     fn write(&self, key: &str, bytes: &[u8]) -> Result<()> {
+        #[cfg(target_os = "windows")]
+        validate_windows_file_name(key)?;
         let path = self.path(key)?;
         if key.ends_with('/') && bytes.is_empty() {
             fs::create_dir_all(path)?;
@@ -192,7 +199,7 @@ impl Storage for FolderStorage {
         };
         match result {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) if is_missing_file(&e) => Ok(()),
             Err(e) => Err(e.into()),
         }
     }
