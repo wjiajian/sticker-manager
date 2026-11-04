@@ -1,0 +1,460 @@
+//! Windows 聊天软件可能交出虚拟文件或图片数据，而不是磁盘路径。
+use std::{cell::Cell, ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
+use tauri::{Emitter, Manager};
+use windows::{
+    Win32::{
+        Foundation::{HWND, LPARAM, POINTL},
+        System::{
+            Com::{
+                DVASPECT_CONTENT, FORMATETC, IDataObject, STGMEDIUM, TYMED_HGLOBAL, TYMED_ISTREAM,
+            },
+            DataExchange::RegisterClipboardFormatW,
+            Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+            Ole::{
+                DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_NONE, IDropTarget, IDropTarget_Impl,
+                RegisterDragDrop, ReleaseStgMedium, RevokeDragDrop,
+            },
+            SystemServices::MODIFIERKEYS_FLAGS,
+        },
+        UI::{
+            Shell::{DragQueryFileW, FILEDESCRIPTORW, HDROP},
+            WindowsAndMessaging::EnumChildWindows,
+        },
+    },
+    core::{BOOL, HSTRING, Ref, implement},
+};
+
+const MAX_BYTES: usize = 100 * 1024 * 1024;
+const MAX_FILES: usize = 256;
+
+fn registered(name: &str) -> u16 {
+    // SAFETY: HSTRING 在调用期间持有有效的 UTF-16 字符串。
+    unsafe { RegisterClipboardFormatW(&HSTRING::from(name)) as u16 }
+}
+
+fn format(id: u16, index: i32, medium: u32) -> FORMATETC {
+    FORMATETC {
+        cfFormat: id,
+        dwAspect: DVASPECT_CONTENT.0,
+        lindex: index,
+        tymed: medium,
+        ..Default::default()
+    }
+}
+
+struct Medium(STGMEDIUM);
+impl Drop for Medium {
+    fn drop(&mut self) {
+        // SAFETY: 每份成功 GetData 的介质只释放一次，包括源提供的释放对象。
+        unsafe { ReleaseStgMedium(&mut self.0) };
+    }
+}
+
+fn get(data: &IDataObject, request: &FORMATETC) -> Result<Medium, String> {
+    unsafe { data.GetData(request) }
+        .map(Medium)
+        .map_err(|e| e.to_string())
+}
+
+fn bytes(medium: &Medium) -> Result<Vec<u8>, String> {
+    // SAFETY: 按 tymed 读取 union，拷贝期间介质始终存活。
+    unsafe {
+        if medium.0.tymed == TYMED_HGLOBAL.0 as u32 {
+            let handle = medium.0.u.hGlobal;
+            let size = GlobalSize(handle);
+            if size == 0 || size > MAX_BYTES {
+                return Err("拖入数据为空或超过 100 MB".into());
+            }
+            let pointer = GlobalLock(handle);
+            if pointer.is_null() {
+                return Err("无法读取拖入数据".into());
+            }
+            let result = std::slice::from_raw_parts(pointer.cast::<u8>(), size).to_vec();
+            let _ = GlobalUnlock(handle);
+            return Ok(result);
+        }
+        if medium.0.tymed == TYMED_ISTREAM.0 as u32 {
+            let stream = medium.0.u.pstm.as_ref().ok_or("拖入文件流为空")?;
+            let mut result = Vec::new();
+            let mut buffer = [0u8; 65536];
+            loop {
+                let mut read = 0;
+                stream
+                    .Read(
+                        buffer.as_mut_ptr().cast(),
+                        buffer.len() as u32,
+                        Some(&mut read),
+                    )
+                    .ok()
+                    .map_err(|e| e.to_string())?;
+                if read as usize > buffer.len() || result.len() + read as usize > MAX_BYTES {
+                    return Err("拖入文件超过 100 MB".into());
+                }
+                result.extend_from_slice(&buffer[..read as usize]);
+                if read == 0 {
+                    return Ok(result);
+                }
+            }
+        }
+    }
+    Err("不支持的拖入数据介质".into())
+}
+
+fn descriptors(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let count = bytes.get(..4).ok_or("虚拟文件列表不完整")?;
+    let count = u32::from_le_bytes(count.try_into().unwrap()) as usize;
+    let size = std::mem::size_of::<FILEDESCRIPTORW>();
+    if count == 0 || count > MAX_FILES || bytes.len() < 4 + count * size {
+        return Err("虚拟文件列表无效或超过 256 项".into());
+    }
+    (0..count)
+        .map(|index| {
+            // SAFETY: 已检查每个描述符的完整边界，外部缓冲区无需对齐。
+            let descriptor = unsafe {
+                bytes[4 + index * size..]
+                    .as_ptr()
+                    .cast::<FILEDESCRIPTORW>()
+                    .read_unaligned()
+            };
+            let end = descriptor
+                .cFileName
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(260);
+            let name = String::from_utf16(&descriptor.cFileName[..end])
+                .map_err(|_| "虚拟文件名编码无效")?;
+            // 每个项目写入独立子目录，只保留文件名，禁止外部提供目录穿越。
+            let name = name.rsplit(['/', '\\']).next().unwrap_or("");
+            if name.is_empty() || name == "." || name == ".." || name.contains(':') {
+                return Err("虚拟文件名无效".into());
+            }
+            Ok(name.to_owned())
+        })
+        .collect()
+}
+
+fn dib_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if bytes.len() < 40 {
+        return Err("位图数据不完整".into());
+    }
+    let read_u32 =
+        |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+    let header = read_u32(0);
+    if ![40, 108, 124].contains(&header) || bytes.len() < header {
+        return Err("不支持的位图头".into());
+    }
+    let bits = u16::from_le_bytes(bytes[14..16].try_into().unwrap());
+    let colors = read_u32(32);
+    let palette = if colors != 0 {
+        colors
+    } else if bits <= 8 {
+        1usize << bits
+    } else {
+        0
+    };
+    let masks = if header == 40 {
+        match read_u32(16) {
+            3 => 12,
+            6 => 16,
+            _ => 0,
+        }
+    } else {
+        0
+    };
+    let offset = header
+        .checked_add(masks)
+        .and_then(|n| palette.checked_mul(4).and_then(|p| n.checked_add(p)))
+        .filter(|n| *n <= bytes.len())
+        .ok_or("位图调色板无效")?;
+    let mut bmp = Vec::with_capacity(bytes.len() + 14);
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&((bytes.len() + 14) as u32).to_le_bytes());
+    bmp.extend_from_slice(&[0; 4]);
+    bmp.extend_from_slice(&((offset + 14) as u32).to_le_bytes());
+    bmp.extend_from_slice(bytes);
+    let image = image::load_from_memory_with_format(&bmp, image::ImageFormat::Bmp)
+        .map_err(|e| e.to_string())?;
+    let mut png = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, image::ImageFormat::Png)
+        .map_err(|e| e.to_string())?;
+    Ok(png.into_inner())
+}
+
+struct Received {
+    paths: Vec<PathBuf>,
+    _temporary: Option<tempfile::TempDir>,
+}
+
+fn receive(data: &IDataObject) -> Result<Received, String> {
+    if let Ok(medium) = get(data, &format(15, -1, TYMED_HGLOBAL.0 as u32)) {
+        let drop = unsafe { HDROP(medium.0.u.hGlobal.0) };
+        let count = unsafe { DragQueryFileW(drop, u32::MAX, None) };
+        if count == 0 || count as usize > MAX_FILES {
+            return Err("拖入文件为空或超过 256 项".into());
+        }
+        let mut paths = Vec::new();
+        for index in 0..count {
+            let length = unsafe { DragQueryFileW(drop, index, None) };
+            let mut name = vec![0u16; length as usize + 1];
+            unsafe {
+                DragQueryFileW(drop, index, Some(&mut name));
+            }
+            paths.push(PathBuf::from(OsString::from_wide(&name[..length as usize])));
+        }
+        return Ok(Received {
+            paths,
+            _temporary: None,
+        });
+    }
+    let temporary = tempfile::tempdir().map_err(|e| e.to_string())?;
+    if let Ok(medium) = get(
+        data,
+        &format(
+            registered("FileGroupDescriptorW"),
+            -1,
+            TYMED_HGLOBAL.0 as u32,
+        ),
+    ) {
+        let names = descriptors(&bytes(&medium)?)?;
+        let mut paths = Vec::new();
+        let mut total = 0;
+        for (index, name) in names.iter().enumerate() {
+            let medium = get(
+                data,
+                &format(
+                    registered("FileContents"),
+                    index as i32,
+                    (TYMED_HGLOBAL.0 | TYMED_ISTREAM.0) as u32,
+                ),
+            )?;
+            let content = bytes(&medium)?;
+            total += content.len();
+            if total > MAX_BYTES {
+                return Err("拖入文件总量超过 100 MB".into());
+            }
+            let directory = temporary.path().join(index.to_string());
+            std::fs::create_dir(&directory).map_err(|e| e.to_string())?;
+            let path = directory.join(name);
+            std::fs::write(&path, content).map_err(|e| e.to_string())?;
+            paths.push(path);
+        }
+        return Ok(Received {
+            paths,
+            _temporary: Some(temporary),
+        });
+    }
+    for id in [registered("PNG"), 17, 8] {
+        if let Ok(medium) = get(data, &format(id, -1, TYMED_HGLOBAL.0 as u32)) {
+            let content = bytes(&medium)?;
+            let content = if id == 17 || id == 8 {
+                dib_png(&content)?
+            } else {
+                content
+            };
+            let path = temporary.path().join("收到的表情.png");
+            std::fs::write(&path, content).map_err(|e| e.to_string())?;
+            return Ok(Received {
+                paths: vec![path],
+                _temporary: Some(temporary),
+            });
+        }
+    }
+    Err("这个拖入来源没有提供可读取的图片或文件，请先保存图片后导入".into())
+}
+
+#[implement(IDropTarget)]
+struct Target {
+    app: tauri::AppHandle,
+    accepted: Cell<bool>,
+}
+
+#[allow(non_snake_case)]
+impl IDropTarget_Impl for Target_Impl {
+    fn DragEnter(
+        &self,
+        data: Ref<IDataObject>,
+        _: MODIFIERKEYS_FLAGS,
+        _: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        let accepted = data.as_ref().is_some_and(|data| {
+            [
+                15,
+                registered("FileGroupDescriptorW"),
+                registered("PNG"),
+                17,
+                8,
+            ]
+            .iter()
+            .any(|id| unsafe {
+                data.QueryGetData(&format(*id, -1, TYMED_HGLOBAL.0 as u32))
+                    .is_ok()
+            })
+        });
+        self.accepted.set(accepted);
+        unsafe {
+            *effect = if accepted {
+                DROPEFFECT_COPY
+            } else {
+                DROPEFFECT_NONE
+            };
+        }
+        let _ = crate::ball::external_drop(&self.app, accepted);
+        if !accepted {
+            let _ = crate::ball::ball_message(self.app.clone(), "拖入来源未提供图片文件".into());
+        }
+        Ok(())
+    }
+    fn DragOver(
+        &self,
+        _: MODIFIERKEYS_FLAGS,
+        _: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        unsafe {
+            *effect = if self.accepted.get() {
+                DROPEFFECT_COPY
+            } else {
+                DROPEFFECT_NONE
+            };
+        }
+        Ok(())
+    }
+    fn DragLeave(&self) -> windows::core::Result<()> {
+        self.accepted.set(false);
+        let _ = crate::ball::external_drop(&self.app, false);
+        Ok(())
+    }
+    fn Drop(
+        &self,
+        data: Ref<IDataObject>,
+        _: MODIFIERKEYS_FLAGS,
+        _: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        let _ = self.DragLeave();
+        unsafe {
+            *effect = DROPEFFECT_NONE;
+        }
+        let result = data
+            .as_ref()
+            .ok_or_else(|| "拖入数据为空".into())
+            .and_then(receive);
+        match result {
+            Ok(received) => {
+                unsafe {
+                    *effect = DROPEFFECT_COPY;
+                }
+                let app = self.app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let result =
+                        crate::imports::run(app.clone(), received.paths.clone(), true).await;
+                    match result {
+                        Ok(report) => {
+                            let _ = app.emit_to("ball", "external-drop-result", report);
+                        }
+                        Err(error) => {
+                            let _ = crate::ball::ball_message(app, format!("导入失败：{error}"));
+                        }
+                    }
+                    drop(received);
+                });
+            }
+            Err(error) => {
+                let _ = crate::ball::ball_message(self.app.clone(), error);
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let root = window.hwnd().map_err(|e| e.to_string())?;
+    let mut handles = vec![root];
+    unsafe extern "system" fn collect(window: HWND, parameter: LPARAM) -> BOOL {
+        // SAFETY: EnumChildWindows 同步调用，参数指向本次安装拥有的 Vec。
+        unsafe {
+            (&mut *(parameter.0 as *mut Vec<HWND>)).push(window);
+        }
+        BOOL(1)
+    }
+    unsafe {
+        EnumChildWindows(
+            Some(root),
+            Some(collect),
+            LPARAM(&mut handles as *mut _ as isize),
+        );
+    }
+    let target: IDropTarget = Target {
+        app: window.app_handle().clone(),
+        accepted: Cell::new(false),
+    }
+    .into();
+    let mut registered = Vec::new();
+    for handle in handles {
+        unsafe {
+            let _ = RevokeDragDrop(handle);
+            if let Err(error) = RegisterDragDrop(handle, &target) {
+                for handle in registered {
+                    let _ = RevokeDragDrop(HWND(handle as _));
+                }
+                return Err(error.to_string());
+            }
+        }
+        registered.push(handle.0 as isize);
+    }
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            for handle in &registered {
+                unsafe {
+                    let _ = RevokeDragDrop(HWND(*handle as _));
+                }
+            }
+        }
+    });
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn virtual_names_cannot_escape_the_staging_directory() {
+        let mut descriptor = FILEDESCRIPTORW::default();
+        let name: Vec<_> = "../../收到.gif".encode_utf16().collect();
+        descriptor.cFileName[..name.len()].copy_from_slice(&name);
+        let mut data = 1u32.to_le_bytes().to_vec();
+        // FILEDESCRIPTORW 全部字段已初始化，仅供测试构造协议缓冲区。
+        data.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                (&descriptor as *const FILEDESCRIPTORW).cast::<u8>(),
+                std::mem::size_of::<FILEDESCRIPTORW>(),
+            )
+        });
+        assert_eq!(descriptors(&data).unwrap(), ["收到.gif"]);
+        data.truncate(data.len() - 1);
+        assert!(descriptors(&data).is_err());
+        assert!(descriptors(&u32::MAX.to_le_bytes()).is_err());
+    }
+
+    #[test]
+    fn dib_round_trip_keeps_pixels_and_rejects_invalid_headers() {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2,
+            3,
+            image::Rgb([23, 45, 67]),
+        ));
+        let mut bmp = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut bmp, image::ImageFormat::Bmp).unwrap();
+        let png = dib_png(&bmp.into_inner()[14..]).unwrap();
+        let decoded = image::load_from_memory(&png).unwrap().to_rgb8();
+        assert_eq!(decoded, image.to_rgb8());
+        assert!(dib_png(&[0; 39]).is_err());
+        let mut malformed = vec![0; 40];
+        malformed[..4].copy_from_slice(&40u32.to_le_bytes());
+        malformed[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(dib_png(&malformed).is_err());
+    }
+}

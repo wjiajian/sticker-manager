@@ -28,6 +28,8 @@ mod startup;
 mod sync;
 mod tray;
 mod updater;
+#[cfg(target_os = "windows")]
+mod windows_drop;
 
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -322,7 +324,11 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
         .traffic_light_position(tauri::LogicalPosition::new(16.0, 33.0));
 
     #[cfg(target_os = "windows")]
-    let builder = builder.decorations(false);
+    let builder = builder
+        .decorations(false)
+        .icon(tauri::image::Image::from_bytes(include_bytes!(
+            "../icons/windows/icon.png"
+        ))?)?;
 
     #[cfg(target_os = "windows")]
     let builder = match portable::root(app.handle()) {

@@ -359,14 +359,22 @@ mod native {
                 point.y.round() as i32,
             ))
             .map_err(|e| e.to_string())?;
+        #[cfg(target_os = "windows")]
+        {
+            crate::desktop::set_preview_visible(&window, true)
+        }
+        #[cfg(not(target_os = "windows"))]
         window.show().map_err(|e| e.to_string())
     }
 
     pub fn hide(app: &AppHandle) -> Result<(), String> {
-        app.get_webview_window("preview")
-            .ok_or("预览窗口不可用")?
-            .hide()
-            .map_err(|e| e.to_string())
+        let window = app.get_webview_window("preview").ok_or("预览窗口不可用")?;
+        #[cfg(target_os = "windows")]
+        {
+            crate::desktop::set_preview_visible(&window, false)
+        }
+        #[cfg(not(target_os = "windows"))]
+        window.hide().map_err(|e| e.to_string())
     }
 }
 

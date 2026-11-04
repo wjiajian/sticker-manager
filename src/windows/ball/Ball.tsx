@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ipc, type SyncStatus, type BallSnapshot } from "../../lib/ipc";
+import { ipc, type SyncStatus, type BallSnapshot, type ImportReport } from "../../lib/ipc";
 import { formatReport } from "../../lib/importReport";
 import { progressLabel } from "../main/useSyncStatus";
 import { platform } from "../../lib/platform";
@@ -27,6 +27,7 @@ export function Ball() {
       listen<SyncStatus>("sync-status-changed", ({ payload }) => { if (!disposed) setSync(payload); }),
       listen<BallSnapshot>("ball-state", ({ payload }) => { if (!disposed) setState(payload); }),
       listen<boolean>("panel-visibility", ({ payload }) => { if (!disposed) setState((s) => s && { ...s, panelVisible: payload }); }),
+      listen<ImportReport>("external-drop-result", ({ payload }) => { if (!disposed) void ipc.ballMessage(formatReport(payload)).catch(reportError); }),
     ];
     void Promise.all(listeners).then(() => ipc.ballState()).then((s) => { if (!disposed) setState(s); })
       .catch((reason: unknown) => { if (!disposed) setError(String(reason)); });

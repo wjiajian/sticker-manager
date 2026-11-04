@@ -339,6 +339,17 @@ pub fn set_ball_drop(app: AppHandle, paths: Option<Vec<PathBuf>>) -> Result<(), 
     render(&app, &mut r)?;
     Ok(())
 }
+
+#[cfg(target_os = "windows")]
+pub fn external_drop(app: &AppHandle, active: bool) -> Result<(), String> {
+    let state = app.state::<BallState>();
+    let mut runtime = state.runtime.lock().unwrap();
+    runtime.drop_label = active.then(|| "松开导入".into());
+    runtime.collapsed = false;
+    runtime.idle_since = Instant::now();
+    render(app, &mut runtime)?;
+    Ok(())
+}
 #[tauri::command]
 pub fn ball_message(app: AppHandle, message: String) -> Result<(), String> {
     let state = app.state::<BallState>();
@@ -449,7 +460,14 @@ mod native {
             Some(root) => builder.data_directory(root.join("webview")),
             None => builder,
         };
-        builder.build()?;
+        #[cfg(target_os = "windows")]
+        let builder = builder.disable_drag_drop_handler();
+        let window = builder.build()?;
+        #[cfg(target_os = "windows")]
+        crate::windows_drop::install(&window)
+            .map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
+        #[cfg(not(target_os = "windows"))]
+        let _ = window;
         Ok(())
     }
     pub fn set_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
@@ -458,6 +476,30 @@ mod native {
     }
     pub fn set_accepts_mouse(app: &AppHandle, accepts: bool) -> Result<(), String> {
         let w = app.get_webview_window("ball").ok_or("悬浮球不可用")?;
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+            };
+            let handle = w.hwnd().map_err(|e| e.to_string())?.0;
+            // 仅切换鼠标穿透。通用样式更新会再次 show 窗口，可能打断拖入源的焦点。
+            // SAFETY: 悬浮球 tick 和 OLE 回调均在 UI 线程，HWND 由应用持有。
+            unsafe {
+                let style = GetWindowLongPtrW(handle, GWL_EXSTYLE);
+                let next = if accepts {
+                    style & !(WS_EX_TRANSPARENT as isize)
+                } else {
+                    style | (WS_EX_TRANSPARENT | WS_EX_LAYERED) as isize
+                };
+                SetLastError(0);
+                if SetWindowLongPtrW(handle, GWL_EXSTYLE, next) == 0 && GetLastError() != 0 {
+                    return Err(std::io::Error::last_os_error().to_string());
+                }
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "windows"))]
         w.set_ignore_cursor_events(!accepts)
             .map_err(|e| e.to_string())
     }
