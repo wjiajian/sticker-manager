@@ -17,6 +17,10 @@ pub struct FileEntry {
 /// 后端只中转文件。写入可被读到一部分，读取方须校验完整性后再应用。
 /// read 的 NotFound 通过 Ok(None) 表达；delete 不存在的文件应成功。
 pub trait Storage: Send + Sync {
+    /// 静态校验目标路径，供移动意图持久化前检查。
+    fn validate_write(&self, _key: &str) -> Result<()> {
+        Ok(())
+    }
     fn list(&self, prefix: &str) -> Result<Vec<FileEntry>>;
     fn read(&self, key: &str) -> Result<Option<Vec<u8>>>;
     fn write(&self, key: &str, bytes: &[u8]) -> Result<()>;
@@ -109,6 +113,11 @@ impl FolderStorage {
     }
 }
 impl Storage for FolderStorage {
+    fn validate_write(&self, _key: &str) -> Result<()> {
+        #[cfg(target_os = "windows")]
+        validate_windows_file_name(_key)?;
+        Ok(())
+    }
     fn list(&self, prefix: &str) -> Result<Vec<FileEntry>> {
         let mut pending = vec![self.root.clone()];
         let mut result = Vec::new();
@@ -170,8 +179,7 @@ impl Storage for FolderStorage {
         }
     }
     fn write(&self, key: &str, bytes: &[u8]) -> Result<()> {
-        #[cfg(target_os = "windows")]
-        validate_windows_file_name(key)?;
+        self.validate_write(key)?;
         let path = self.path(key)?;
         if key.ends_with('/') && bytes.is_empty() {
             fs::create_dir_all(path)?;

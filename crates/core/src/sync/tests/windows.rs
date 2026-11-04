@@ -68,3 +68,72 @@ fn unicode_folder_names_and_network_names_are_preserved() {
     assert_eq!(network.read(network_key).unwrap().unwrap(), b"original");
     assert!(super::super::storage::validate_key(network_key).is_ok());
 }
+
+#[test]
+fn incompatible_destination_is_rejected_before_journaling_and_renaming_recovers() {
+    let site = Site::new();
+    let directory = tempfile::tempdir().unwrap();
+    let folder = FolderStorage::new(directory.path()).unwrap();
+    let manifest = Manifest::create(&folder).unwrap();
+    let id = site.import(77);
+    let category = site.lib.lock().unwrap().categorize(&id, "CON").unwrap();
+    assert!(synchronize(&site.lib, &folder, &manifest.id).is_err());
+    let pending: i64 = site
+        .lib
+        .lock()
+        .unwrap()
+        .conn
+        .query_row("SELECT count(*) FROM sync_file_moves", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(pending, 0);
+    site.lib
+        .lock()
+        .unwrap()
+        .rename_category(&category.id, "兼容分类")
+        .unwrap();
+    site.sync(&folder, &manifest);
+    assert!(folder.read("兼容分类/77.png").unwrap().is_some());
+}
+
+#[test]
+fn renaming_replans_an_incompatible_destination_left_by_an_older_client() {
+    // 模拟只有写入阶段校验名称的旧客户端。
+    struct Legacy(FolderStorage);
+    impl Storage for Legacy {
+        fn list(&self, prefix: &str) -> Result<Vec<storage::FileEntry>> {
+            self.0.list(prefix)
+        }
+        fn read(&self, key: &str) -> Result<Option<Vec<u8>>> {
+            self.0.read(key)
+        }
+        fn write(&self, key: &str, bytes: &[u8]) -> Result<()> {
+            self.0.write(key, bytes)
+        }
+        fn delete(&self, key: &str) -> Result<()> {
+            self.0.delete(key)
+        }
+    }
+    let site = Site::new();
+    let directory = tempfile::tempdir().unwrap();
+    let legacy = Legacy(FolderStorage::new(directory.path()).unwrap());
+    let manifest = Manifest::create(&legacy).unwrap();
+    let id = site.import(78);
+    let category = site.lib.lock().unwrap().categorize(&id, "CON").unwrap();
+    assert!(synchronize(&site.lib, &legacy, &manifest.id).is_err());
+    let pending: i64 = site
+        .lib
+        .lock()
+        .unwrap()
+        .conn
+        .query_row("SELECT count(*) FROM sync_file_moves", [], |row| row.get(0))
+        .unwrap();
+    assert!(pending > 0);
+    site.lib
+        .lock()
+        .unwrap()
+        .rename_category(&category.id, "兼容分类")
+        .unwrap();
+    site.sync(&legacy.0, &manifest);
+    assert!(legacy.0.read("兼容分类/78.png").unwrap().is_some());
+    assert_eq!(remote_images(&legacy.0).len(), 1);
+}

@@ -749,6 +749,9 @@ pub(super) fn push_files(
                     .map(|name| (id.clone(), name.to_owned()))
             })
             .collect::<Vec<_>>();
+        for (_, name) in &new_folders {
+            storage.validate_write(&format!("{name}/"))?;
+        }
         let dirty = {
             let mut q = tx.prepare("SELECT sticker_id,revision FROM sync_file_dirty")?;
             q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
@@ -790,7 +793,9 @@ pub(super) fn push_files(
                 || cache
                     .get(&source)
                     .is_some_and(|e| e.object.hash != object.hash);
-            if model.dead(Kind::Sticker, &id) || overwritten {
+            let renamed_incompatible = dirty.get(&id).is_some_and(|current| *current > rev)
+                && storage.validate_write(&destination).is_err();
+            if model.dead(Kind::Sticker, &id) || overwritten || renamed_incompatible {
                 tx.execute(
                     "DELETE FROM sync_file_moves WHERE library_id=?1 AND sticker_id=?2",
                     params![target, id],
@@ -860,6 +865,7 @@ pub(super) fn push_files(
                 tx.execute("DELETE FROM sync_file_dirty WHERE sticker_id=?1", [&id])?;
                 continue;
             }
+            storage.validate_write(&destination)?;
             let revision = dirty.get(&id).copied().unwrap_or(-1);
             used.entry(destination.to_lowercase())
                 .or_default()
