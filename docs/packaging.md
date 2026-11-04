@@ -70,3 +70,13 @@ $env:STICKER_LIBRARY_DIR = Join-Path 'D:\Environment\sticker-manager-tests' ([gu
 发布版忽略 `STICKER_LIBRARY_DIR`，首次启动还会初始化开机自启，发布版的安装运行验收应单独安排。拖拽功能采用代码检查；系统设置相关场景由用户切换后验证。
 
 Windows 同步文件夹会在记录移动意图前检查非法字符、结尾空格或句点、设备保留名和过长名称，并给出错误提示。用户可修改对应的表情名或分类名后重试，旧客户端留下的非法目标移动意图也可在改名后重新规划。网络存储沿用原有命名规则。
+
+### Windows 便携版
+
+同一工作流另行上传 `sticker-manager-windows-portable-<SHA>`，其中的 ZIP 包含程序、`portable.flag` 和使用说明。将整个 ZIP 解压到可写目录后运行，首次启动创建旁边的 `data` 仓库和 `webview` 缓存。运行需要 WebView2 Runtime。
+
+便携模式由程序所在目录的 `portable.flag` 文件启用，安装版仓库迁移仅在安装模式执行。便携版关闭开机自启登记，检查更新入口提示手动升级。升级时先退出应用，再替换 EXE，保留 `portable.flag`、`data` 和 `webview`。移动到另一位置时一起移动整个目录。
+
+Windows 安装版仓库为 `%APPDATA%\sticker-manager`。目标为空时优先迁移 `com.wjiajian.sticker-manager`，其次兼容旧的 `com.shaojian.sticker-manager`。迁移失败会报告启动错误。
+
+Windows 图标复用 `icons/app-icon.svg`，生成时将根 `viewBox` 改为 `72 72 880 880`，用 `pnpm tauri icon` 生成后保留 ICO 与 128 像素 PNG 到 `icons/windows/`。Windows 平台配置使用这一组资源，以减少任务栏图标内部留白。

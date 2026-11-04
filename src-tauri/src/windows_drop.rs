@@ -116,13 +116,9 @@ fn descriptors(bytes: &[u8]) -> Result<Vec<String>, String> {
                     .cast::<FILEDESCRIPTORW>()
                     .read_unaligned()
             };
-            let end = descriptor
-                .cFileName
-                .iter()
-                .position(|c| *c == 0)
-                .unwrap_or(260);
-            let name = String::from_utf16(&descriptor.cFileName[..end])
-                .map_err(|_| "虚拟文件名编码无效")?;
+            let filename = descriptor.cFileName;
+            let end = filename.iter().position(|c| *c == 0).unwrap_or(260);
+            let name = String::from_utf16(&filename[..end]).map_err(|_| "虚拟文件名编码无效")?;
             // 每个项目写入独立子目录，只保留文件名，禁止外部提供目录穿越。
             let name = name.rsplit(['/', '\\']).next().unwrap_or("");
             if name.is_empty() || name == "." || name == ".." || name.contains(':') {
@@ -355,7 +351,11 @@ impl IDropTarget_Impl for Target_Impl {
                             let _ = app.emit_to("ball", "external-drop-result", report);
                         }
                         Err(error) => {
-                            let _ = crate::ball::ball_message(app, format!("导入失败：{error}"));
+                            let handle = app.clone();
+                            let _ = app.run_on_main_thread(move || {
+                                let _ =
+                                    crate::ball::ball_message(handle, format!("导入失败：{error}"));
+                            });
                         }
                     }
                     drop(received);
@@ -419,20 +419,153 @@ pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::{
+        Foundation::E_NOTIMPL,
+        System::{
+            Com::{IAdviseSink, IDataObject_Impl, IEnumFORMATETC, IEnumSTATDATA},
+            Memory::{GMEM_MOVEABLE, GlobalAlloc},
+        },
+    };
 
-    #[test]
-    fn virtual_names_cannot_escape_the_staging_directory() {
+    #[implement(IDataObject)]
+    struct Sample {
+        formats: Vec<(u16, i32, Vec<u8>)>,
+    }
+
+    #[allow(non_snake_case)]
+    impl IDataObject_Impl for Sample_Impl {
+        fn GetData(&self, request: *const FORMATETC) -> windows::core::Result<STGMEDIUM> {
+            let request = unsafe { &*request };
+            let (_, _, bytes) = self
+                .formats
+                .iter()
+                .find(|(id, index, _)| *id == request.cfFormat && *index == request.lindex)
+                .ok_or_else(|| windows::core::Error::from_hresult(E_NOTIMPL))?;
+            unsafe {
+                let handle = GlobalAlloc(GMEM_MOVEABLE, bytes.len())?;
+                let pointer = GlobalLock(handle);
+                assert!(!pointer.is_null());
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), pointer.cast(), bytes.len());
+                let _ = GlobalUnlock(handle);
+                let mut result = STGMEDIUM {
+                    tymed: TYMED_HGLOBAL.0 as u32,
+                    ..Default::default()
+                };
+                result.u.hGlobal = handle;
+                Ok(result)
+            }
+        }
+        fn QueryGetData(&self, request: *const FORMATETC) -> windows::core::HRESULT {
+            let request = unsafe { &*request };
+            if self
+                .formats
+                .iter()
+                .any(|(id, index, _)| *id == request.cfFormat && *index == request.lindex)
+            {
+                windows::core::HRESULT(0)
+            } else {
+                E_NOTIMPL
+            }
+        }
+        fn GetDataHere(&self, _: *const FORMATETC, _: *mut STGMEDIUM) -> windows::core::Result<()> {
+            Err(E_NOTIMPL.into())
+        }
+        fn GetCanonicalFormatEtc(
+            &self,
+            _: *const FORMATETC,
+            _: *mut FORMATETC,
+        ) -> windows::core::HRESULT {
+            E_NOTIMPL
+        }
+        fn SetData(
+            &self,
+            _: *const FORMATETC,
+            _: *const STGMEDIUM,
+            _: BOOL,
+        ) -> windows::core::Result<()> {
+            Err(E_NOTIMPL.into())
+        }
+        fn EnumFormatEtc(&self, _: u32) -> windows::core::Result<IEnumFORMATETC> {
+            Err(E_NOTIMPL.into())
+        }
+        fn DAdvise(
+            &self,
+            _: *const FORMATETC,
+            _: u32,
+            _: Ref<IAdviseSink>,
+        ) -> windows::core::Result<u32> {
+            Err(E_NOTIMPL.into())
+        }
+        fn DUnadvise(&self, _: u32) -> windows::core::Result<()> {
+            Err(E_NOTIMPL.into())
+        }
+        fn EnumDAdvise(&self) -> windows::core::Result<IEnumSTATDATA> {
+            Err(E_NOTIMPL.into())
+        }
+    }
+
+    fn file_descriptor(name: &str) -> Vec<u8> {
         let mut descriptor = FILEDESCRIPTORW::default();
-        let name: Vec<_> = "../../收到.gif".encode_utf16().collect();
-        descriptor.cFileName[..name.len()].copy_from_slice(&name);
+        let name: Vec<_> = name.encode_utf16().collect();
+        let mut filename = [0u16; 260];
+        filename[..name.len()].copy_from_slice(&name);
+        descriptor.cFileName = filename;
         let mut data = 1u32.to_le_bytes().to_vec();
-        // FILEDESCRIPTORW 全部字段已初始化，仅供测试构造协议缓冲区。
         data.extend_from_slice(unsafe {
             std::slice::from_raw_parts(
                 (&descriptor as *const FILEDESCRIPTORW).cast::<u8>(),
                 std::mem::size_of::<FILEDESCRIPTORW>(),
             )
         });
+        data
+    }
+
+    #[test]
+    fn virtual_file_data_is_staged_without_changing_original_bytes() {
+        let original = b"GIF89a original animation bytes".to_vec();
+        let data: IDataObject = Sample {
+            formats: vec![
+                (
+                    registered("FileGroupDescriptorW"),
+                    -1,
+                    file_descriptor("收到.gif"),
+                ),
+                (registered("FileContents"), 0, original.clone()),
+            ],
+        }
+        .into();
+        let received = receive(&data).unwrap();
+        assert_eq!(received.paths.len(), 1);
+        let path = received.paths[0].clone();
+        assert_eq!(path.file_name().unwrap(), "收到.gif");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        drop(received);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn png_data_is_staged_and_unsupported_sources_report_an_error() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([23, 45, 67, 128]),
+        ));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let original = png.into_inner();
+        let data: IDataObject = Sample {
+            formats: vec![(registered("PNG"), -1, original.clone())],
+        }
+        .into();
+        let received = receive(&data).unwrap();
+        assert_eq!(std::fs::read(&received.paths[0]).unwrap(), original);
+        let unsupported: IDataObject = Sample { formats: vec![] }.into();
+        assert!(receive(&unsupported).err().unwrap().contains("没有提供"));
+    }
+
+    #[test]
+    fn virtual_names_cannot_escape_the_staging_directory() {
+        let mut data = file_descriptor("../../收到.gif");
         assert_eq!(descriptors(&data).unwrap(), ["收到.gif"]);
         data.truncate(data.len() - 1);
         assert!(descriptors(&data).is_err());

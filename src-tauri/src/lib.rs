@@ -48,7 +48,21 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            app.manage(portable::Portable::detect()?);
+            let portable = match portable::Portable::detect() {
+                Ok(portable) => portable,
+                Err(error) => {
+                    let path = std::env::current_exe()
+                        .ok()
+                        .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+                        .unwrap_or_else(|| PathBuf::from("（程序所在目录）"));
+                    app.manage(startup::StartupFailure(Mutex::new(Some((
+                        path,
+                        format!("无法初始化便携目录，请确认程序所在目录可写：{error}"),
+                    )))));
+                    return Ok(());
+                }
+            };
+            app.manage(portable);
             let (mut library, root) = match open_library(app) {
                 Ok(library) => library,
                 Err((path, reason)) => {
