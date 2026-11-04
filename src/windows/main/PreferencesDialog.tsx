@@ -2,11 +2,15 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "../../components/Button";
 import { Switch } from "../../components/Switch";
-import { ipc, type Settings, type SyncStatus } from "../../lib/ipc";
+import { ipc, type Settings, type SyncStatus, type UpdateStatus } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
 import { SyncPreferences } from "./SyncPreferences";
+import { downloadLabel, focusOpener } from "./useUpdate";
+import { syncTime } from "./useSyncStatus";
 
-export function PreferencesDialog({ onClose, sync, focusSync = false }: { onClose: () => void; sync?: SyncStatus; focusSync?: boolean }) {
+export function PreferencesDialog({ onClose, sync, focusSync = false, update, onShowUpdate }: {
+  onClose: () => void; sync?: SyncStatus; focusSync?: boolean; update?: UpdateStatus; onShowUpdate: () => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const title = useId();
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -18,6 +22,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false }: { onClos
   const [busy, setBusy] = useState<string | null>(null);
   const working = useRef(false);
   const focusedInitially = useRef(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
   useEffect(() => {
     const element = dialog.current!;
     element.showModal();
@@ -111,10 +116,36 @@ export function PreferencesDialog({ onClose, sync, focusSync = false }: { onClos
         </p>
         <div><Button disabled={!!busy || !path} onClick={() => void change("directory", ipc.openLibraryDirectory)}>打开所在位置</Button></div>
       </Group>
+      <Group title="更新">
+        <div className="flex items-center justify-between gap-4">
+          <span>当前版本 {update?.currentVersion ?? ""}</span>
+          <Button disabled={!update || update.phase !== "idle"} onClick={() => { setCheckError(null); void ipc.checkUpdate().catch((e: unknown) => setCheckError(String(e))); }}>
+            {update?.phase === "checking" ? "正在检查…" : "检查更新"}
+          </Button>
+        </div>
+        {update && <UpdateNote status={update} onShow={onShowUpdate} />}
+        {checkError && <p role="alert" className="text-xs text-accent">{checkError}</p>}
+        <div className="flex items-center justify-between gap-4">
+          <span id={`${title}-auto-update`}>自动检查更新</span>
+          <Switch aria-labelledby={`${title}-auto-update`} aria-describedby={`${title}-auto-update-note`} checked={settings?.autoCheckUpdates ?? false} disabled={!!busy || !settings}
+            onClick={() => void change("auto-update", async () => setSettings(await ipc.setAutoCheckUpdates(!settings!.autoCheckUpdates)))} />
+        </div>
+        <p id={`${title}-auto-update-note`} className="text-xs text-ink-secondary">启动时和每天检查一次，发现新版本只提示，确认后才下载</p>
+      </Group>
       {error && <p role="alert" className="text-xs text-accent">{error}</p>}
       <div className="flex justify-end"><Button variant="primary" onClick={onClose}>完成</Button></div>
     </div>
   </dialog>;
+}
+function UpdateNote({ status, onShow }: { status: UpdateStatus; onShow: () => void }) {
+  if (status.phase === "downloading" || status.phase === "installing") return <p role="status" className="text-xs">{downloadLabel(status)}</p>;
+  if (status.error) return <p role="alert" className="text-xs text-accent">{status.error}</p>;
+  if (status.available) return <div className="flex items-center justify-between gap-4 text-xs">
+    <span role="status">发现新版本 {status.available.version}{status.ignored ? "（已忽略）" : ""}</span>
+    <button type="button" onClick={(event) => { focusOpener(event.currentTarget); onShow(); }} className="shrink-0 underline underline-offset-4">查看</button>
+  </div>;
+  if (status.lastChecked && status.phase === "idle") return <p role="status" className="text-xs text-ink-secondary">已是最新版本 · 检查于 {syncTime(status.lastChecked)}</p>;
+  return null;
 }
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return <section className="flex flex-col gap-3"><h3 className="text-xs font-semibold text-ink-secondary">{title}</h3>{children}</section>;

@@ -25,6 +25,7 @@ mod settings;
 mod startup;
 mod sync;
 mod tray;
+mod updater;
 
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -41,6 +42,7 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let (mut library, root) = match open_library(app) {
                 Ok(library) => library,
@@ -69,6 +71,9 @@ pub fn run() {
             eprintln!("启动时本地日志维护：{:?}", maintenance.elapsed());
             app.manage(Mutex::new(library));
             app.manage(imports::ImportState::default());
+            app.manage(updater::UpdateState::new(
+                app.package_info().version.to_string(),
+            ));
             app.manage(export::ExportDirectory::new(
                 std::env::temp_dir()
                     .join(app.config().identifier.clone())
@@ -82,6 +87,7 @@ pub fn run() {
             ball::create(app)?;
             settings::initialize_autostart(app.handle());
             sync::start(app.handle().clone());
+            updater::start(app.handle().clone());
             start_expiry_cleanup(app.handle().clone());
             Ok(())
         })
@@ -158,6 +164,12 @@ pub fn run() {
             sync::cancel_sync_connection,
             sync::update_sync_credentials,
             sync::set_device_name,
+            updater::update_status,
+            updater::check_update,
+            updater::install_update,
+            updater::ignore_update,
+            updater::set_auto_check_updates,
+            updater::take_update_request,
         ])
         .build(tauri::generate_context!())
         .expect("启动应用失败")

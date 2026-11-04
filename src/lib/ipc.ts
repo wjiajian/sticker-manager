@@ -121,6 +121,12 @@ export const ipc = {
   libraryDirectory: () => invoke<string>("library_directory"),
   openLibraryDirectory: () => invoke<void>("open_library_directory"),
   takePreferencesRequest: () => invoke<boolean>("take_preferences_request"),
+  updateStatus: () => invoke<UpdateStatus>("update_status"),
+  checkUpdate: () => invoke<UpdateStatus>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
+  ignoreUpdate: (version: string) => invoke<void>("ignore_update", { version }),
+  setAutoCheckUpdates: (enabled: boolean) => invoke<Settings>("set_auto_check_updates", { enabled }),
+  takeUpdateRequest: () => invoke<boolean>("take_update_request"),
   ballState: () => invoke<BallSnapshot>("ball_state"),
   ballPointerDown: () => invoke<void>("ball_pointer_down"),
   setBallDrop: (paths: string[] | null) => invoke<void>("set_ball_drop", { paths }),
@@ -167,6 +173,20 @@ export interface Settings {
   ballPosition: { display: string; edge: "left" | "right"; y: number };
   autostartInitialized: boolean;
   sync: (({ backend: "folder"; folder: string } | NetworkTarget) & { libraryId: string; paused: boolean; pauseOnMetered: boolean }) | null;
+  autoCheckUpdates: boolean;
+  ignoredUpdate: string | null;
+}
+export interface UpdateStatus {
+  currentVersion: string;
+  phase: "idle" | "checking" | "downloading" | "installing";
+  downloaded: number;
+  total: number | null;
+  /** 最近一次成功检查的时间（毫秒） */
+  lastChecked: number | null;
+  available: { version: string; notes: string | null; date: number | null } | null;
+  /** 可用版本被忽略过：提示条不显示，偏好设置照常显示 */
+  ignored: boolean;
+  error: string | null;
 }
 export interface SyncStatus {
   phase: "unconfigured" | "syncing" | "synced" | "paused" | "error";

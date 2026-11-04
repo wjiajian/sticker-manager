@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "main-commands"
-description = "主窗口的仓库管理命令和快捷键注册状态。"
+description = "主窗口的仓库管理命令、快捷键注册状态和检查更新。"
 commands.allow = [
   "set_sync_paused", "set_pause_on_metered", "sticker_sync_info", "take_sync_details_request", "import_status", "cancel_import", "set_stickers_category", "create_category_and_set_stickers",
   "sync_status", "sync_now", "inspect_sync_folder", "join_sync_folder", "stop_sync", "set_device_name",
@@ -12,4 +12,5 @@ commands.allow = [
   "set_category_color", "delete_category", "set_sticker_category", "set_sticker_name",
   "set_sticker_caption", "import_stickers", "copy_sticker", "prepare_sticker_drag",
   "record_sticker_usage", "toggle_sticker_favorite", "reveal_sticker", "global_shortcut_error",
+  "update_status", "check_update", "install_update", "ignore_update", "set_auto_check_updates", "take_update_request",
 ]

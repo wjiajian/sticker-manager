@@ -18,6 +18,9 @@ import { PreferencesDialog } from "./PreferencesDialog";
 import { usePreferences } from "./usePreferences";
 import { useStickerActions } from "./useStickerActions";
 import { useSyncStatus } from "./useSyncStatus";
+import { UpdateBar } from "./UpdateBar";
+import { UpdateDialog } from "./UpdateDialog";
+import { useUpdate } from "./useUpdate";
 
 // 列表还没读到时用同一个空数组，避免每次渲染都换引用、重新绑定快捷键。
 const NO_STICKERS: Sticker[] = [];
@@ -25,6 +28,7 @@ const NO_STICKERS: Sticker[] = [];
 export function App() {
   const preferences = usePreferences();
   const sync = useSyncStatus();
+  const update = useUpdate();
   const [anchor, setAnchor] = useState<{ button: HTMLButtonElement; above: boolean } | null>(null);
   const anchorRef = useRef(anchor); anchorRef.current = anchor;
   const closeSync = useCallback((focus = false) => {
@@ -76,13 +80,16 @@ export function App() {
 
   return (
     <div className={`flex h-full flex-col ${dragging ? "outline-2 -outline-offset-2 outline-accent" : ""}`}>
-      {preferences.open && <PreferencesDialog onClose={() => preferences.setOpen(false)} sync={sync.data} focusSync={preferences.focusSync} />}
+      {preferences.open && <PreferencesDialog onClose={() => preferences.setOpen(false)} sync={sync.data} focusSync={preferences.focusSync}
+        update={update.status} onShowUpdate={update.showDialog} />}
+      {update.dialogOpen && <UpdateDialog status={update.status} onClose={update.closeDialog} />}
       <TitleBar busy={busy} onChoose={choose} sync={sync.data} onSync={(button) => openSync(button)} />
       {status && <div role="status" aria-atomic="true" className="max-h-24 shrink-0 overflow-y-auto whitespace-pre-line text-ink-secondary">
         {status && <p className="px-6 py-2">{status}</p>}
       </div>}
       <ImportBar key={importing.status?.batch ?? 0} status={importing.status} error={importing.error} clearError={importing.clearError} />
       <UndoBar actions={actions} />
+      <UpdateBar status={update.status} onShow={update.showDialog} />
       {anchor && sync.data?.target && !preferences.open && <SyncDetails status={sync.data} anchor={anchor.button} above={anchor.above} onClose={closeSync} onSettings={() => { closeSync(); preferences.show(true); }} />}
       <div className="flex min-h-0 flex-1">
         <Sidebar onPreferences={() => preferences.show()} sync={sync.data} onSync={(button) => openSync(button, true)} />

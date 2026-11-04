@@ -3,7 +3,10 @@ use crate::{
     ball, panel,
     settings::{self, SettingsState},
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use tauri::{
     AppHandle, Emitter, Manager,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
@@ -13,6 +16,11 @@ use tauri::{
 pub struct TrayState {
     ball_item: CheckMenuItem<tauri::Wry>,
     ball_menu: Menu<tauri::Wry>,
+    menu: Menu<tauri::Wry>,
+    update_item: MenuItem<tauri::Wry>,
+    update_separator: PredefinedMenuItem<tauri::Wry>,
+    /// 托盘菜单里正在显示的“更新到 x.y.z…”版本；只在主线程读写。
+    update_version: Mutex<Option<String>>,
     preferences_pending: AtomicBool,
     sync_pending: AtomicBool,
     sync_item: MenuItem<tauri::Wry>,
@@ -47,6 +55,9 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(handle, "entry-quit", "退出", true, None::<&str>)?;
+    // 发现新版本时才插到托盘菜单最上面。
+    let update_item = MenuItem::with_id(handle, "entry-update", "更新…", true, None::<&str>)?;
+    let update_separator = PredefinedMenuItem::separator(handle)?;
     let menu = Menu::with_items(
         handle,
         &[
@@ -97,6 +108,10 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
     app.manage(TrayState {
         ball_item,
         ball_menu,
+        menu,
+        update_item,
+        update_separator,
+        update_version: Mutex::new(None),
         preferences_pending: AtomicBool::new(false),
         sync_pending: AtomicBool::new(false),
         sync_item,
@@ -137,6 +152,7 @@ fn dispatch(app: &AppHandle, id: &str) {
             "entry-panel" => panel::toggle(&handle),
             "entry-main" => panel::show_main_window(handle.clone()),
             "entry-preferences" => open_preferences(&handle),
+            "entry-update" => crate::updater::open_dialog(&handle),
             "entry-ball" => settings::set_ball_visible(
                 handle.clone(),
                 !handle.state::<SettingsState>().get().ball_visible,
@@ -174,6 +190,42 @@ pub fn sync_menu_changed(app: &AppHandle) {
             } else {
                 "暂停同步"
             });
+    }
+}
+/// 有该提示的新版本时在托盘菜单最上面显示“更新到 x.y.z…”，否则移除。
+/// 放到主线程按顺序执行，避免后台线程等主线程改菜单时和主线程上的命令互相等锁。
+pub fn update_menu_changed(app: &AppHandle, version: Option<String>) {
+    let handle = app.clone();
+    let result = app.run_on_main_thread(move || {
+        let Some(tray) = handle.try_state::<TrayState>() else {
+            return;
+        };
+        let mut shown = tray.update_version.lock().unwrap();
+        if *shown == version {
+            return;
+        }
+        let result = match &version {
+            Some(version) => tray
+                .update_item
+                .set_text(format!("更新到 {version}…"))
+                .and_then(|()| match *shown {
+                    Some(_) => Ok(()),
+                    None => tray
+                        .menu
+                        .insert_items(&[&tray.update_item, &tray.update_separator], 0),
+                }),
+            None => tray
+                .menu
+                .remove(&tray.update_item)
+                .and_then(|()| tray.menu.remove(&tray.update_separator)),
+        };
+        match result {
+            Ok(()) => *shown = version,
+            Err(error) => eprintln!("更新托盘菜单失败：{error}"),
+        }
+    });
+    if let Err(error) = result {
+        eprintln!("更新托盘菜单失败：{error}");
     }
 }
 #[tauri::command]

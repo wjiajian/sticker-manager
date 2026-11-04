@@ -35,6 +35,9 @@ pub struct Settings {
     pub ball_position: BallPosition,
     pub autostart_initialized: bool,
     pub sync: Option<SyncSettings>,
+    pub auto_check_updates: bool,
+    /// 用户在提示条上选了“忽略这个版本”的版本号；自动检查找到它时不再提示。
+    pub ignored_update: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -76,6 +79,8 @@ impl Default for Settings {
             },
             autostart_initialized: false,
             sync: None,
+            auto_check_updates: true,
+            ignored_update: None,
         }
     }
 }

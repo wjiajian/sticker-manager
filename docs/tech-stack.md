@@ -19,7 +19,7 @@
 | 拖出发送 | `tauri-plugin-drag` |
 | 全局快捷键 | `tauri-plugin-global-shortcut` |
 | 开机自启 | `tauri-plugin-autostart` |
-| 自动更新 | `tauri-plugin-updater`，从 GitHub Releases 拉取（尚未实现，见 [TODO.md](TODO.md)） |
+| 自动更新 | `tauri-plugin-updater`，读 GitHub Releases 最新版本附带的 `latest.json`；只在 Rust 端调用，前端不开放插件命令（发布流程见 [packaging.md](packaging.md)） |
 | 包管理 | pnpm；Rust workspace |
 
 ## 代码结构

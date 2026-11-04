@@ -25,6 +25,24 @@ fn is_stable_path(executable: &Path, temporary: &Path) -> bool {
         && !(temporary.is_absolute() && executable.starts_with(temporary))
 }
 
+// 与 tauri-plugin-autostart 的 LaunchAgent 模式一致，登记的是规范化的二进制路径。
+fn current_executable() -> Result<PathBuf, String> {
+    std::env::current_exe()
+        .and_then(|path| path.canonicalize())
+        .map_err(|e| e.to_string())
+}
+fn temporary_directory() -> PathBuf {
+    let temporary = std::env::temp_dir();
+    temporary.canonicalize().unwrap_or(temporary)
+}
+/// 应用是否从 .app 包运行，且不在 DMG、App Translocation 或临时目录里；发布版安装更新前检查。
+#[cfg_attr(debug_assertions, allow(dead_code))]
+pub fn running_from_installed_bundle() -> Result<bool, String> {
+    let current = current_executable()?;
+    Ok(current.to_string_lossy().contains(".app/Contents/MacOS/")
+        && is_stable_path(&current, &temporary_directory()))
+}
+
 #[derive(Debug, PartialEq)]
 enum Action {
     Keep,
@@ -64,13 +82,8 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
     if cfg!(debug_assertions) {
         return Ok(());
     }
-    // 与 tauri-plugin-autostart 的 LaunchAgent 模式一致，登记的是规范化的二进制路径。
-    let current = std::env::current_exe()
-        .and_then(|path| path.canonicalize())
-        .map_err(|e| e.to_string())?;
-    let temporary = std::env::temp_dir();
-    let temporary = temporary.canonicalize().unwrap_or(temporary);
-    if !is_stable_path(&current, &temporary) {
+    let current = current_executable()?;
+    if !is_stable_path(&current, &temporary_directory()) {
         // 不消耗首次登记机会，也不覆盖可能仍指向稳定位置的旧登记。
         return Ok(());
     }

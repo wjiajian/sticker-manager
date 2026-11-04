@@ -6,7 +6,7 @@
 
 把表情集中收进一个仓库，归类、快速取用，并在自己的设备之间同步。
 
-![版本 0.1.1](https://img.shields.io/badge/版本-0.1.1-blue)
+![版本 0.1.2](https://img.shields.io/badge/版本-0.1.2-blue)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
 

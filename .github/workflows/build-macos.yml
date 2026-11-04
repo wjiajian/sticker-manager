@@ -31,27 +31,61 @@ jobs:
 
       - run: pnpm typecheck
 
-      # CI=true 跳过 DMG 的访达窗口美化
-      - run: CI=true pnpm tauri build --bundles dmg
-
+      # 应用按 tauri.conf.json 的版本号判断有没有更新，Release 的 tag 用 package.json 的，三处必须一致。
       - id: version
-        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tauri=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)
+          if [ "$version" != "$tauri" ] || [ "$version" != "$cargo" ]; then
+            echo "::error::版本号不一致：package.json $version，tauri.conf.json $tauri，src-tauri/Cargo.toml $cargo"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      # 有更新签名私钥时同时生成更新包（.app.tar.gz 及签名）；发布到 Release 必须有私钥，
+      # 否则新 Release 没有 latest.json，已安装的应用检查更新会失败。
+      # CI=true 跳过 DMG 的访达窗口美化
+      - id: build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            CI=true pnpm tauri build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
+            echo "updater=true" >> "$GITHUB_OUTPUT"
+          elif [ "$RELEASE" = "true" ]; then
+            echo "::error::发布到 Release 需要仓库 Secret TAURI_SIGNING_PRIVATE_KEY（更新签名私钥），见 docs/packaging.md"
+            exit 1
+          else
+            CI=true pnpm tauri build --bundles dmg
+          fi
+
+      - if: steps.build.outputs.updater == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.value }}
+        run: node .github/scripts/updater-manifest.mjs
 
       - uses: actions/upload-artifact@v4
         with:
           name: sticker-manager-${{ steps.version.outputs.value }}-macos-arm64
-          path: target/release/bundle/dmg/*.dmg
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/updater/*
           if-no-files-found: error
           retention-days: 14
 
-      # Release 已存在时只覆盖上传 DMG，不改说明
+      # Release 已存在时只覆盖上传 DMG、更新包和 latest.json，不改说明
       - if: inputs.release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.version.outputs.value }}
         run: |
+          files=(target/release/bundle/dmg/*.dmg target/release/bundle/updater/*)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" target/release/bundle/dmg/*.dmg --clobber
+            gh release upload "$TAG" "${files[@]}" --clobber
           else
-            gh release create "$TAG" target/release/bundle/dmg/*.dmg --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
           fi
