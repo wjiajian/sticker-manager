@@ -80,6 +80,9 @@ pub fn run() {
                     .join(app.config().identifier.clone())
                     .join("exports"),
             ));
+            // WebView2 可在 setup 结束前发出查询，先登记同步状态。
+            #[cfg(target_os = "windows")]
+            sync::start(app.handle().clone());
             panel::create(app)?;
             preview::create(app)?;
             panel::register_shortcut(app.handle());
@@ -87,6 +90,7 @@ pub fn run() {
             tray::create(app)?;
             ball::create(app)?;
             settings::initialize_autostart(app.handle());
+            #[cfg(not(target_os = "windows"))]
             sync::start(app.handle().clone());
             updater::start(app.handle().clone());
             start_expiry_cleanup(app.handle().clone());
