@@ -8,6 +8,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 [![版本 0.1.5](https://img.shields.io/badge/版本-0.1.5-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
+![平台 Windows x64](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
 
 [下载](https://github.com/wjiajian/sticker-manager/releases/latest) · [用户篇](#用户篇) · [开发者篇](#开发者篇) · [更新记录](CHANGELOG.md)
@@ -17,7 +18,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 表情包散落在聊天记录、下载文件夹和各种相册里，想用的时候要翻半天。表情管理器是一个个人桌面应用：所有表情放进一个本地仓库，按分类、名称和配文来找；在任何应用里按一下快捷键呼出表情面板，单击复制或者直接拖出去发送。有多台电脑的话，可以通过自己的网盘或云存储同步，不需要服务器。
 
 > [!NOTE]
-> macOS 14 及以上已有运行验证，Releases 提供 Apple Silicon 安装包。Windows x64 已通过双平台 CI 构建与 Windows 11 隔离运行验收，Debug 程序和 NSIS 安装包可从构建产物下载，详情见 [Windows 验收报告](docs/windows-validation.md) 和[打包说明](docs/packaging.md#windows-x64-构建与验收)。
+> macOS 14 及以上已有运行验证，Releases 提供 Apple Silicon 安装包。Windows x64 已通过双平台 CI、Windows 11 隔离运行检查及用户实际验收，提供 NSIS 安装包和便携 ZIP；当前从 Actions 构建产物下载，详情见 [Windows 验收报告](docs/windows-validation.md) 和[打包说明](docs/packaging.md#windows-x64-构建与验收)。
 
 - [用户篇](#用户篇)：[安装](#安装) · [快速上手](#快速上手) · [功能](#功能) · [数据存放位置](#数据存放位置) · [常见问题](#常见问题)
 - [开发者篇](#开发者篇)：[技术栈](#技术栈) · [目录结构](#目录结构) · [本地开发](#本地开发) · [提交前检查](#提交前检查) · [文档地图](#文档地图) · [发布流程](#发布流程) · [贡献约定](#贡献约定)
@@ -25,6 +26,8 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 ## 用户篇
 
 ### 安装
+
+#### macOS
 
 1. 打开 [GitHub Releases](https://github.com/wjiajian/sticker-manager/releases/latest)，下载 `sticker-manager_<版本>_<架构>.dmg`。目前只发布 Apple Silicon 版本，文件名形如 `sticker-manager_0.1.5_aarch64.dmg`。
 2. 双击打开 DMG，把「表情管理器」拖进「应用程序」文件夹。
@@ -42,12 +45,22 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 系统提示的具体措辞随 macOS 版本略有不同。如果提示的是「已损坏」，看[常见问题](#提示已损坏或者打不开怎么办)。
 
+#### Windows
+
+从 [Windows 构建与平台回归](https://github.com/wjiajian/sticker-manager/actions/workflows/build-windows.yml) 最近成功运行的 Artifacts 下载对应产物（需要登录 GitHub，产物保留 14 天）：
+
+- **安装版**：下载 `sticker-manager-windows-nsis-<提交 SHA>`，解压后运行其中的安装程序。
+- **便携版**：下载 `sticker-manager-windows-portable-<提交 SHA>`，解开产物中的便携 ZIP，将整个 `sticker-manager` 文件夹放到可写位置，运行 `sticker-manager.exe`。需要 WebView2 Runtime；程序旁的 `portable.flag` 用于启用便携模式，`data` 保存仓库，`webview` 保存缓存。
+- 便携版不登记开机自启，不使用安装式更新。升级时从菜单退出，再替换 EXE，保留 `portable.flag`、`data` 和 `webview`；搬迁时移动整个文件夹。
+
 ### 快速上手
+
+下文快捷键按 macOS 标记；Windows 的面板快捷键是 `Ctrl+Alt+E`，搜索、复制和多选使用 `Ctrl` 替代 `⌘`。
 
 1. 点主窗口里的「导入表情」选择图片或 `.zip`，或者点它旁边的箭头选「导入文件夹」；也可以直接把图片、文件夹或 `.zip` 拖进窗口。
 2. 选中一张表情，在右侧详情栏里设分类、写配文、点星标收藏。
 3. 在任何应用里按 `⌃⌥E` 呼出表情面板，输入文字搜索，单击表情复制，回到聊天窗口粘贴发送。
-4. 有多台 Mac 的话，在「偏好设置 › 同步」里选一种存储；另一台电脑连到同一个位置，两边的表情就会合并。
+4. 有多台电脑的话，在「偏好设置 › 同步」里选一种存储；另一台电脑连到同一个位置，两边的表情就会合并。
 
 ### 功能
 
@@ -99,6 +112,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 - **悬浮球**常驻屏幕边缘，初始在主显示器右侧。单击展开表情面板，右键打开菜单：打开主窗口、偏好设置、隐藏悬浮球、暂停或继续同步、退出。可以拖到别的位置；静止 3 秒后收到屏幕边缘，也可以在偏好设置里改成 10 秒或不收起。
 - 把图片、文件夹或 `.zip` 拖到悬浮球上也能导入。
+- Windows 也支持从微信、QQ 等聊天软件拖入图片或虚拟文件；来源没有提供可读取数据时会提示先保存图片再导入。
 - **菜单栏托盘**提供：显示表情面板、打开主窗口、显示悬浮球、偏好设置、暂停或继续同步、退出。有新版本时，菜单最上面会多一项「更新到 x.y.z…」。
 - 关闭主窗口只是把它隐藏，应用会继续在后台运行。要完全退出，用托盘或悬浮球菜单里的「退出」，或者按 `⌘Q`。
 
@@ -143,8 +157,16 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 所有表情和整理信息都在一个文件夹里（在「偏好设置 › 仓库」里点「打开所在位置」可以直接找到）：
 
+| 运行方式 | 仓库目录 |
+|---|---|
+| macOS | `~/Library/Application Support/com.wjiajian.sticker-manager/` |
+| Windows 安装版 | `%APPDATA%\sticker-manager\` |
+| Windows 便携版 | 程序所在目录的 `data\` |
+
+Windows 安装版首次使用新路径时，会在目标目录为空的情况下迁移旧的 `com.wjiajian.sticker-manager` 仓库，并兼容更早的 `com.shaojian.sticker-manager` 目录。各平台仓库内部结构相同：
+
 ```text
-~/Library/Application Support/com.wjiajian.sticker-manager/
+仓库目录/
 ├── library.db      表情、分类、配文、使用记录等元数据（SQLite）
 ├── objects/        原图，按内容哈希命名
 ├── thumbs/         缩略图，每台电脑各自生成，不同步
@@ -237,14 +259,14 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 │   └── tauri.conf.json
 ├── design/README.md             界面设计规范
 ├── docs/                        技术文档、ADR、术语表、测试、打包、待办
-└── .github/                     macOS 构建与发布 workflow、更新清单脚本
+└── .github/                     双平台构建、macOS 发布 workflow、更新清单脚本
 ```
 
 ### 本地开发
 
 #### 环境要求
 
-- macOS 14 及以上，装好 Xcode 命令行工具
+- macOS 14 及以上，装好 Xcode 命令行工具；或 Windows x64，装好 C++ Build Tools、Windows SDK 和 WebView2 Runtime（见[打包说明](docs/packaging.md#windows-x64-构建与验收)）
 - Rust stable（workspace 使用 edition 2024）
 - Node.js（CI 用 22）
 - pnpm 11（`package.json` 的 `packageManager` 固定为 `pnpm@11.22.0`）
@@ -275,7 +297,7 @@ pnpm tauri dev
 #### 用 `STICKER_LIBRARY_DIR` 隔离仓库
 
 > [!WARNING]
-> 开发构建默认打开的是真实仓库 `~/Library/Application Support/com.wjiajian.sticker-manager`。调试和测试时请换成临时仓库。
+> 开发构建默认打开的是真实仓库（见[数据存放位置](#数据存放位置)）。调试和测试时请换成临时仓库。
 
 ```bash
 STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm tauri dev
@@ -283,7 +305,7 @@ STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm tauri dev
 
 - 必须是绝对路径。相对路径会直接报启动错误，因为它会落在 `src-tauri/` 下，写入的文件又会触发 `tauri dev` 重新编译。
 - 目录不存在时会自动新建。
-- 只在开发构建里生效；release 构建会忽略这个变量，直接打开真实仓库。要试运行打包版，需要隔离 `HOME`，做法见 [docs/packaging.md](docs/packaging.md)。
+- 只在开发构建里生效；release 构建会忽略这个变量。macOS 打包版通过隔离 `HOME` 验收；Windows 便携版通过程序旁的 `portable.flag` 和临时程序目录隔离，做法见 [docs/packaging.md](docs/packaging.md)。
 
 另外两个只在开发构建里生效的调试变量：
 
