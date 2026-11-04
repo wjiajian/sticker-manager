@@ -7,7 +7,7 @@ pnpm tauri build --bundles app
 CI=true pnpm tauri build --bundles app,dmg
 ```
 
-产物分别在 `target/release/bundle/macos/表情管理器.app` 和 `target/release/bundle/dmg/`。只要 DMG 时可用 `--bundles dmg`，但 Tauri 会清理作为中间产物的 `.app`；要同时保留两者就用 `--bundles app,dmg`。`CI=true` 跳过 DMG 的访达窗口美化，避免构建时弹出自动化权限提示。当前未配置开发者签名和公证。本地打包默认不生成更新包，不需要更新签名私钥。
+产物分别在 `target/release/bundle/macos/表情管理器.app` 和 `target/release/bundle/dmg/`。只要 DMG 时可用 `--bundles dmg`，但 Tauri 会清理作为中间产物的 `.app`；要同时保留两者就用 `--bundles app,dmg`。`CI=true` 跳过 DMG 的访达窗口美化，避免构建时弹出自动化权限提示。当前未配置 Apple 开发者签名和公证；`tauri.conf.json` 的 `bundle.macOS.signingIdentity` 设为 `"-"`，打包时对整个 .app 做临时签名（ad-hoc）。不做这一步时只有编译器给可执行文件加的签名，Info.plist 和资源没有纳入签名，从浏览器下载后系统会直接报“已损坏”，隐私与安全性里也没有放行按钮（0.1.2 的 DMG 就是这样）。本地打包默认不生成更新包，不需要更新签名私钥。
 
 ## GitHub Actions 构建
 
@@ -25,7 +25,7 @@ CI=true pnpm tauri build --bundles app,dmg
 - 本地要生成同样的更新包时，在打包命令前加 `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/sticker-manager.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`，并加上述 `--config` 和 `--bundles app`。
 - 开发构建不自动检查。设置 `STICKER_UPDATE_ENDPOINT` 为一个 `latest.json` 地址（可以是本机 http）时，开发构建改从那里检查并打开自动检查；开发构建只下载和校验签名，不安装。
 
-CI 构建同样没有签名和公证，下载的 DMG 装好后首次打开会被 Gatekeeper 拦下。右键应用选「打开」，或在终端执行：
+CI 构建同样只有临时签名，没有公证，下载的 DMG 装好后首次打开会被 Gatekeeper 拦下：先打开一次，再到「系统设置 › 隐私与安全性」底部点「仍要打开」。提示“已损坏”或想跳过这一步时，在终端执行：
 
 ```bash
 xattr -cr /Applications/表情管理器.app

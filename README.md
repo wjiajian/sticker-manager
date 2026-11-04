@@ -6,7 +6,7 @@
 
 把表情集中收进一个仓库，归类、快速取用，并在自己的设备之间同步。
 
-![版本 0.1.2](https://img.shields.io/badge/版本-0.1.2-blue)
+![版本 0.1.3](https://img.shields.io/badge/版本-0.1.3-blue)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
 
@@ -15,7 +15,7 @@
 表情包散落在聊天记录、下载文件夹和各种相册里，想用的时候翻半天。表情管理器是一个个人桌面应用：所有表情放进一个本地仓库，按分类和配文找，一个快捷键呼出面板，单击就能复制或拖出去发送。
 
 > [!NOTE]
-> 目前只在 macOS 14 及以上验证过，Windows 还没有编译和运行过。还没有发布安装包，需要[自己打包](docs/packaging.md)；应用没有签名，第一次打开要在“系统设置 › 隐私与安全性”里手动允许。
+> 目前只在 macOS 14 及以上验证过，Windows 还没有编译和运行过。安装包（Apple Silicon）在 [Releases](https://github.com/wjiajian/sticker-manager/releases) 下载，也可以[自己打包](docs/packaging.md)；应用没有 Apple 签名，第一次打开后要到“系统设置 › 隐私与安全性”里点“仍要打开”。
 
 ## 功能
 
