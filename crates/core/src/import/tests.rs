@@ -532,3 +532,67 @@ fn cancel_keeps_committed_files_and_import_releases_lock_between_images() {
     assert_eq!((report.added, report.sticker_ids.len()), (2, 2));
     assert_eq!(library.lock().unwrap().overview().unwrap().all, 2);
 }
+
+#[test]
+fn folder_import_puts_new_stickers_in_category_named_after_their_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(&dir.path().join("library")).unwrap();
+    let existing_category = library.create_category("Cats", None).unwrap();
+    // 已在库里、没有分类的图，再从文件夹导入时保持原样
+    let loose = dir.path().join("早就有.png");
+    png_file(&loose, [9, 9, 9, 255]);
+    library.import_paths(&[loose]);
+
+    let root = dir.path().join("表情包");
+    for folder in ["看戏", "cats", "看戏/更深", "未分类", "a..b"] {
+        fs::create_dir_all(root.join(folder)).unwrap();
+    }
+    png_file(&root.join("散图.png"), [1, 0, 0, 255]);
+    png_file(&root.join("看戏/吃瓜.png"), [2, 0, 0, 255]);
+    png_file(&root.join("看戏/更深/搬凳子.png"), [3, 0, 0, 255]);
+    png_file(&root.join("cats/猫.png"), [4, 0, 0, 255]);
+    png_file(&root.join("未分类/没分类.png"), [5, 0, 0, 255]);
+    png_file(&root.join("a..b/怪名字.png"), [6, 0, 0, 255]);
+    png_file(&root.join("看戏/重复.png"), [9, 9, 9, 255]);
+    let single = dir.path().join("单独选的.png");
+    png_file(&single, [7, 0, 0, 255]);
+
+    let report = library.import_paths(&[root, single]);
+    assert!(report.failures.is_empty(), "{:?}", report.failures);
+    assert_eq!((report.added, report.existing), (7, 1));
+
+    let stickers = library.list_stickers(LibraryView::All).unwrap();
+    let category = |name: &str| {
+        stickers
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap()
+            .category
+            .as_ref()
+            .map(|c| c.name.clone())
+    };
+    assert_eq!(category("散图").as_deref(), Some("表情包"));
+    assert_eq!(category("吃瓜").as_deref(), Some("看戏"));
+    assert_eq!(category("搬凳子").as_deref(), Some("更深"));
+    assert_eq!(category("猫").as_deref(), Some("Cats"));
+    assert_eq!(category("没分类"), None);
+    assert_eq!(category("怪名字"), None);
+    assert_eq!(category("单独选的"), None);
+    assert_eq!(category("早就有"), None);
+
+    let mut names = library
+        .categories()
+        .unwrap()
+        .into_iter()
+        .map(|c| c.category.name)
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, ["Cats", "更深", "看戏", "表情包"]);
+    assert!(
+        library
+            .categories()
+            .unwrap()
+            .iter()
+            .any(|c| c.category.id == existing_category.id)
+    );
+}

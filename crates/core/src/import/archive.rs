@@ -199,7 +199,7 @@ fn import_with_limits(
             Ok(Entry::Ignored) => {}
             Ok(Entry::Skipped) => report.skipped += 1,
             Ok(Entry::Image(file, stem)) => {
-                process(root, file.path(), &stem, &display, report, store)
+                process(root, file.path(), &stem, None, &display, report, store)
             }
             Err(message) => report.failures.push(ImportFailure {
                 path: display,

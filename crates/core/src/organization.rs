@@ -214,6 +214,28 @@ fn batch_set(conn: &Connection, ids: &[String], category: Option<&str>) -> Resul
     Ok(count)
 }
 
+/// 导入文件夹时按文件夹名找分类：已有同名分类（ASCII 不区分大小写）就沿用，没有就新建。
+/// 名字不能当分类（例如「未分类」或含 `..`）时返回 None，图片照常导入到未分类。
+pub(crate) fn category_for_folder(conn: &Connection, folder: &str) -> Result<Option<String>> {
+    let existing = conn
+        .query_row(
+            "SELECT id FROM categories WHERE name=?1 COLLATE NOCASE",
+            [folder.trim()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing.is_some() {
+        return Ok(existing);
+    }
+    match insert_category(conn, folder, None) {
+        Ok(category) => Ok(Some(category.id)),
+        Err(Error::EmptyName(_) | Error::ReservedCategoryName | Error::InvalidCategoryName) => {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn insert_category(conn: &Connection, name: &str, color: Option<&str>) -> Result<Category> {
     let name = validate_name(conn, name, None)?;
     let position: i64 = conn.query_row(

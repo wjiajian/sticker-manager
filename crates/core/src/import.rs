@@ -125,6 +125,7 @@ impl Library {
             ext,
             format,
             name,
+            category,
             mut dimensions,
             mut animated,
             byte_size,
@@ -149,9 +150,13 @@ impl Library {
         if existing.is_some() {
             tx.execute("UPDATE stickers SET deleted_at=NULL WHERE hash=?1", [&hash])?;
         } else {
+            let category_id = match category.as_deref() {
+                Some(folder) => crate::organization::category_for_folder(&tx, folder)?,
+                None => None,
+            };
             tx.execute(
-                "INSERT INTO stickers(id,hash,ext,name,animated,width,height,byte_size,added_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-                params![id, hash, ext, name, animated, dimensions.0, dimensions.1, byte_size, unix_millis()?],
+                "INSERT INTO stickers(id,hash,ext,name,animated,width,height,byte_size,added_at,category_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                params![id, hash, ext, name, animated, dimensions.0, dimensions.1, byte_size, unix_millis()?, category_id],
             )?;
         }
         let object_path = self.root.join("objects").join(format!("{hash}.{ext}"));
@@ -194,6 +199,8 @@ struct Prepared {
     ext: &'static str,
     format: ImageFormat,
     name: String,
+    /// 导入文件夹时的文件夹名；只给新表情设分类，已在库里的保持原样。
+    category: Option<String>,
     dimensions: (u32, u32),
     animated: bool,
     byte_size: i64,
@@ -221,6 +228,7 @@ fn prepare(
     root: &Path,
     path: &Path,
     name: &str,
+    category: Option<&str>,
     store: &mut dyn Store,
 ) -> Result<Option<Prepared>> {
     let reader = ImageReader::open(path)?.with_guessed_format()?;
@@ -262,6 +270,7 @@ fn prepare(
         ext,
         format,
         name: name.into(),
+        category: category.map(str::to_owned),
         dimensions,
         animated,
         byte_size,
@@ -269,7 +278,8 @@ fn prepare(
 }
 
 enum Input {
-    File(PathBuf),
+    /// 第二项是图片所在文件夹的名字；直接选中的文件为 None。
+    File(PathBuf, Option<String>),
     Zip(PathBuf, usize),
     Skip,
     Failed(PathBuf, String),
@@ -311,7 +321,12 @@ fn collect(root: &Path, paths: &[PathBuf], cancelled: &dyn Fn() -> bool) -> Vec<
                     Err(e) => inputs.push(Input::Failed(path.clone(), e)),
                 }
             } else if metadata.is_file() {
-                inputs.push(Input::File(path.clone()));
+                // 从文件夹里找到的图片归到它所在那一层文件夹同名的分类
+                let folder = (!direct)
+                    .then(|| path.parent().and_then(Path::file_name))
+                    .flatten()
+                    .map(|name| name.to_string_lossy().into_owned());
+                inputs.push(Input::File(path.clone(), folder));
             } else {
                 inputs.push(Input::Skip);
             }
@@ -347,9 +362,17 @@ fn run(
             break;
         }
         match input {
-            Input::File(path) => {
+            Input::File(path, folder) => {
                 let name = path.file_stem().unwrap_or_default().to_string_lossy();
-                process(root, &path, &name, &path, &mut report, store);
+                process(
+                    root,
+                    &path,
+                    &name,
+                    folder.as_deref(),
+                    &path,
+                    &mut report,
+                    store,
+                );
             }
             Input::Zip(path, count) => {
                 archive::import(
@@ -380,11 +403,12 @@ fn process(
     root: &Path,
     path: &Path,
     name: &str,
+    category: Option<&str>,
     display: &Path,
     report: &mut ImportReport,
     store: &mut dyn Store,
 ) {
-    let result = prepare(root, path, name, store).and_then(|prepared| match prepared {
+    let result = prepare(root, path, name, category, store).and_then(|prepared| match prepared {
         Some(p) => store.commit(p, report),
         None => {
             report.skipped += 1;
