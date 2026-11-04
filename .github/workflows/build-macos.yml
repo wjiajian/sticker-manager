@@ -62,6 +62,22 @@ jobs:
             CI=true pnpm tauri build --bundles dmg
           fi
 
+      # GitHub 会去掉附件名里的中文（「表情管理器_0.1.2_aarch64.dmg」会变成「_0.1.2_aarch64.dmg」），
+      # 所以复制成和更新包一致的 ASCII 文件名再上传。
+      - env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          dmgs=(target/release/bundle/dmg/*.dmg)
+          if [ ${#dmgs[@]} -ne 1 ]; then
+            echo "::error::target/release/bundle/dmg 里应该正好有一个 DMG，实际是 ${#dmgs[@]} 个"
+            exit 1
+          fi
+          arch=$(uname -m)
+          if [ "$arch" = arm64 ]; then arch=aarch64; fi
+          mkdir -p target/release/bundle/release
+          cp "${dmgs[0]}" "target/release/bundle/release/sticker-manager_${VERSION}_${arch}.dmg"
+
+      # 生成 latest.json，同时把 CHANGELOG 对应小节写成 Release 说明（release-notes.md）。
       - if: steps.build.outputs.updater == 'true'
         env:
           VERSION: ${{ steps.version.outputs.value }}
@@ -72,20 +88,20 @@ jobs:
         with:
           name: sticker-manager-${{ steps.version.outputs.value }}-macos-arm64
           path: |
-            target/release/bundle/dmg/*.dmg
+            target/release/bundle/release/*.dmg
             target/release/bundle/updater/*
           if-no-files-found: error
           retention-days: 14
 
-      # Release 已存在时只覆盖上传 DMG、更新包和 latest.json，不改说明
+      # 新建 Release 时用 CHANGELOG 对应小节作说明；Release 已存在时只覆盖上传 DMG、更新包和 latest.json，不改说明
       - if: inputs.release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.version.outputs.value }}
         run: |
-          files=(target/release/bundle/dmg/*.dmg target/release/bundle/updater/*)
+          files=(target/release/bundle/release/*.dmg target/release/bundle/updater/*)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           else
-            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "$TAG" --notes-file target/release/bundle/release-notes.md
           fi

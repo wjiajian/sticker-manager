@@ -13,7 +13,7 @@ CI=true pnpm tauri build --bundles app,dmg
 
 在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow 手动触发。只构建 Apple Silicon（arm64）的 DMG，完成后在运行详情页的 Artifacts 下载，保留 14 天。
 
-运行时勾选「发布到 Release」，会以 `v` 加 `package.json` 的版本号为 tag 创建正式 Release，附上 DMG、更新包 `sticker-manager_<版本>_aarch64.app.tar.gz` 和 `latest.json`；该 tag 的 Release 已存在时，只覆盖上传这三个文件，不改说明。tag 指向运行时选择的分支的最新提交，发布前先确认版本号已更新：`package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 三处必须一致，不一致时构建直接失败。
+运行时勾选「发布到 Release」，会以 `v` 加 `package.json` 的版本号为 tag 创建正式 Release，附上 DMG `sticker-manager_<版本>_aarch64.dmg`、更新包 `sticker-manager_<版本>_aarch64.app.tar.gz` 和 `latest.json`，说明取 `CHANGELOG.md` 里该版本的小节，与应用更新对话框里显示的一致。附件都用 ASCII 文件名，因为 GitHub 会去掉附件名里的中文。该 tag 的 Release 已存在时，只覆盖上传这三个文件，不改说明；旧名字的附件要手动删除。tag 指向运行时选择的分支的最新提交，发布前先确认版本号已更新：`package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 三处必须一致，不一致时构建直接失败。
 
 ## 检查更新与签名密钥
 

@@ -1,6 +1,7 @@
 // 把 tauri build 生成的更新包改成固定的 ASCII 文件名，并生成更新检查读取的 latest.json。
 // 用法：VERSION=0.1.2 BASE_URL=https://github.com/<owner>/<repo>/releases/download/v0.1.2 node .github/scripts/updater-manifest.mjs
-// 输出到 target/release/bundle/updater/。更新说明取 CHANGELOG.md 里该版本的小节，没有就取“未发布”。
+// 输出到 target/release/bundle/updater/，另外把说明写到 target/release/bundle/release-notes.md 供 Release 使用。
+// 更新说明取 CHANGELOG.md 里该版本的小节，没有就取“未发布”。
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -37,4 +38,7 @@ const manifest = {
   platforms: { [`darwin-${arch}`]: { signature, url: `${baseUrl}/${name}` } },
 };
 writeFileSync(join(output, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`已生成 ${join(output, name)} 和 latest.json（darwin-${arch}，说明 ${notes.length} 字）`);
+// Release 页面的说明与更新对话框一致；放在 updater/ 外面，不作为附件上传。
+const releaseNotes = "target/release/bundle/release-notes.md";
+writeFileSync(releaseNotes, `${notes}\n`);
+console.log(`已生成 ${join(output, name)}、latest.json 和 ${releaseNotes}（darwin-${arch}，说明 ${notes.length} 字）`);
