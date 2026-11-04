@@ -9,7 +9,7 @@ commands.allow = [
   "library_directory", "open_library_directory", "take_preferences_request",
   "library_overview", "list_stickers", "search_stickers", "sticker", "categories",
   "delete_sticker", "restore_sticker", "delete_stickers", "restore_stickers", "purge_sticker", "purge_deleted_stickers", "create_category", "rename_category",
-  "set_category_color", "delete_category", "set_sticker_category",
+  "set_category_color", "delete_category", "set_sticker_category", "set_sticker_name",
   "set_sticker_caption", "import_stickers", "copy_sticker", "prepare_sticker_drag",
   "record_sticker_usage", "toggle_sticker_favorite", "reveal_sticker", "global_shortcut_error",
 ]

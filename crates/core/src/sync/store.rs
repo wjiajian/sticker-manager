@@ -12,7 +12,13 @@ pub(super) fn load(conn: &Connection) -> Result<(i64, Model)> {
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    Ok((revision, serde_json::from_str(&json)?))
+    let mut model: Model = serde_json::from_str(&json)?;
+    if let Some(stickers) = model.entities.get_mut(&Kind::Sticker) {
+        for entity in stickers.values_mut() {
+            entity.fields.remove("category_id");
+        }
+    }
+    Ok((revision, model))
 }
 pub(super) fn save(conn: &Connection, revision: i64, model: &Model) -> Result<()> {
     conn.execute("INSERT INTO sync_model VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET revision=excluded.revision,state=excluded.state",params![revision,serde_json::to_string(model)?])?;
@@ -257,7 +263,7 @@ impl Library {
                                 byte_size: row.get(6)?,
                                 added_at: row.get(7)?,
                             }),
-                            json!({"name":row.get::<_,String>(8)?,"caption":row.get::<_,Option<String>>(9)?,"favorite":row.get::<_,i64>(10)?,"deleted_at":row.get::<_,Option<i64>>(11)?,"category_id":row.get::<_,Option<String>>(12)?}),
+                            json!({"name":row.get::<_,String>(8)?,"caption":row.get::<_,Option<String>>(9)?,"favorite":row.get::<_,i64>(10)?,"deleted_at":row.get::<_,Option<i64>>(11)?}),
                         ),
                         Kind::Category => (
                             None,
@@ -318,7 +324,12 @@ impl Library {
         Ok(())
     }
     pub fn local_revision(&self) -> Result<i64> {
-        current_revision(&self.conn)
+        Ok(current_revision(&self.conn)?
+            + self
+                .conn
+                .query_row("SELECT revision FROM sync_file_revision", [], |r| {
+                    r.get::<_, i64>(0)
+                })?)
     }
     pub fn rename_device(&mut self, name: &str) -> Result<()> {
         self.device.rename(&self.root, name)
@@ -377,6 +388,13 @@ pub(super) fn enqueue(conn: &Connection, library: &str, change: Change) -> Resul
 }
 
 pub(super) fn project(conn: &Connection, model: &Model) -> Result<()> {
+    let local_categories = {
+        let mut q = conn.prepare("SELECT hash,category_id FROM stickers")?;
+        q.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?
+        .collect::<rusqlite::Result<BTreeMap<_, _>>>()?
+    };
     conn.execute("UPDATE sync_meta SET recording=0", [])?;
     conn.execute_batch("DELETE FROM usages; DELETE FROM categories; DELETE FROM stickers;")?;
     let categories = model.projected(Kind::Category);
@@ -396,8 +414,9 @@ pub(super) fn project(conn: &Connection, model: &Model) -> Result<()> {
     }
     for (id, e) in &stickers {
         let Some(o) = &e.data else { continue };
-        let category = value(e, "category_id")
-            .as_str()
+        let category = local_categories
+            .get(&o.hash)
+            .and_then(|c| c.as_deref())
             .and_then(|c| model.representative(&category_ids, Kind::Category, c))
             .filter(|c| categories.contains_key(c));
         conn.execute("INSERT INTO stickers(id,hash,ext,name,caption,favorite,animated,width,height,byte_size,added_at,deleted_at,category_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![id,o.hash,o.ext,value(e,"name").as_str().unwrap_or(""),value(e,"caption").as_str(),value(e,"favorite").as_i64().unwrap_or(0),o.animated,o.width,o.height,o.byte_size,o.added_at,value(e,"deleted_at").as_i64(),category])?;
@@ -408,7 +427,8 @@ pub(super) fn project(conn: &Connection, model: &Model) -> Result<()> {
             let Some(s) = model.representative(&sticker_ids, Kind::Sticker, original) else {
                 continue;
             };
-            if !stickers.contains_key(&s) {
+            // 活着的别名可能只剩字段，原图所属身份已被永久删除；此时没有表情行可引用。
+            if stickers.get(&s).is_none_or(|e| e.data.is_none()) {
                 continue;
             }
             let v = usages.entry((s.clone(), device.clone())).or_default();

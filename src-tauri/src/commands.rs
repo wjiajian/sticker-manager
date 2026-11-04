@@ -181,6 +181,11 @@ pub async fn set_sticker_category(
 }
 
 #[tauri::command]
+pub async fn set_sticker_name(app: AppHandle, id: String, name: String) -> CommandResult<()> {
+    with_library(app, move |library| Ok(library.set_sticker_name(&id, &name)?)).await
+}
+
+#[tauri::command]
 pub async fn set_sticker_caption(app: AppHandle, id: String, caption: String) -> CommandResult<()> {
     with_library(app, move |library| {
         Ok(library.set_sticker_caption(&id, &caption)?)

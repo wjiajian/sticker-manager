@@ -107,6 +107,7 @@ pub fn run() {
             commands::set_category_color,
             commands::delete_category,
             commands::set_sticker_category,
+            commands::set_sticker_name,
             commands::set_sticker_caption,
             commands::import_stickers,
             commands::import_status,

@@ -149,6 +149,7 @@ export const ipc = {
   setCategoryColor: (id: string, color: string) => invoke<void>("set_category_color", { id, color }),
   deleteCategory: (id: string) => invoke<void>("delete_category", { id }),
   setStickerCategory: (stickerId: string, categoryId: string | null) => invoke<void>("set_sticker_category", { stickerId, categoryId }),
+  setStickerName: (id: string, name: string) => invoke<void>("set_sticker_name", { id, name }),
   setStickerCaption: (id: string, caption: string) => invoke<void>("set_sticker_caption", { id, caption }),
   importStickers: (paths: string[]) => invoke<ImportReport>("import_stickers", { paths }),
   copySticker: (id: string, fileOnly: boolean) => invoke<void>("copy_sticker", { id, fileOnly }),

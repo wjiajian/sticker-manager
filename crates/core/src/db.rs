@@ -11,6 +11,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0002_sync.sql"),
     include_str!("migrations/0003_sync_presence.sql"),
     include_str!("migrations/0004_categories.sql"),
+    include_str!("migrations/0005_sync_tree.sql"),
 ];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 

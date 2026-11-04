@@ -322,7 +322,10 @@ impl Transport {
         check(&self.cancelled)
     }
     async fn send(&self, request: &Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
-        let base = if request.uri().path().contains("/objects/") {
+        let base = if [".png", ".jpg", ".gif", ".webp"]
+            .iter()
+            .any(|ext| request.uri().path().to_ascii_lowercase().ends_with(ext))
+        {
             self.object_timeout
         } else {
             self.request_timeout
@@ -530,11 +533,19 @@ impl Storage for NetworkStorage {
             };
             let mut result = entries
                 .into_iter()
-                .filter(|e| e.metadata().is_file() && e.path().starts_with(&prefix))
+                .filter(|e| {
+                    (e.metadata().is_file() || e.metadata().is_dir())
+                        && e.path().starts_with(&prefix)
+                })
                 .filter(|e| validate_key(e.path()).is_ok())
                 .map(|e| FileEntry {
                     key: e.path().to_owned(),
                     size: e.metadata().content_length(),
+                    version: e
+                        .metadata()
+                        .etag()
+                        .map(str::to_owned)
+                        .or_else(|| e.metadata().last_modified().map(|t| t.to_string())),
                 })
                 .collect::<Vec<_>>();
             result.sort_by(|a, b| a.key.cmp(&b.key));
@@ -560,6 +571,9 @@ impl Storage for NetworkStorage {
         let key = key.to_owned();
         let bytes = bytes.to_vec();
         self.run(async move {
+            if key.ends_with('/') && bytes.is_empty() {
+                return operator.create_dir(&key).await;
+            }
             match operator.write_with(&key, bytes.clone()).concurrent(1).await {
                 Err(e) if creating.is_some() && missing_parent(&e) => {
                     let creating = creating.unwrap();
@@ -661,6 +675,23 @@ mod tests {
         .unwrap()
     }
     #[test]
+    fn webdav_listing_uses_etag_or_last_modified_without_extra_requests() {
+        let body = r#"<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">
+          <D:response><D:href>/a.png</D:href><D:propstat><D:prop><D:resourcetype/><D:getcontentlength>12</D:getcontentlength><D:getetag>opaque-version</D:getetag><D:getlastmodified>Tue, 07 May 2024 06:40:10 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+          <D:response><D:href>/b.png</D:href><D:propstat><D:prop><D:resourcetype/><D:getcontentlength>13</D:getcontentlength><D:getlastmodified>Tue, 07 May 2024 06:40:10 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+        </D:multistatus>"#;
+        let url = server(vec![(207, body, Duration::ZERO)]);
+        let files = storage(url, Arc::new(|| false)).list("").unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].version.as_deref(), Some("opaque-version"));
+        assert!(
+            files[1]
+                .version
+                .as_ref()
+                .is_some_and(|v| v.contains("2024"))
+        );
+    }
+    #[test]
     fn invalid_keys_and_urls_do_not_reach_the_network() {
         let s = storage("http://127.0.0.1:1".into(), Arc::new(|| false));
         for key in ["", "..", "../a", "a/../b", "/a", "a\\b", "./a"] {
@@ -686,7 +717,7 @@ mod tests {
         // 父目录已存在：只有一次 PUT，服务端只准备了一个响应。
         let url = server(vec![(201, "", Duration::ZERO)]);
         storage(url, Arc::new(|| false))
-            .write("objects/a.png", b"x")
+            .write("分类/a.png", b"x")
             .unwrap();
         // 父目录不存在：PUT 409 → PROPFIND 父目录 404 → MKCOL → 再 PUT。
         let url = server(vec![
@@ -696,12 +727,12 @@ mod tests {
             (201, "", Duration::ZERO),
         ]);
         storage(url, Arc::new(|| false))
-            .write("objects/a.png", b"x")
+            .write("分类/a.png", b"x")
             .unwrap();
         // 认证失败不再走建目录的路径。
         let url = server(vec![(401, "", Duration::ZERO)]);
         let error = storage(url, Arc::new(|| false))
-            .write("objects/a.png", b"x")
+            .write("分类/a.png", b"x")
             .unwrap_err();
         assert!(error.to_string().contains(AUTH));
     }
@@ -711,7 +742,7 @@ mod tests {
         let s = storage(url, Arc::new(|| false));
         assert_eq!(s.read("missing").unwrap(), None);
         s.delete("missing").unwrap();
-        assert!(s.list("ops/").unwrap().is_empty());
+        assert!(s.list(".sticker-manager/ops/").unwrap().is_empty());
     }
     #[test]
     fn http_errors_are_classified_without_response_or_credentials() {
@@ -808,7 +839,7 @@ mod tests {
         });
         let start = Instant::now();
         assert!(
-            s.read("objects/test")
+            s.read("分类/test.png")
                 .unwrap_err()
                 .to_string()
                 .contains("停止")

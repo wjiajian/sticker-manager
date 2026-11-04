@@ -41,7 +41,7 @@ pub enum Error {
     #[error("“未分类”是保留名称，请使用其他名称")]
     ReservedCategoryName,
 
-    #[error("分类名称不能以点开头，也不能包含斜杠")]
+    #[error("分类名称不能以点开头，也不能包含 .. 或斜杠")]
     InvalidCategoryName,
 
     #[error("请选择八种分类颜色之一")]

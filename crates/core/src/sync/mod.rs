@@ -1,7 +1,9 @@
 //! 阻塞文件后端与可独立测试的同步协议。I/O 在 Library 的锁外，数据库阶段单独提交。
 mod compaction;
 mod model;
+mod paths;
 mod presence;
+mod tree;
 pub use presence::{StickerSyncInfo, platform};
 pub mod network;
 pub mod storage;
@@ -31,15 +33,25 @@ pub struct Manifest {
 }
 impl Manifest {
     pub fn create(storage: &dyn Storage) -> Result<Self> {
+        if storage.read(".sticker-manager/library.json")?.is_some()
+            || storage.read("library.json")?.is_some()
+        {
+            return Err(Error::Sync(
+                "同步仓库已经存在，请加入现有仓库或选择空路径".into(),
+            ));
+        }
         if storage.list("")?.iter().any(|f| !system_file(&f.key)) {
             return Err(Error::Sync("请选择空路径，或已有的同步仓库".into()));
         }
         let manifest = Self {
-            format: 1,
+            format: 2,
             id: Uuid::new_v4().to_string(),
             created_at: unix_millis()?,
         };
-        storage.write("library.json", &serde_json::to_vec(&manifest)?)?;
+        storage.write(
+            ".sticker-manager/library.json",
+            &serde_json::to_vec(&manifest)?,
+        )?;
         Ok(manifest)
     }
     pub fn read(storage: &dyn Storage) -> Result<Self> {
@@ -48,7 +60,10 @@ impl Manifest {
     }
     /// 读到半截返回 None，等下一轮；文件不存在则报错，否则仓库被删后会一直显示已同步、改动却推不出去。
     fn read_complete(storage: &dyn Storage) -> Result<Option<Self>> {
-        let Some(bytes) = storage.read("library.json")? else {
+        let Some(bytes) = storage.read(".sticker-manager/library.json")? else {
+            if storage.read("library.json")?.is_some() {
+                return Err(Error::Sync("旧同步格式，请重新创建同步仓库".into()));
+            }
             return Err(Error::Sync(
                 "存储目标里找不到 library.json：可能还没送达，或仓库已被删除或移走".into(),
             ));
@@ -56,10 +71,13 @@ impl Manifest {
         let Ok(manifest) = serde_json::from_slice::<Self>(&bytes) else {
             return Ok(None);
         };
-        if manifest.format > 1 {
+        if manifest.format == 1 {
+            return Err(Error::Sync("旧同步格式，请重新创建同步仓库".into()));
+        }
+        if manifest.format > 2 {
             return Err(Error::SyncUpgrade(format!("同步格式 {}", manifest.format)));
         }
-        if manifest.format != 1 || !valid_device(&manifest.id) {
+        if manifest.format != 2 || !valid_device(&manifest.id) {
             return Err(Error::Sync("无效的 library.json".into()));
         }
         Ok(Some(manifest))
@@ -136,7 +154,10 @@ pub fn inspect_folder(path: &Path, local_root: &Path) -> Result<FolderInfo> {
 
 /// 所有后端共用的目标检查；系统文件和探测文件不算用户内容。
 pub fn inspect(storage: &dyn Storage) -> Result<TargetInfo> {
-    if storage.read("library.json")?.is_none() {
+    if storage.read(".sticker-manager/library.json")?.is_none() {
+        if storage.read("library.json")?.is_some() {
+            return Err(Error::Sync("旧同步格式，请重新创建同步仓库".into()));
+        }
         if storage.list("")?.iter().any(|f| !system_file(&f.key)) {
             return Err(Error::Sync(
                 "这个路径非空且没有 library.json；请选择空路径或已有的同步仓库".into(),
@@ -221,7 +242,8 @@ fn valid_device(s: &str) -> bool {
     Uuid::parse_str(s).is_ok_and(|id| id.to_string() == s)
 }
 fn segment(key: &str) -> Option<Segment> {
-    let p = key.split('/').collect::<Vec<_>>();
+    let relative = key.strip_prefix(".sticker-manager/")?;
+    let p = relative.split('/').collect::<Vec<_>>();
     if p.len() != 3 || p[0] != "ops" || !valid_device(p[1]) {
         return None;
     }
@@ -250,7 +272,7 @@ fn segment(key: &str) -> Option<Segment> {
 }
 fn segments(storage: &dyn Storage) -> Result<Vec<Segment>> {
     let mut result = storage
-        .list("ops/")?
+        .list(".sticker-manager/ops/")?
         .into_iter()
         .filter_map(|f| {
             let mut s = segment(&f.key)?;
@@ -294,10 +316,10 @@ fn decode_segment(bytes: &[u8], segment: &Segment) -> Option<Vec<Operation>> {
 }
 fn read_devices(storage: &dyn Storage) -> Result<Vec<RemoteDevice>> {
     let mut result = Vec::new();
-    for file in storage.list("devices/")? {
+    for file in storage.list(".sticker-manager/devices/")? {
         let Some(id) = file
             .key
-            .strip_prefix("devices/")
+            .strip_prefix(".sticker-manager/devices/")
             .and_then(|s| s.strip_suffix(".json"))
             .filter(|s| valid_device(s))
         else {
@@ -312,6 +334,14 @@ fn read_devices(storage: &dyn Storage) -> Result<Vec<RemoteDevice>> {
     }
     Ok(result)
 }
+pub(crate) fn validate_sticker_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {return Err(Error::EmptyName("表情"));}
+    if name.contains(['/', '\\']) {return Err(Error::Sync("表情名称不能包含斜杠或反斜杠".into()));}
+    if name.chars().any(char::is_control) {return Err(Error::Sync("表情名称不能包含控制字符".into()));}
+    if name.trim().starts_with('.') || name.contains("..") {return Err(Error::Sync("表情名称不能以点开头，也不能包含 ..".into()));}
+    Ok(())
+}
+
 fn lock(library: &Mutex<Library>) -> Result<std::sync::MutexGuard<'_, Library>> {
     library
         .lock()
@@ -445,18 +475,48 @@ pub fn synchronize_with_maintenance(
         });
     };
     let mut published = Vec::new();
-    let mut changed = push(
+    let cursors = {
+        let lib = lock(library)?;
+        remote
+            .iter()
+            .map(|s| {
+                Ok((
+                    s.device.clone(),
+                    if s.device == device.id {
+                        next
+                    } else {
+                        store::cursor(&lib.conn, expected_id, &s.device)?
+                    },
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?
+    };
+    let batches = remote
+        .iter()
+        .map(|s| {
+            Ok((
+                s.clone(),
+                if s.last <= cursors[&s.device] {
+                    Some(Vec::new())
+                } else {
+                    read_segment(storage, s)?
+                },
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut scan = tree::scan(
         library,
         storage,
         expected_id,
         &root,
-        &device,
-        progress,
-        &mut published,
+        &batches,
+        cursors,
+        &on_download,
     )?;
+    let mut changed = false;
     let mut first_error = None;
     let mut blocked = BTreeSet::new();
-    for s in &remote {
+    for (s, operations) in &batches {
         if s.device == device.id || blocked.contains(&s.device) {
             continue;
         }
@@ -464,11 +524,7 @@ pub fn synchronize_with_maintenance(
         if s.last <= cursor || s.first > cursor + 1 {
             continue;
         }
-        let Some(bytes) = storage.read(&s.key)? else {
-            blocked.insert(s.device.clone());
-            continue;
-        };
-        let Some(mut ops) = decode_segment(&bytes, s) else {
+        let Some(mut ops) = operations.clone() else {
             continue;
         };
         ops.retain(|o| o.seq > cursor);
@@ -484,7 +540,7 @@ pub fn synchronize_with_maintenance(
         for op in &ops {
             op.change.objects(&mut objects);
         }
-        let available = download_objects(storage, &root, &files, &objects, &on_download)?;
+        let available = download_objects(storage, &root, &files, &objects, &scan, &on_download)?;
         let mut lib = lock(library)?;
         let tx = lib.conn.transaction()?;
         let (mut revision, mut model) = store::load(&tx)?;
@@ -531,7 +587,7 @@ pub fn synchronize_with_maintenance(
         }
         result
     };
-    let available = download_objects(storage, &root, &files, &objects, &on_download)?;
+    let available = download_objects(storage, &root, &files, &objects, &scan, &on_download)?;
     {
         let mut lib = lock(library)?;
         let tx = lib.conn.transaction()?;
@@ -555,6 +611,16 @@ pub fn synchronize_with_maintenance(
             arrived(added);
         }
     }
+    if scan.ready {
+        let known = presence::known_hashes(&store::load(&lock(library)?.conn)?.1);
+        changed |= tree::reconcile(library, expected_id, &mut scan)?;
+        let added = presence::new_stickers(&known, &store::load(&lock(library)?.conn)?.1);
+        new_stickers += added;
+        if initial_complete && added > 0 {
+            arrived(added);
+        }
+        tree::push_files(library, storage, expected_id, &root, progress)?;
+    }
     changed |= push(
         library,
         storage,
@@ -564,6 +630,7 @@ pub fn synchronize_with_maintenance(
         progress,
         &mut published,
     )?;
+    tree::purge(library, storage, expected_id)?;
     cleanup_purged_files(library, &root, &files)?;
     if let Some(error) = first_error {
         return Err(error);
@@ -571,7 +638,7 @@ pub fn synchronize_with_maintenance(
     let last_sync_at = unix_millis()?;
     let received = presence::received(&lock(library)?.conn, expected_id)?;
     storage.write(
-        &format!("devices/{}.json", device.id),
+        &format!(".sticker-manager/devices/{}.json", device.id),
         &serde_json::to_vec(&RemoteDevice {
             id: device.id.clone(),
             name: device.name,
@@ -580,11 +647,18 @@ pub fn synchronize_with_maintenance(
             received,
         })?,
     )?;
-    let pending = lock(library)?
-        .conn
-        .query_row("SELECT COUNT(*) FROM sync_pending", [], |r| {
-            r.get::<_, i64>(0)
-        })? as usize;
+    let mut pending =
+        lock(library)?
+            .conn
+            .query_row("SELECT COUNT(*) FROM sync_pending", [], |r| {
+                r.get::<_, i64>(0)
+            })? as usize;
+    pending += lock(library)?.conn.query_row(
+        "SELECT COUNT(*) FROM sync_file_moves WHERE library_id=?1",
+        [expected_id],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    pending += usize::from(!scan.ready);
     let devices = read_devices(storage)?;
     {
         let lib = lock(library)?;
@@ -632,12 +706,12 @@ fn push(
     library: &Mutex<Library>,
     storage: &dyn Storage,
     id: &str,
-    root: &Path,
+    _root: &Path,
     device: &Device,
-    progress: &dyn Fn(SyncProgress),
+    _progress: &dyn Fn(SyncProgress),
     published: &mut Vec<Segment>,
 ) -> Result<bool> {
-    let (ops, live, deleted, changed) = {
+    let (ops, changed) = {
         let mut lib = lock(library)?;
         let tx = lib.conn.transaction()?;
         let (mut revision, mut model) = store::load(&tx)?;
@@ -686,72 +760,24 @@ fn push(
                 .map(|s| serde_json::from_str::<Operation>(&s))
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
-        let live = model
-            .projected(Kind::Sticker)
-            .into_values()
-            .filter_map(|e| e.data)
-            .map(|o| (o.key(), o))
-            .collect::<BTreeMap<_, _>>();
-        let mut deleted = BTreeSet::new();
-        if let Some(entities) = model.entities.get(&Kind::Sticker) {
-            for (entity, e) in entities {
-                if model.dead(Kind::Sticker, entity)
-                    && let Some(o) = &e.data
-                    && !live.contains_key(&o.key())
-                {
-                    let done:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_deleted_objects WHERE library_id=?1 AND key=?2)",params![id,o.key()],|r|r.get(0))?;
-                    if !done {
-                        deleted.insert(o.key());
-                    }
-                }
-            }
-        }
         tx.commit()?;
-        (ops, live, deleted, changed)
+        (ops, changed)
     };
-    let mut objects = live.clone();
-    for op in &ops {
-        op.change.objects(&mut objects);
-    }
-    let existing = storage
-        .list("objects/")?
-        .into_iter()
-        .map(|f| (f.key, f.size))
-        .collect::<BTreeMap<_, _>>();
-    let missing = objects
-        .keys()
-        .filter(|key| {
-            fs::metadata(root.join(key)).map_or(true, |m| existing.get(*key) != Some(&m.len()))
-        })
-        .collect::<Vec<_>>();
-    let total = missing.len();
-    for (index, key) in missing.into_iter().enumerate() {
-        progress(SyncProgress {
-            stage: TransferStage::Uploading,
-            completed: index,
-            total: Some(total),
-        });
-        match fs::read(root.join(key)) {
-            Ok(bytes) => storage.write(key, &bytes)?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !live.contains_key(key) => {} // 已彻底删除，后续 purge 会终止等待。
-            Err(e) => return Err(e.into()),
-        }
-        progress(SyncProgress {
-            stage: TransferStage::Uploading,
-            completed: index + 1,
-            total: Some(total),
-        });
-    }
     for batch in ops.chunks(128) {
         let first = batch.first().unwrap().seq;
         let last = batch.last().unwrap().seq;
-        let key = format!("ops/{}/{first:012}-{last:012}.jsonl", device.id);
+        let key = format!(
+            ".sticker-manager/ops/{}/{first:012}-{last:012}.jsonl",
+            device.id
+        );
         let mut bytes = Vec::new();
         for op in batch {
             serde_json::to_writer(&mut bytes, op)?;
             bytes.push(b'\n');
         }
-        storage.write(&key, &bytes)?;
+        if storage.read(&key)?.as_deref() != Some(bytes.as_slice()) {
+            storage.write(&key, &bytes)?;
+        }
         published.push(Segment {
             key,
             device: device.id.clone(),
@@ -768,13 +794,6 @@ fn push(
         store::prune(&tx, Some(id))?;
         tx.commit()?;
     }
-    for key in deleted {
-        storage.delete(&key)?;
-        lock(library)?.conn.execute(
-            "INSERT OR IGNORE INTO sync_deleted_objects VALUES(?1,?2)",
-            params![id, key],
-        )?;
-    }
     Ok(changed)
 }
 
@@ -783,6 +802,7 @@ fn download_objects(
     root: &Path,
     files: &Mutex<()>,
     objects: &BTreeMap<String, Object>,
+    scan: &tree::Scan,
     downloaded: &dyn Fn(bool),
 ) -> Result<BTreeSet<String>> {
     let mut available = BTreeSet::new();
@@ -808,7 +828,13 @@ fn download_objects(
             }
             _ => {
                 downloaded(false);
-                (storage.read(key)?, true)
+                (
+                    match scan.current.values().find(|e| e.object.hash == object.hash) {
+                        Some(entry) => storage.read(&entry.file.key)?,
+                        None => None,
+                    },
+                    true,
+                )
             }
         };
         let Some(bytes) = bytes else { continue };

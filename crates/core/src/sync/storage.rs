@@ -11,6 +11,7 @@ use std::{
 pub struct FileEntry {
     pub key: String,
     pub size: u64,
+    pub version: Option<String>,
 }
 
 /// 后端只中转文件。写入可被读到一部分，读取方须校验完整性后再应用。
@@ -25,10 +26,15 @@ pub trait Storage: Send + Sync {
 pub fn validate_key(key: &str) -> Result<()> {
     if key.is_empty()
         || key.contains('\\')
+        || key.contains("..")
         || Path::new(key)
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
     {
+        return Err(Error::Sync("无效的存储文件名".into()));
+    }
+    let visible = key.strip_prefix(super::paths::META).unwrap_or(key);
+    if visible.split('/').any(|p| p.starts_with('.')) && !key.starts_with(".sticker-probe-") {
         return Err(Error::Sync("无效的存储文件名".into()));
     }
     Ok(())
@@ -78,6 +84,22 @@ impl Storage for FolderStorage {
                     continue;
                 }
                 if ty.is_dir() {
+                    let key = format!(
+                        "{}/",
+                        entry
+                            .path()
+                            .strip_prefix(&self.root)
+                            .unwrap()
+                            .to_string_lossy()
+                            .replace('\\', "/")
+                    );
+                    if key.starts_with(prefix) {
+                        result.push(FileEntry {
+                            key,
+                            size: 0,
+                            version: None,
+                        });
+                    }
                     pending.push(entry.path());
                 } else if ty.is_file() {
                     let key = entry
@@ -90,6 +112,12 @@ impl Storage for FolderStorage {
                         result.push(FileEntry {
                             key,
                             size: entry.metadata()?.len(),
+                            version: entry
+                                .metadata()?
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|t| t.as_nanos().to_string()),
                         });
                     }
                 }
@@ -107,6 +135,10 @@ impl Storage for FolderStorage {
     }
     fn write(&self, key: &str, bytes: &[u8]) -> Result<()> {
         let path = self.path(key)?;
+        if key.ends_with('/') && bytes.is_empty() {
+            fs::create_dir_all(path)?;
+            return Ok(());
+        }
         let directory = path.parent().unwrap();
         fs::create_dir_all(directory)?;
         // 同图可能被两台设备同时上传；独立临时名避免互相改名尚未写完的文件。
@@ -121,7 +153,13 @@ impl Storage for FolderStorage {
         Ok(())
     }
     fn delete(&self, key: &str) -> Result<()> {
-        match fs::remove_file(self.path(key)?) {
+        let path = self.path(key)?;
+        let result = if key.ends_with('/') {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        };
+        match result {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
@@ -139,6 +177,8 @@ struct MemoryFiles {
     visible: BTreeMap<String, Vec<u8>>,
     pending: BTreeMap<String, Option<Vec<u8>>>,
     hold: bool,
+    clock: u64,
+    versions: BTreeMap<String, String>,
 }
 impl MemoryStorage {
     pub fn hold(&self, hold: bool) {
@@ -152,6 +192,9 @@ impl MemoryStorage {
         if let Some(value) = files.pending.remove(key) {
             match value {
                 Some(bytes) => {
+                    files.clock += 1;
+                    let version = files.clock.to_string();
+                    files.versions.insert(key.into(), version);
                     files.visible.insert(key.into(), bytes);
                 }
                 None => {
@@ -168,16 +211,15 @@ impl MemoryStorage {
 }
 impl Storage for MemoryStorage {
     fn list(&self, prefix: &str) -> Result<Vec<FileEntry>> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
+        let files = self.inner.lock().unwrap();
+        Ok(files
             .visible
             .iter()
             .filter(|(k, _)| k.starts_with(prefix))
             .map(|(key, bytes)| FileEntry {
                 key: key.clone(),
                 size: bytes.len() as u64,
+                version: files.versions.get(key).cloned(),
             })
             .collect())
     }
@@ -189,6 +231,9 @@ impl Storage for MemoryStorage {
         if files.hold {
             files.pending.insert(key.into(), Some(bytes.to_vec()));
         } else {
+            files.clock += 1;
+            let version = files.clock.to_string();
+            files.versions.insert(key.into(), version);
             files.visible.insert(key.into(), bytes.to_vec());
         }
         Ok(())

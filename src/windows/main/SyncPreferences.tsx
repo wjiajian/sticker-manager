@@ -101,6 +101,7 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
   const progress = progressLabel(status);
   return <section ref={section} tabIndex={-1} aria-labelledby="sync-preferences-title" className="flex scroll-mt-6 flex-col gap-3 rounded-control">
     <h3 id="sync-preferences-title" className="text-xs font-semibold text-ink-secondary">同步</h3>
+    <p className="text-xs text-ink-secondary">同步目录里的文件夹就是分类，图片按表情名称保存；直接放图、移动、改名或删除，下次同步会更新到应用。旧同步仓库需要重新创建。</p>
     {!target && <>
       {wide ? <div className="flex flex-col gap-2">
         <span className="text-xs text-ink-secondary">存储后端</span>

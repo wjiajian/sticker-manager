@@ -149,6 +149,22 @@ impl Library {
         Ok(())
     }
 
+    pub fn set_sticker_name(&self, id: &str, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::EmptyName("表情"));
+        }
+        crate::sync::validate_sticker_name(name)?;
+        let changed = self.conn.execute(
+            "UPDATE stickers SET name=?2 WHERE id=?1 AND deleted_at IS NULL",
+            params![id, name],
+        )?;
+        if changed == 0 {
+            return Err(Error::StickerUnavailable);
+        }
+        Ok(())
+    }
+
     pub fn set_sticker_caption(&self, id: &str, caption: &str) -> Result<()> {
         let caption = caption.trim();
         let caption = if caption.is_empty() {
@@ -217,7 +233,12 @@ fn insert_category(conn: &Connection, name: &str, color: Option<&str>) -> Result
     };
     conn.execute(
         "INSERT INTO categories (id, name, color, position) VALUES (?1, ?2, ?3, ?4)",
-        params![category.id, category.name, category.color, category.position],
+        params![
+            category.id,
+            category.name,
+            category.color,
+            category.position
+        ],
     )?;
     Ok(category)
 }
@@ -235,7 +256,7 @@ fn validate_name<'a>(
     if name == UNCATEGORIZED {
         return Err(Error::ReservedCategoryName);
     }
-    if name.starts_with('.') || name.contains(['/', '\\']) {
+    if name.starts_with('.') || name.contains("..") || name.contains(['/', '\\']) {
         return Err(Error::InvalidCategoryName);
     }
     // 用户输入始终通过参数绑定。事务避免两个连接同时通过重名检查。

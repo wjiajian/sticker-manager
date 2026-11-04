@@ -23,13 +23,7 @@ impl Site {
         let mut l = self.lib.lock().unwrap();
         let result = l.import_paths(&[path]);
         assert!(result.failures.is_empty(), "{:?}", result.failures);
-        l.conn
-            .query_row(
-                "SELECT id FROM stickers WHERE name=?1",
-                [color.to_string()],
-                |r| r.get(0),
-            )
-            .unwrap()
+        result.sticker_ids[0].clone()
     }
     fn sync(&self, s: &dyn Storage, m: &Manifest) -> SyncReport {
         synchronize(&self.lib, s, &m.id).unwrap()
@@ -70,6 +64,12 @@ impl Site {
         }
         Value::Object(result)
     }
+}
+fn remote_images(s: &dyn Storage) -> Vec<storage::FileEntry> {
+    s.list("").unwrap().into_iter().filter(|f| paths::image(&f.key).is_some()).collect()
+}
+fn remote_key(site: &Site, id: &str) -> String {
+    site.lib.lock().unwrap().conn.query_row("SELECT path FROM sync_path_cache WHERE sticker_id=?1 ORDER BY path LIMIT 1", [id], |r|r.get(0)).unwrap()
 }
 fn backend() -> (MemoryStorage, Manifest) {
     let s = MemoryStorage::default();
@@ -114,7 +114,7 @@ fn write_segment(s: &dyn Storage, device: &str, ops: &[Operation]) {
     }
     s.write(
         &format!(
-            "ops/{device}/{:012}-{:012}.jsonl",
+            ".sticker-manager/ops/{device}/{:012}-{:012}.jsonl",
             ops.first().unwrap().seq,
             ops.last().unwrap().seq
         ),
@@ -215,16 +215,8 @@ fn two_library_end_to_end(s: &dyn Storage) {
         emptied.iter().find(|c| c.category.id == tag).unwrap().sticker_count,
         0
     );
-    let key = format!(
-        "objects/{}",
-        l.sticker(&y)
-            .unwrap()
-            .object_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-    );
     drop(l);
+    let key = remote_key(&a, &y);
     {
         let mut l = a.lib.lock().unwrap();
         l.delete_sticker(&y).unwrap();
@@ -368,33 +360,18 @@ fn missing_objects_and_cross_device_dependencies_wait_and_retry_without_new_segm
     let id = a.import(4);
     a.sync(&s, &m);
     b.sync(&s, &m);
-    let key = a
-        .lib
-        .lock()
-        .unwrap()
-        .sticker(&id)
-        .unwrap()
-        .object_path
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let object = s.read(&format!("objects/{key}")).unwrap().unwrap();
-    s.delete(&format!("objects/{key}")).unwrap();
-    b.lib
-        .lock()
-        .unwrap()
-        .categorize(&id, "依赖")
-        .unwrap();
-    b.sync(&s, &m); // 补传原图
-    s.delete(&format!("objects/{key}")).unwrap();
+    b.lib.lock().unwrap().categorize(&id, "依赖").unwrap();
+    b.sync(&s, &m);
+    let key = remote_key(&b, &id);
+    let object = s.read(&key).unwrap().unwrap();
+    s.delete(&key).unwrap();
     let report = c.sync(&s, &m);
     assert!(report.pending > 0);
     assert_eq!(c.lib.lock().unwrap().overview().unwrap().all, 0);
-    s.write(&format!("objects/{key}"), b"truncated image")
+    s.write(&key, b"truncated image")
         .unwrap();
     assert!(c.sync(&s, &m).pending > 0);
-    s.write(&format!("objects/{key}"), &object).unwrap();
+    s.write(&key, &object).unwrap();
     assert_eq!(c.sync(&s, &m).pending, 0);
     assert_eq!(c.lib.lock().unwrap().sticker(&id).unwrap().category.is_some(), true);
 }
@@ -418,7 +395,7 @@ fn gap_overlap_parse_failure_unknown_operation_and_conflict_names() {
     write_ops(&s, &d, 2, std::slice::from_ref(&second));
     a.sync(&s, &m);
     assert!(a.lib.lock().unwrap().categories().unwrap().is_empty());
-    let key = format!("ops/{d}/000000000001-000000000001.jsonl");
+    let key = format!(".sticker-manager/ops/{d}/000000000001-000000000001.jsonl");
     s.write(&key, b"{bad\n").unwrap();
     a.sync(&s, &m);
     assert_eq!(
@@ -426,12 +403,12 @@ fn gap_overlap_parse_failure_unknown_operation_and_conflict_names() {
         0
     );
     s.write(
-        &format!("ops/{d}/000000000001-000000000001 (conflict).jsonl"),
+        &format!(".sticker-manager/ops/{d}/000000000001-000000000001 (conflict).jsonl"),
         b"bad",
     )
     .unwrap();
     s.write(
-        &format!("ops/{d}/.000000000001-000000000001.jsonl.icloud"),
+        &format!(".sticker-manager/ops/{d}/.000000000001-000000000001.jsonl.icloud"),
         b"bad",
     )
     .unwrap();
@@ -497,8 +474,8 @@ fn newer_format_and_cloned_device_identity_stop_before_writes() {
         Err(Error::DeviceConflict)
     ));
     let mut newer = m.clone();
-    newer.format = 2;
-    s.write("library.json", &serde_json::to_vec(&newer).unwrap())
+    newer.format = 3;
+    s.write(".sticker-manager/library.json", &serde_json::to_vec(&newer).unwrap())
         .unwrap();
     assert!(matches!(
         synchronize(&a.lib, &s, &m.id),
@@ -529,14 +506,12 @@ fn categories_fields_delete_and_sticker_category_dependency() {
     assert_eq!(c.name, "新名字");
     assert_eq!(c.color, "#E5484D");
     a.lib.lock().unwrap().delete_category(&category).unwrap();
-    b.lib
-        .lock()
-        .unwrap()
-        .rename_category(&category, "迟到改名")
-        .unwrap();
+    let delayed_device = Uuid::new_v4().to_string();
+    write_ops(&s, &delayed_device, 1, &[change(unix_millis().unwrap()+1000, &delayed_device,
+        Action::Set {entity:Kind::Category,id:category.clone(),field:"name".into(),value:json!("迟到改名")})]);
     settle(&[&b, &a], &s, &m);
     assert!(a.lib.lock().unwrap().sticker(&id).unwrap().category.is_none());
-    assert!(a.lib.lock().unwrap().categories().unwrap().is_empty());
+    assert!(a.lib.lock().unwrap().categories().unwrap().is_empty(), "{:?}",a.state());
     assert_eq!(a.state(), b.state());
 }
 
@@ -650,25 +625,19 @@ fn folder_validation_atomic_files_and_original_repair() {
     s.write("a/file", b"first").unwrap();
     s.write("a/file", b"second").unwrap();
     assert_eq!(s.read("a/file").unwrap().unwrap(), b"second");
-    assert_eq!(s.list("").unwrap().len(), 1);
+    assert_eq!(s.list("").unwrap().into_iter().filter(|f|!f.key.ends_with('/')).count(), 1);
     assert!(s.write("../outside", b"no").is_err());
     let (s, m) = backend();
     let id = a.import(7);
     a.sync(&s, &m);
-    let key = a
-        .lib
-        .lock()
-        .unwrap()
-        .sticker(&id)
-        .unwrap()
-        .object_path
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    s.delete(&format!("objects/{key}")).unwrap();
-    a.sync(&s, &m);
-    assert!(s.read(&format!("objects/{key}")).unwrap().is_some());
+    let key = remote_key(&a,&id);
+    s.delete(&key).unwrap();
+    a.sync(&s,&m);
+    assert!(a.lib.lock().unwrap().sticker(&id).unwrap().deleted_at.is_some());
+    assert!(s.read(&key).unwrap().is_none());
+    a.lib.lock().unwrap().restore_sticker(&id).unwrap();
+    a.sync(&s,&m);
+    assert!(s.read(&key).unwrap().is_some());
 }
 
 #[test]
@@ -690,7 +659,7 @@ fn backend_io_never_holds_library_lock_and_failure_retries_the_same_segment() {
         fn write(&self, k: &str, b: &[u8]) -> Result<()> {
             assert!(self.lib.try_lock().is_ok());
             self.inner.write(k, b)?;
-            if k.starts_with("ops/") && self.fail.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            if k.starts_with(".sticker-manager/ops/") && self.fail.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 return Err(Error::Sync("模拟写成后未记账".into()));
             }
             Ok(())
@@ -709,9 +678,9 @@ fn backend_io_never_holds_library_lock_and_failure_retries_the_same_segment() {
         fail: std::sync::atomic::AtomicBool::new(true),
     };
     assert!(synchronize(&a.lib, &checked, &m.id).is_err());
-    let before = s.list("ops/").unwrap();
+    let before = s.list(".sticker-manager/ops/").unwrap();
     a.sync(&checked, &m);
-    assert_eq!(s.list("ops/").unwrap(), before);
+    assert_eq!(s.list(".sticker-manager/ops/").unwrap(), before);
     let b = Site::new();
     b.sync(&s, &m);
     assert_eq!(a.state(), b.state());
@@ -739,9 +708,31 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
         for _ in 0..120 {
             let index = (next() % 3) as usize;
             let site = &sites[index];
-            let action = next() % 12;
+            let action = next() % 18;
             if action == 0 {
                 site.import((10 + next() % 3) as u8);
+            } else if action >= 14 {
+                let files=remote_images(&s);
+                if action==17 {
+                    let path=format!("手建/{}.png",next()%3);
+                    s.write(&path,&tree::png((50+next()%3) as u8)).unwrap();s.deliver(&path);
+                } else if let Some(file)=files.get(next() as usize % files.len().max(1)) {
+                    let bytes=s.read(&file.key).unwrap().unwrap();
+                    if action==14 {
+                        let path=format!("远端移动/{}.png",next()%5);
+                        s.write(&path,&bytes).unwrap();s.deliver(&path);
+                        s.delete(&file.key).unwrap();s.deliver(&file.key);
+                    } else if action==15 {
+                        s.delete(&file.key).unwrap();s.deliver(&file.key);
+                    } else if let Some((folder,_))=file.key.split_once('/') {
+                        let new_folder=format!("整目录{}",next()%3);
+                        for file in files.iter().filter(|f|f.key.starts_with(&format!("{folder}/"))) {
+                            let path=format!("{new_folder}/{}",file.key.split_once('/').unwrap().1);
+                            s.write(&path,&s.read(&file.key).unwrap().unwrap()).unwrap();s.deliver(&path);
+                            s.delete(&file.key).unwrap();s.deliver(&file.key);
+                        }
+                    }
+                }
             } else {
                 let mut l = site.lib.lock().unwrap();
                 let all = l.list_stickers(LibraryView::All).unwrap();
@@ -786,9 +777,10 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
                     (9, Some(id)) => {
                         l.set_sticker_category(&id, None).unwrap();
                     }
-                    (10, _) => {
-                        let _ = l.create_category("共同分类", None);
-                    }
+                    (10, _) => { let _ = l.create_category("共同分类", None); }
+                    (11, Some(id)) => {l.set_sticker_name(&id,&format!("名称 {}",next()%3)).unwrap();}
+                    (12, _) => {if let Some(c)=l.categories().unwrap().first() {let _=l.rename_category(&c.category.id,&format!("分类 {}",next()%3));}}
+                    (13, _) => {if let Some(c)=l.categories().unwrap().first() {l.delete_category(&c.category.id).unwrap();}}
                     _ => {}
                 }
             }
@@ -909,7 +901,7 @@ fn duplicate_category_names_merge_with_members_and_late_category_reference() {
             assert_eq!(l.sticker(id).unwrap().category.unwrap().id, winner);
         }
     }
-    // 迟到的操作仍然引用被合并掉的那个 id，要归到合并后的分类。
+    // 迟到的分类颜色仍引用被合并掉的 id；分类归属另外由文件路径覆盖。
     let d = Uuid::new_v4().to_string();
     let future = unix_millis().unwrap() + 1000;
     write_ops(
@@ -920,10 +912,10 @@ fn duplicate_category_names_merge_with_members_and_late_category_reference() {
             future,
             &d,
             Action::Set {
-                entity: Kind::Sticker,
-                id: x.clone(),
-                field: "category_id".into(),
-                value: json!(ca.max(cb)),
+                entity: Kind::Category,
+                id: ca.max(cb),
+                field: "color".into(),
+                value: json!("#E5484D"),
             },
         )],
     );
@@ -1028,7 +1020,7 @@ fn reimport_on_another_device_survives_merge_with_delayed_purge() {
     }
     settle(&[&a, &b, &c], &s, &m);
     let before = s
-        .list("ops/")
+        .list(".sticker-manager/ops/")
         .unwrap()
         .into_iter()
         .map(|f| f.key)
@@ -1042,7 +1034,7 @@ fn reimport_on_another_device_survives_merge_with_delayed_purge() {
     b.sync(&s, &m);
     let a_device = a.lib.lock().unwrap().device.id.clone();
     let mut delayed = Vec::new();
-    for f in s.list(&format!("ops/{a_device}/")).unwrap() {
+    for f in s.list(&format!(".sticker-manager/ops/{a_device}/")).unwrap() {
         if !before.contains(&f.key) {
             delayed.push((f.key.clone(), s.read(&f.key).unwrap().unwrap()));
             s.delete(&f.key).unwrap();
@@ -1108,7 +1100,7 @@ fn remote_purge_removes_local_files_and_backend_object() {
     b.sync(&s, &m);
     assert!(!old.object_path.exists());
     assert!(!old.thumbnail_path.exists());
-    assert!(s.list("objects/").unwrap().is_empty());
+    assert!(remote_images(&s).is_empty());
 }
 
 #[test]
@@ -1189,17 +1181,17 @@ fn incomplete_manifest_and_device_wait_without_applying_partial_data() {
     let site = Site::new();
     site.import(81);
     storage
-        .write("library.json", br#"{"format":1,"id":"#)
+        .write(".sticker-manager/library.json", br#"{"format":1,"id":"#)
         .unwrap();
     let report = synchronize(&site.lib, &storage, &manifest.id).unwrap();
     assert_eq!(report.last_sync_at, None);
     assert_eq!(report.pending, 1);
-    assert!(storage.list("ops/").unwrap().is_empty());
+    assert!(storage.list(".sticker-manager/ops/").unwrap().is_empty());
     storage
-        .write("library.json", &serde_json::to_vec(&manifest).unwrap())
+        .write(".sticker-manager/library.json", &serde_json::to_vec(&manifest).unwrap())
         .unwrap();
     storage
-        .write(&format!("devices/{}.json", Uuid::new_v4()), b"{")
+        .write(&format!(".sticker-manager/devices/{}.json", Uuid::new_v4()), b"{")
         .unwrap();
     site.sync(&storage, &manifest);
     assert_eq!(inspect(&storage).unwrap().devices, 1);
@@ -1209,12 +1201,12 @@ fn missing_manifest_is_an_error_not_a_quiet_wait() {
     let (storage, manifest) = backend();
     let site = Site::new();
     site.sync(&storage, &manifest);
-    let segments = storage.list("ops/").unwrap();
-    storage.delete("library.json").unwrap();
+    let segments = storage.list(".sticker-manager/ops/").unwrap();
+    storage.delete(".sticker-manager/library.json").unwrap();
     site.import(83);
     let error = synchronize(&site.lib, &storage, &manifest.id).unwrap_err();
     assert!(error.to_string().contains("找不到 library.json"), "{error}");
-    assert_eq!(storage.list("ops/").unwrap(), segments);
+    assert_eq!(storage.list(".sticker-manager/ops/").unwrap(), segments);
 }
 #[test]
 fn progress_is_outside_repository_lock_and_partial_object_is_repaired() {
@@ -1223,7 +1215,7 @@ fn progress_is_outside_repository_lock_and_partial_object_is_repaired() {
     let b = Site::new();
     a.import(82);
     a.sync(&storage, &manifest);
-    let object = storage.list("objects/").unwrap().pop().unwrap();
+    let object = remote_images(&storage).pop().unwrap();
     storage.write(&object.key, b"partial").unwrap();
     let updates = Mutex::new(Vec::new());
     synchronize_with_progress(&a.lib, &storage, &manifest.id, &|p| {
@@ -1406,3 +1398,5 @@ fn switching_targets_does_not_pin_outbox_and_rejoining_uses_a_fresh_snapshot() {
         Some("尚未分配给当前目标")
     );
 }
+
+mod tree;

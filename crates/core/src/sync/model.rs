@@ -31,6 +31,7 @@ pub struct Object {
     pub added_at: i64,
 }
 impl Object {
+    /// 本机原图路径；远端路径由目录缓存和 file 操作提供。
     pub fn key(&self) -> String {
         format!("objects/{}.{}", self.hash, self.ext)
     }
@@ -55,6 +56,13 @@ pub enum Action {
         id: String,
         data: Option<Object>,
         fields: BTreeMap<String, Value>,
+    },
+    File {
+        id: String,
+        path: String,
+        data: Object,
+        #[serde(default)]
+        version: Option<String>,
     },
     Set {
         entity: Kind,
@@ -141,7 +149,7 @@ impl Change {
 }
 pub fn fields(kind: Kind) -> &'static [&'static str] {
     match kind {
-        Kind::Sticker => &["name", "caption", "favorite", "deleted_at", "category_id"],
+        Kind::Sticker => &["name", "caption", "favorite", "deleted_at"],
         Kind::Category => &["name", "color", "position"],
     }
 }
@@ -157,14 +165,68 @@ pub struct Usage {
     pub last_used_at: i64,
     pub stamp: Stamp,
 }
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct Location {
+    pub path: String,
+    pub data: Object,
+    pub stamp: Stamp,
+    pub version: Option<String>,
+}
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct FileHistory {
+    pub live: Option<Location>,
+    pub trash: Option<Location>,
+}
+impl FileHistory {
+    pub fn iter(&self) -> impl Iterator<Item = &Location> {
+        self.live.iter().chain(self.trash.iter())
+    }
+}
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Model {
     pub entities: BTreeMap<Kind, BTreeMap<String, Entity>>,
     pub aliases: BTreeMap<Kind, BTreeMap<String, String>>,
     pub tombstones: BTreeMap<Kind, BTreeSet<String>>,
+    #[serde(default)]
+    pub file_history: BTreeMap<String, FileHistory>,
     pub usages: BTreeMap<String, BTreeMap<String, Usage>>,
 }
 impl Model {
+    /// 每个原身份分别保留正常路径和 trash 路径的最大时钟；路径被别的图复用不影响它。
+    pub fn record_file(
+        &mut self,
+        id: &str,
+        path: &str,
+        data: &Object,
+        stamp: &Stamp,
+        version: &Option<String>,
+    ) -> Result<()> {
+        if self.dead(Kind::Sticker, id) {
+            return Ok(());
+        }
+        if !data.validate() {
+            return Err(Error::Sync("原图元数据不合法".into()));
+        }
+        let history = self.file_history.entry(id.into()).or_default();
+        let slot = if path.starts_with(".sticker-manager/trash/") {
+            &mut history.trash
+        } else {
+            &mut history.live
+        };
+        if slot.as_ref().is_none_or(|old| {
+            (stamp, path, &data.hash, version)
+                > (&old.stamp, old.path.as_str(), &old.data.hash, &old.version)
+        }) {
+            *slot = Some(Location {
+                path: path.into(),
+                data: data.clone(),
+                stamp: stamp.clone(),
+                version: version.clone(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn resolve(&self, kind: Kind, id: &str) -> String {
         let mut id = id;
         if let Some(aliases) = self.aliases.get(&kind) {
@@ -249,6 +311,15 @@ impl Model {
     pub fn apply(&mut self, change: &Change, available: &BTreeSet<String>) -> Result<bool> {
         let stamp = &change.stamp;
         match &change.action {
+            Action::File {
+                id,
+                path,
+                data,
+                version,
+            } => {
+                self.record_file(id, path, data, stamp, version)?;
+            }
+
             Action::Create {
                 entity,
                 id,
@@ -267,9 +338,6 @@ impl Model {
                     }
                 } else if *entity == Kind::Sticker {
                     return Err(Error::Sync("导入缺少原图信息".into()));
-                }
-                if !self.category_ready(*entity, values.get("category_id")) {
-                    return Ok(false);
                 }
                 let entity = self
                     .entities
@@ -297,9 +365,7 @@ impl Model {
                 if self.dead(*entity, id) {
                     return Ok(true);
                 }
-                if !self.exists(*entity, id)
-                    || (field == "category_id" && !self.category_ready(*entity, Some(value)))
-                {
+                if !self.exists(*entity, id) {
                     return Ok(false);
                 }
                 // 保留原 id 的寄存器；投影时按合并后的 id 逐字段归并，迟到操作不丢失。
@@ -320,6 +386,11 @@ impl Model {
                     .entry(*entity)
                     .or_default()
                     .extend(ids.iter().cloned());
+                if *entity == Kind::Sticker {
+                    for id in ids {
+                        self.file_history.remove(id);
+                    }
+                }
             }
             Action::Merge { entity, from, into } => {
                 let a = self.resolve(*entity, from);
@@ -362,15 +433,6 @@ impl Model {
             }
         }
         Ok(true)
-    }
-    /// 表情所属的分类还没到时，先放进待应用表；分类已被删除则按未分类处理。
-    fn category_ready(&self, entity: Kind, value: Option<&Value>) -> bool {
-        if entity != Kind::Sticker {
-            return true;
-        }
-        value
-            .and_then(Value::as_str)
-            .is_none_or(|id| self.dead(Kind::Category, id) || self.exists(Kind::Category, id))
     }
     /// 按代表 id 汇总合并身份里还活着的 id 的字段。
     pub fn projected(&self, kind: Kind) -> BTreeMap<String, Entity> {
@@ -482,6 +544,19 @@ impl Model {
                         });
                     }
                 }
+            }
+        }
+        for (id, history) in &self.file_history {
+            for location in history.iter() {
+                result.push(Change {
+                    stamp: location.stamp.clone(),
+                    action: Action::File {
+                        id: id.clone(),
+                        path: location.path.clone(),
+                        data: location.data.clone(),
+                        version: location.version.clone(),
+                    },
+                });
             }
         }
         for (sticker, usages) in &self.usages {

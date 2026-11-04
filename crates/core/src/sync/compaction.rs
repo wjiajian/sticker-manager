@@ -1,4 +1,4 @@
-//! 只重组同一设备的 format-1 原始字节，不丢历史，不依赖本地 stream。
+//! 只重组同一设备的 format-2 原始字节，不丢历史，不依赖本地 stream。
 use super::{Segment, decode_segment, storage::Storage};
 use crate::{Error, Result};
 use std::collections::BTreeMap;
@@ -104,7 +104,7 @@ pub(super) fn compact(
             return Ok(());
         }
         if !storage
-            .list(&format!("ops/{}/", cover.device))?
+            .list(&format!(".sticker-manager/ops/{}/", cover.device))?
             .iter()
             .any(|f| f.key == cover.key && f.size == bytes.len() as u64)
         {
@@ -154,7 +154,7 @@ pub(super) fn compact(
     }
     let first = sources[0];
     let key = format!(
-        "ops/{}/{:012}-{:012}.jsonl",
+        ".sticker-manager/ops/{}/{:012}-{:012}.jsonl",
         first.device,
         first.first,
         sources.last().unwrap().last
@@ -167,7 +167,7 @@ pub(super) fn compact(
         return Ok(());
     }
     if !storage
-        .list(&format!("ops/{}/", first.device))?
+        .list(&format!(".sticker-manager/ops/{}/", first.device))?
         .iter()
         .any(|f| f.key == key && f.size == bytes.len() as u64)
     {

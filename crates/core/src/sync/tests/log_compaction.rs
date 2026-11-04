@@ -51,7 +51,7 @@ impl Storage for Tracked<'_> {
     }
     fn write(&self, k: &str, b: &[u8]) -> Result<()> {
         self.calls.lock().unwrap().push('w');
-        if self.fail_write && k.starts_with("ops/") {
+        if self.fail_write && k.starts_with(".sticker-manager/ops/") {
             return Err(Error::Sync("模拟写失败".into()));
         }
         self.inner.write(k, b)
@@ -79,7 +79,7 @@ fn hundred_segments_converge_at_cursors_0_37_100_and_new_joiner_with_exact_budge
     let device = a.lib.lock().unwrap().device.id.clone();
     assert_eq!(
         store::cursor(&b37.lib.lock().unwrap().conn, &m.id, &device).unwrap(),
-        37
+        38 // 首轮多一条原图路径声明。
     );
     for i in 38..=100 {
         a.lib
@@ -169,7 +169,7 @@ fn listed_source_removed_before_read_waits_for_next_round_merged_segment() {
             self.s.list(p)
         }
         fn read(&self, k: &str) -> Result<Option<Vec<u8>>> {
-            if k.starts_with("ops/") && !std::mem::replace(&mut *self.once.lock().unwrap(), true) {
+            if k.starts_with(".sticker-manager/ops/") && !std::mem::replace(&mut *self.once.lock().unwrap(), true) {
                 compaction::compact(self.s, own(self.s, self.a), &|| true)?;
             }
             self.s.read(k)
@@ -262,7 +262,7 @@ fn failed_push_retains_unpushed_stream_and_retries_after_outbox_cleanup() {
             .query_row("SELECT COUNT(*) FROM sync_stream", [], |r| r
                 .get::<_, i64>(0))
             .unwrap(),
-        1
+        2 // 快照和原图路径声明都必须留在未发布队列。
     );
     drop(l);
     a.sync(&s, &m);
@@ -297,7 +297,7 @@ fn broken_leftovers_from_interrupted_puts_do_not_block_merging_forever() {
         sources.last().unwrap().last,
     );
     // 上次合并的写入断在中途，后端留下了半截覆盖段，源段都还在。
-    let cover = format!("ops/{device}/{first:012}-{last:012}.jsonl");
+    let cover = format!(".sticker-manager/ops/{device}/{first:012}-{last:012}.jsonl");
     let merged = sources
         .iter()
         .flat_map(|source| s.read(&source.key).unwrap().unwrap())
@@ -309,7 +309,7 @@ fn broken_leftovers_from_interrupted_puts_do_not_block_merging_forever() {
     compaction::compact(&s, own(&s, &a), &|| true).unwrap();
     assert_eq!(own(&s, &a).len(), 1);
     // 推送写到一半的残段，之后被完整段覆盖：残段删掉，完整段不动。
-    let leftover = format!("ops/{device}/{first:012}-{:012}.jsonl", first + 1);
+    let leftover = format!(".sticker-manager/ops/{device}/{first:012}-{:012}.jsonl", first + 1);
     s.write(&leftover, b"{\"seq\":").unwrap();
     compaction::compact(&s, own(&s, &a), &|| true).unwrap();
     assert!(s.read(&leftover).unwrap().is_none());

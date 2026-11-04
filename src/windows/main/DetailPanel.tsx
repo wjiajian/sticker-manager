@@ -8,6 +8,7 @@ import { useSticker, useLibraryOverview } from "../../lib/queries";
 import { DetailSkeleton, useDelayedLoading } from "../../components/Skeleton";
 import { ReadError } from "../../components/ReadError";
 import { useUiStore } from "../../stores/ui";
+import { NameEditor } from "./NameEditor";
 import { CaptionEditor } from "./CaptionEditor";
 import { StickerCategory } from "./StickerCategory";
 import { StickerImage } from "./StickerImage";
@@ -72,7 +73,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
             )}
           </div>
           <div className="flex flex-col gap-1">
-            <h2 className="text-lg font-semibold break-words">{sticker.name}</h2>
+            <NameEditor key={sticker.id} sticker={sticker} />
             <p className="text-xs text-ink-secondary">
               {sticker.width} × {sticker.height} · {formatSize(sticker.byteSize)} · {new Date(sticker.addedAt).toLocaleDateString("zh-CN")} 添加
             </p>

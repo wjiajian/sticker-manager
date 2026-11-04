@@ -112,7 +112,7 @@ fn received_stops_before_earliest_pending_and_delayed_first_download_is_not_new(
     for key in s
         .pending_keys()
         .into_iter()
-        .filter(|k| !k.starts_with("objects/"))
+        .filter(|k| paths::image(k).is_none())
     {
         s.deliver(&key);
     }
@@ -128,7 +128,7 @@ fn received_stops_before_earliest_pending_and_delayed_first_download_is_not_new(
     assert_eq!((report.pending, report.new_stickers), (0, 0));
     assert_eq!(
         received(&b.lib.lock().unwrap().conn, &m.id).unwrap()[&a_id],
-        3
+        5
     );
     assert_eq!(info(&a, &id, &m, &s).device_count, Some(2));
 }
