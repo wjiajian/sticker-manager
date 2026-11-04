@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ipc, type PreviewRequest } from "../../lib/ipc";
 import { previewDescription } from "../../lib/preview";
+import { platform } from "../../lib/platform";
 
 type Content = PreviewRequest & { image: string | null };
 
@@ -53,7 +54,10 @@ export function Preview() {
     let second = 0;
     function ready() {
       if (latest.current !== requestId || !card.current) return;
-      void ipc.previewReady(requestId, card.current.getBoundingClientRect().height).then((visible) => {
+      const height = card.current.getBoundingClientRect().height;
+      // Windows 分数缩放可能把 216px 测为 215.975px，取整后再交给原生层校验。
+      const cardHeight = platform === "windows" ? Math.round(height) : height;
+      void ipc.previewReady(requestId, cardHeight).then((visible) => {
         if (!disposed && visible && latest.current === requestId) setShown(requestId);
       }).catch(console.error);
     }
