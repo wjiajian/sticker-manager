@@ -41,7 +41,7 @@ export function GridSkeleton({ panel = false }: { panel?: boolean }) {
   return <div ref={container} className={panel ? "h-41" : "min-h-0 flex-1 overflow-hidden"}>
     <Skeleton label="正在读取表情" className="h-full">
       <div style={panel ? undefined : stickerGridColumns(size)} className={panel ? "grid grid-cols-4 gap-2" : "grid gap-3"}>
-        {Array.from({ length: panel ? 8 : count }, (_, index) => <div key={index} className={`aspect-square bg-muted ${panel ? "rounded-lg" : "rounded-card"}`} />)}
+        {Array.from({ length: panel ? 8 : count }, (_, index) => <div key={index} className="aspect-square bg-muted" />)}
       </div>
     </Skeleton>
   </div>;
