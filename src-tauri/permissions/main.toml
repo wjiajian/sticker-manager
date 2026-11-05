@@ -5,7 +5,7 @@ commands.allow = [
   "set_sync_paused", "set_pause_on_metered", "sticker_sync_info", "take_sync_details_request", "import_status", "cancel_import", "set_stickers_category", "create_category_and_set_stickers",
   "sync_status", "sync_now", "inspect_sync_folder", "join_sync_folder", "stop_sync", "set_device_name",
   "inspect_network_target", "join_network_target", "cancel_sync_connection", "update_sync_credentials",
-  "get_settings", "set_appearance", "set_ball_visible", "set_ball_auto_hide", "get_autostart", "set_autostart",
+  "get_settings", "set_appearance", "set_ball_visible", "set_ball_auto_hide", "set_sticker_tile_size", "get_autostart", "set_autostart",
   "library_directory", "open_library_directory", "take_preferences_request",
   "library_overview", "list_stickers", "search_stickers", "sticker", "categories",
   "delete_sticker", "restore_sticker", "delete_stickers", "restore_stickers", "purge_sticker", "purge_deleted_stickers", "create_category", "rename_category",

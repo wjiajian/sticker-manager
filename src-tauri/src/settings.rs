@@ -38,6 +38,8 @@ pub struct Settings {
     pub auto_check_updates: bool,
     /// 用户在提示条上选了“忽略这个版本”的版本号；自动检查找到它时不再提示。
     pub ignored_update: Option<String>,
+    /// 主窗口表情格的最小边长（px），窗口宽度决定实际列数。
+    pub sticker_tile_size: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -81,6 +83,7 @@ impl Default for Settings {
             sync: None,
             auto_check_updates: true,
             ignored_update: None,
+            sticker_tile_size: 104,
         }
     }
 }
@@ -205,6 +208,14 @@ pub fn set_ball_visible(app: AppHandle, visible: bool) -> Result<Settings, Strin
 pub fn set_ball_auto_hide(app: AppHandle, seconds: Option<u32>) -> Result<Settings, String> {
     update(&app, |s| s.ball_auto_hide_seconds = seconds)
 }
+/// 不放进 `validate`：读到范围外的值时界面夹回范围内就够了，不该让整份设置（含同步配置）回到默认值。
+#[tauri::command]
+pub fn set_sticker_tile_size(app: AppHandle, size: u32) -> Result<Settings, String> {
+    if !(80..=200).contains(&size) {
+        return Err("表情大小必须在 80 到 200 之间".into());
+    }
+    update(&app, |s| s.sticker_tile_size = size)
+}
 #[tauri::command]
 pub fn get_autostart(app: AppHandle) -> Result<bool, String> {
     if crate::portable::enabled(&app) {
@@ -280,6 +291,12 @@ pub fn initialize_autostart(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn settings_saved_before_tile_size_existed_keep_their_values() {
+        let settings: Settings = serde_json::from_str(r#"{"ballVisible":false}"#).unwrap();
+        assert!(!settings.ball_visible);
+        assert_eq!(settings.sticker_tile_size, 104);
+    }
     #[test]
     fn sync_settings_round_trip_and_corrupt_backend_falls_back() {
         let root = tempfile::tempdir().unwrap();

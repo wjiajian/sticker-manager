@@ -1,10 +1,10 @@
 import { ArrowsDownUpIcon } from "@phosphor-icons/react";
 import { useIsMutating } from "@tanstack/react-query";
 import { Button } from "../../components/Button";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Sticker, SyncStatus } from "../../lib/ipc";
 import { type useStickers, useCategories, useLibraryOverview } from "../../lib/queries";
-import { GridSkeleton, useDelayedLoading } from "../../components/Skeleton";
+import { GridSkeleton, stickerGridColumns, useDelayedLoading } from "../../components/Skeleton";
 import { ReadError } from "../../components/ReadError";
 import { EmptyLibrary } from "./EmptyLibrary";
 import { useUiStore, type StickerTypeFilter } from "../../stores/ui";
@@ -12,6 +12,7 @@ import { LIBRARY_VIEWS } from "./libraryViews";
 import { RecentStickers } from "./RecentStickers";
 import type { Usage } from "./stickerList";
 import { StickerTile, type SelectMode } from "./StickerTile";
+import { TileSizeSlider } from "./TileSizeSlider";
 import { STICKER_SORTS, useSortMenu } from "./useSortMenu";
 import type { StickerActions } from "./useStickerActions";
 import { useStickerMenu } from "./useStickerMenu";
@@ -48,6 +49,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const overview = useLibraryOverview();
   const menus = useStickerMenu(actions);
   const sortMenu = useSortMenu();
+  const [tileSizeError, setTileSizeError] = useState<string | null>(null);
   const recentlyDeleted = !searchQuery && view === "recentlyDeleted";
   const { data: categories } = useCategories();
   const label = searchQuery ? `搜索“${searchQuery}”` : typeof view === "string"
@@ -145,6 +147,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
               {STICKER_SORTS.find((sort) => sort.value === sortOrder)?.label}
             </button>
           )}
+          <TileSizeSlider onError={setTileSizeError} />
         </div>
       </div>
 
@@ -170,7 +173,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
           </>}
         </div>
       ) : (
-        <section aria-label={label} className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-3">
+        <TileGrid label={label}>
           {stickers.map((sticker, index) => (
             <StickerTile
               key={sticker.id}
@@ -182,10 +185,17 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
               actions={actions}
             />
           ))}
-        </section>
+        </TileGrid>
       )}
       {menus.error && <p role="alert" className="text-xs text-ink-secondary">{menus.error}</p>}
       {sortMenu.error && <p role="alert" className="text-xs text-ink-secondary">{sortMenu.error}</p>}
+      {tileSizeError && <p role="alert" className="text-xs text-ink-secondary">{tileSizeError}</p>}
     </main>
   );
+}
+
+/** 单独订阅大小：拖动滑块时只改列宽，几千个格子不用重新渲染。 */
+function TileGrid({ label, children }: { label?: string; children: ReactNode }) {
+  const size = useUiStore((s) => s.stickerTileSize);
+  return <section aria-label={label} style={stickerGridColumns(size)} className="grid gap-3">{children}</section>;
 }

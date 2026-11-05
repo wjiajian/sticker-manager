@@ -162,6 +162,7 @@ pub fn run() {
             settings::set_appearance,
             settings::set_ball_visible,
             settings::set_ball_auto_hide,
+            settings::set_sticker_tile_size,
             settings::get_autostart,
             settings::set_autostart,
             settings::library_directory,

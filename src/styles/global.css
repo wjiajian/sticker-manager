@@ -161,6 +161,28 @@
   }
 }
 
+/* 表情大小滑块。macOS 的 WKWebView 和 Windows 的 WebView2 都认 -webkit- 伪元素。 */
+.tile-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+}
+.tile-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--color-line);
+}
+.tile-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--color-ink);
+}
+
 @keyframes sync-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
 @keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
 .skeleton-pulse { animation: skeleton-pulse 1.2s var(--ease-standard) infinite; }

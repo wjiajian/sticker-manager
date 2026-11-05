@@ -5,12 +5,17 @@ import type { LibraryView } from "../lib/ipc";
 export type StickerTypeFilter = "all" | "static" | "animated";
 export type StickerSort = "added" | "recent" | "usage" | "name";
 
+/** 主窗口表情格的最小边长（px）。范围和 src-tauri/src/settings.rs 的 set_sticker_tile_size 一致。 */
+export const STICKER_TILE_SIZE = { min: 80, max: 200, step: 24, initial: 104 };
+
 interface UiState {
   view: LibraryView;
   typeFilter: StickerTypeFilter;
   sortOrder: StickerSort;
   setTypeFilter: (filter: StickerTypeFilter) => void;
   setSortOrder: (sort: StickerSort) => void;
+  stickerTileSize: number;
+  setStickerTileSize: (size: number) => void;
   searchText: string;
   searchQuery: string;
   /** 搜索框里按了 ↓ 或 Enter，等当前搜索词的结果回来后选中第一张。 */
@@ -35,6 +40,8 @@ export const useUiStore = create<UiState>()((set) => ({
   sortOrder: "added",
   setTypeFilter: (typeFilter) => set({ typeFilter }),
   setSortOrder: (sortOrder) => set({ sortOrder }),
+  stickerTileSize: STICKER_TILE_SIZE.initial,
+  setStickerTileSize: (size) => set({ stickerTileSize: Math.min(STICKER_TILE_SIZE.max, Math.max(STICKER_TILE_SIZE.min, size)) }),
   searchText: "",
   searchQuery: "",
   resultFocusRequested: false,
