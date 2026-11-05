@@ -29,6 +29,6 @@
 | `src/assets/stickers/sidiaole.png` | `memes/sad/0143_sticker_bf_201.png` |
 | `public/media/cooking.gif` | `memes/food/0173_sticker_issue_20_001.gif` |
 
-`public/og.png` 里的表情也来自这份列表。
+`public/og.png` 里的表情也来自这份列表。仓库根目录 `docs/images/` 的 README 截图里出现的表情，也都在这份列表内。
 
 字体 [Manrope](https://github.com/sharanda/manrope) 使用 SIL Open Font License，图标来自 [Phosphor Icons](https://phosphoricons.com/)（MIT）。
