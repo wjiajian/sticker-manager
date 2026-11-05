@@ -64,8 +64,8 @@ export function StickerTile({ sticker, selected, onSelect, onMenu, actions, butt
         void onMenu(rect.left, rect.bottom);
       }}
       {...drag}
-      className={`group interactive relative flex touch-none items-center justify-center bg-tile p-[5px] hover:-translate-y-0.5 active:scale-98 ${
-        compact ? "size-16 shrink-0" : "aspect-square min-h-0 w-full"
+      className={`group interactive relative flex touch-none items-center justify-center bg-tile hover:-translate-y-0.5 active:scale-98 ${
+        compact ? "size-16 shrink-0 p-[3px]" : "aspect-square min-h-0 w-full p-[5px]"
       } ${selected ? "ring-2 ring-accent ring-offset-2 ring-offset-surface" : ""}`}
     >
       <StickerImage path={useOriginal ? sticker.objectPath : sticker.thumbnailPath} name={sticker.name} lazy />
