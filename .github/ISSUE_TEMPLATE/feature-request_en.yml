@@ -1,0 +1,15 @@
+name: Feature request
+description: Suggest a new feature or an improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    attributes:
+      label: Description
+      description: What would you like the app to do?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Use case
+      description: When would you use it? How do you handle this today?

@@ -1,0 +1,42 @@
+name: Bug report
+description: The app fails or does not behave as expected.
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: Description
+      description: What happened? What did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: App version
+      description: Shown in the 更新 (Update) section of Preferences.
+      placeholder: For example, 0.1.6
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Additional information
+      description: Screenshots, recordings, or error messages. Check that they contain nothing you want to keep private before uploading.

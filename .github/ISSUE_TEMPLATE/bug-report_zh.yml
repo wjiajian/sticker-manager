@@ -1,0 +1,42 @@
+name: 报告问题
+description: 应用出错或行为不符合预期。
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: 问题描述
+      description: 发生了什么？你原本期望怎样？
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 ...
+        2. 点击 ...
+        3. 出现 ...
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: 应用版本
+      description: 在偏好设置的“更新”分组里查看。
+      placeholder: 例如 0.1.6
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: 操作系统
+      options:
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 补充信息
+      description: 截图、录屏或错误提示。上传前请确认里面没有不想公开的内容。
