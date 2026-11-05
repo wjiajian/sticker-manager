@@ -8,7 +8,7 @@ import type { SyncStatus } from "../../lib/ipc";
 import { SyncIcon } from "./SyncIcon";
 import { progressLabel, syncLabel, syncTooltip } from "./useSyncStatus";
 import { WindowControls } from "./WindowControls";
-import appIcon from "../../../src-tauri/icons/app-icon.svg";
+import appIcon from "../../../../src-tauri/icons/app-icon.svg";
 
 export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onChoose: (directory: boolean) => void; sync?: SyncStatus; onSync: (button: HTMLButtonElement) => void }) {
   const input = useRef<HTMLInputElement>(null);

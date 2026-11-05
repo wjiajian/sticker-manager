@@ -12,11 +12,10 @@ export default defineConfig({
     },
   },
   server: {
-    // 与 src-tauri/tauri.conf.json 的 build.devUrl 保持一致
+    // 与 ../src-tauri/tauri.conf.json 的 build.devUrl 保持一致
     port: 1420,
     strictPort: true,
-    watch: {
-      ignored: ["**/src-tauri/**", "**/crates/**", "**/target/**"],
-    },
+    // 应用图标放在 src-tauri/icons，在 Vite 根目录之外，开发时要单独放行
+    fs: { allow: [".", "../src-tauri/icons"] },
   },
 });

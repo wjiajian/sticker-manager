@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "typecheck": "tsc",
-    "tauri": "tauri"
+    "tauri": "cd .. && tauri"
   },
   "dependencies": {
     "@crabnebula/tauri-plugin-drag": "^2.1.0",
