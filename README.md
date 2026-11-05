@@ -182,7 +182,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 | Windows 安装版 | `%APPDATA%\sticker-manager\` |
 | Windows 便携版 | 程序所在目录的 `data\` |
 
-Windows 安装版首次使用新路径时，会在目标目录为空的情况下迁移旧的 `com.wjiajian.sticker-manager` 仓库，并兼容更早的 `com.shaojian.sticker-manager` 目录。各平台仓库内部结构相同：
+各平台仓库内部结构相同：
 
 ```text
 仓库目录/
