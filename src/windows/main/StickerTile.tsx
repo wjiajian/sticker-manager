@@ -2,10 +2,14 @@ import { CheckIcon } from "@phosphor-icons/react";
 import { useRef, type Ref } from "react";
 import type { Sticker } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
+import { useUiStore } from "../../stores/ui";
 import { StickerImage } from "./StickerImage";
 import { useDragOut } from "./useDragOut";
 import { usePurgeDays } from "./usePurgeDays";
 import type { StickerActions } from "./useStickerActions";
+
+/** 缩略图的边长（crates/core/src/import.rs 的 THUMBNAIL_SIZE）。 */
+const THUMBNAIL_SIZE = 256;
 
 /** 点击怎样改变选中：换成这一张、加入或移出多选、从起点连选到这一张。 */
 export type SelectMode = "replace" | "toggle" | "range";
@@ -23,6 +27,9 @@ export function StickerTile({ sticker, selected, onSelect, onMenu, actions, butt
   const days = usePurgeDays(sticker.purgeAt);
   // 拖出手势会让按钮捕获指针，click 的目标因此总是按钮本身，只能在按下时记下点中的是不是复选框。
   const pressedCheckbox = useRef(false);
+  // 格子大到缩略图要被放大时，静态表情换成原图才清晰。动图继续用静止的缩略图，不在网格里播放。
+  const thumbnailTooSmall = useUiStore((s) => s.stickerTileSize * window.devicePixelRatio > THUMBNAIL_SIZE);
+  const useOriginal = thumbnailTooSmall && !compact && !sticker.animated;
   return (
     <button
       ref={buttonRef}
@@ -58,10 +65,10 @@ export function StickerTile({ sticker, selected, onSelect, onMenu, actions, butt
       }}
       {...drag}
       className={`group interactive relative flex touch-none items-center justify-center bg-tile hover:-translate-y-0.5 active:scale-98 ${
-        compact ? "size-16 shrink-0 rounded-control p-2" : "aspect-square min-h-0 w-full rounded-card p-4"
+        compact ? "size-16 shrink-0 p-[3px]" : "aspect-square min-h-0 w-full p-[5px]"
       } ${selected ? "ring-2 ring-accent ring-offset-2 ring-offset-surface" : ""}`}
     >
-      <StickerImage path={sticker.thumbnailPath} name={sticker.name} lazy />
+      <StickerImage path={useOriginal ? sticker.objectPath : sticker.thumbnailPath} name={sticker.name} lazy />
       {!compact && <>
         <span
           data-checkbox

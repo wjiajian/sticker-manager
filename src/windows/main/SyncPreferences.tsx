@@ -9,8 +9,8 @@ import { progressLabel, syncStateLabel, syncTime, waitingNote } from "./useSyncS
 const backends = { folder: "同步文件夹", webdav: "WebDAV", r2: "Cloudflare R2", s3: "S3 兼容" };
 const inputStyle = "min-w-0 w-full rounded-control border border-line bg-surface px-3 py-2 text-sm disabled:opacity-50";
 
-export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus: boolean }) {
-  const section = useRef<HTMLElement>(null);
+export function SyncPreferences({ status }: { status?: SyncStatus }) {
+  const section = useRef<HTMLDivElement>(null);
   const [name, setName] = useState(status?.deviceName ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -31,9 +31,6 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
   const mounted = useRef(true);
   const client = useQueryClient();
   useEffect(() => { if (!editingName.current) setName(status?.deviceName ?? ""); }, [status?.deviceName]);
-  useEffect(() => {
-    if (focus) requestAnimationFrame(() => { section.current?.scrollIntoView({ block: "start" }); section.current?.focus({ preventScroll: true }); });
-  }, [focus]);
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => setWide(entry.contentRect.width >= 420));
     if (section.current) observer.observe(section.current);
@@ -99,8 +96,7 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
   const address = target?.address ?? "";
   const split = Math.max(0, address.length - 28);
   const progress = progressLabel(status);
-  return <section ref={section} tabIndex={-1} aria-labelledby="sync-preferences-title" className="flex scroll-mt-6 flex-col gap-3 rounded-control">
-    <h3 id="sync-preferences-title" className="text-xs font-semibold text-ink-secondary">同步</h3>
+  return <div ref={section} className="flex flex-col gap-3">
     <p className="text-xs text-ink-secondary">同步目录里的文件夹就是分类，图片按表情名称保存；直接放图、移动、改名或删除，下次同步会更新到应用。旧同步仓库需要重新创建。</p>
     {!target && <>
       {wide ? <div className="flex flex-col gap-2">
@@ -176,7 +172,7 @@ export function SyncPreferences({ status, focus }: { status?: SyncStatus; focus:
       </div>
     </form>}
     {error && <p role="alert" className="text-xs text-accent">{error}</p>}
-  </section>;
+  </div>;
 }
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="flex min-w-0 flex-col gap-2"><span className="text-xs text-ink-secondary">{label}</span>{children}</label>;

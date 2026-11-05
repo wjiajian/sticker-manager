@@ -6,7 +6,7 @@
 
 macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分类整理，用的时候随手就能取。
 
-[![版本 0.1.5](https://img.shields.io/badge/版本-0.1.5-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
+[![版本 0.1.6](https://img.shields.io/badge/版本-0.1.6-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
 ![平台 Windows x64](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
@@ -49,7 +49,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 #### macOS
 
-1. 打开 [GitHub Releases](https://github.com/wjiajian/sticker-manager/releases/latest)，下载 `sticker-manager_<版本>_<架构>.dmg`。目前只发布 Apple Silicon 版本，文件名形如 `sticker-manager_0.1.5_aarch64.dmg`。
+1. 打开 [GitHub Releases](https://github.com/wjiajian/sticker-manager/releases/latest)，下载 `sticker-manager_<版本>_<架构>.dmg`。目前只发布 Apple Silicon 版本，文件名形如 `sticker-manager_0.1.6_aarch64.dmg`。
 2. 双击打开 DMG，把「表情管理器」拖进「应用程序」文件夹。
 3. 按下一节的步骤放行，然后打开。
 
@@ -104,6 +104,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 - **左栏**：全部表情、最近使用、收藏、未分类、最近删除，下面是各个分类。
 - **筛选和排序**：可以只看静态图或者动图；按最近添加、最近使用、使用次数或名称排序。
+- **表情大小**：拖动排序按钮旁边的滑块调整表情格子的大小，每列放几张由窗口宽度决定。大小会记住，重启后不变。
 - **搜索**：标题栏的搜索框（按 `⌘K` 跳过去）按名称、配文和分类模糊匹配。输入多个词时用空格隔开，每个词都要匹配上。
 - **收藏**：在详情栏点星标。
 - **改名**：在详情栏点表情名称就能修改。开了同步的话，同步目录里的文件名也会跟着改。
@@ -136,12 +137,12 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 #### 偏好设置
 
-从左栏底部、托盘菜单、悬浮球右键菜单打开，或者按 `⌘,`。设置只保存在本机，不会同步。
+从左栏底部、托盘菜单、悬浮球右键菜单打开，或者按 `⌘,`。设置按功能分组，在左侧切换。设置只保存在本机，不会同步。
 
-- **外观**：跟随系统、浅色、深色，改了立即生效。主窗口、表情面板、悬浮球、预览，以及系统的菜单和对话框会一起切换。
-- **开机时自动启动**：第一次从「应用程序」这类固定位置打开时默认开启；直接从 DMG 里运行不会登记。开机自启时只显示悬浮球和托盘，不弹出主窗口。
-- **悬浮球**：显示或隐藏，以及静止后多久收到屏幕边缘。
-- **表情面板**：查看呼出快捷键。
+- **通用**：
+  - **外观**：跟随系统、浅色、深色，改了立即生效。主窗口、表情面板、悬浮球、预览，以及系统的菜单和对话框会一起切换。
+  - **开机时自动启动**：第一次从「应用程序」这类固定位置打开时默认开启；直接从 DMG 里运行不会登记。开机自启时只显示悬浮球和托盘，不弹出主窗口。
+- **悬浮球与面板**：显示或隐藏悬浮球，设置静止后多久收到屏幕边缘；查看表情面板的呼出快捷键。
 - **同步**：见下一节。
 - **仓库**：查看仓库路径，「打开所在位置」可以在访达里找到它。
 - **更新**：当前版本、手动检查更新、自动检查更新开关。
@@ -181,7 +182,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 | Windows 安装版 | `%APPDATA%\sticker-manager\` |
 | Windows 便携版 | 程序所在目录的 `data\` |
 
-Windows 安装版首次使用新路径时，会在目标目录为空的情况下迁移旧的 `com.wjiajian.sticker-manager` 仓库，并兼容更早的 `com.shaojian.sticker-manager` 目录。各平台仓库内部结构相同：
+各平台仓库内部结构相同：
 
 ```text
 仓库目录/

@@ -229,7 +229,7 @@ function PanelTile({ sticker, id, number, selectable, selected, copied, busy, on
   preview: ReturnType<ReturnType<typeof usePreview>["tile"]>; description: string;
 }) {
   const drag = useDragOut(onDrag, busy);
-  return <button id={id} type="button" className="relative flex aspect-square min-h-0 w-full touch-none items-center justify-center rounded-lg bg-tile p-3 [transition:transform_500ms_var(--ease-standard),opacity_300ms_var(--ease-standard)] data-[selected=true]:shadow-[inset_0_0_0_2px_var(--color-accent),inset_0_0_0_4px_var(--color-surface)] hover:[transform:translateY(-2px)] active:[transform:scale(.98)] motion-reduce:transition-opacity motion-reduce:duration-300 motion-reduce:hover:transform-none motion-reduce:active:transform-none" role={selectable ? "option" : undefined}
+  return <button id={id} type="button" className="relative flex aspect-square min-h-0 w-full touch-none items-center justify-center bg-tile p-1 [transition:transform_500ms_var(--ease-standard),opacity_300ms_var(--ease-standard)] data-[selected=true]:shadow-[inset_0_0_0_2px_var(--color-accent),inset_0_0_0_4px_var(--color-surface)] hover:[transform:translateY(-2px)] active:[transform:scale(.98)] motion-reduce:transition-opacity motion-reduce:duration-300 motion-reduce:hover:transform-none motion-reduce:active:transform-none" role={selectable ? "option" : undefined}
     aria-label={sticker.name} aria-description={description} aria-selected={selectable ? selected : undefined} aria-disabled={busy}
     tabIndex={-1} data-selected={selected} onMouseDown={(event) => event.preventDefault()} onClick={onCopy} {...drag} {...preview}
     onPointerMove={(event) => { drag.onPointerMove(event); preview.onPointerMove(event); }}>

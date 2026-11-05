@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useUiStore } from "../stores/ui";
 
 export function useDelayedLoading(loading: boolean, identity: unknown = loading) {
   const [ready, setReady] = useState<{ identity: unknown } | null>(null);
@@ -18,24 +19,29 @@ export function Skeleton({ label, className = "", children }: { label: string; c
   </div>;
 }
 
+export function stickerGridColumns(size: number): CSSProperties {
+  return { gridTemplateColumns: `repeat(auto-fill,minmax(${size}px,1fr))` };
+}
+
 export function GridSkeleton({ panel = false }: { panel?: boolean }) {
   const container = useRef<HTMLDivElement>(null);
   const [count, setCount] = useState(0);
+  const size = useUiStore((s) => s.stickerTileSize);
   useEffect(() => {
     if (panel || !container.current) return;
     const observer = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
-      const columns = Math.max(1, Math.floor((width + 12) / 116));
+      const columns = Math.max(1, Math.floor((width + 12) / (size + 12)));
       const tile = (width - (columns - 1) * 12) / columns;
       setCount(columns * Math.ceil((height + 12) / (tile + 12)));
     });
     observer.observe(container.current);
     return () => observer.disconnect();
-  }, [panel]);
+  }, [panel, size]);
   return <div ref={container} className={panel ? "h-41" : "min-h-0 flex-1 overflow-hidden"}>
     <Skeleton label="正在读取表情" className="h-full">
-      <div className={panel ? "grid grid-cols-4 gap-2" : "grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-3"}>
-        {Array.from({ length: panel ? 8 : count }, (_, index) => <div key={index} className={`aspect-square bg-muted ${panel ? "rounded-lg" : "rounded-card"}`} />)}
+      <div style={panel ? undefined : stickerGridColumns(size)} className={panel ? "grid grid-cols-4 gap-2" : "grid gap-3"}>
+        {Array.from({ length: panel ? 8 : count }, (_, index) => <div key={index} className="aspect-square bg-muted" />)}
       </div>
     </Skeleton>
   </div>;
