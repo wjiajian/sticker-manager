@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: 发布到 Release（tag 为 v + package.json 版本号）
+        description: 发布到 Release（tag 为 v + frontend/package.json 版本号）
         type: boolean
         default: false
       validate:
@@ -20,18 +20,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend typecheck
 
       - id: version
         run: |
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $version = (Get-Content frontend/package.json -Raw | ConvertFrom-Json).version
           $tauri = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
           if ($version -ne $tauri -or $version -ne $cargo) { throw '版本号不一致' }
@@ -57,13 +60,13 @@ jobs:
         run: |
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
             '{"bundle":{"createUpdaterArtifacts":true}}' | Set-Content -LiteralPath updater-build.json -Encoding utf8
-            pnpm tauri build --bundles nsis --config updater-build.json
+            pnpm --dir frontend tauri build --bundles nsis --config updater-build.json
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             'updater=true' >> $env:GITHUB_OUTPUT
           } elseif ($env:RELEASE -eq 'true') {
             throw '发布到 Release 需要仓库 Secret TAURI_SIGNING_PRIVATE_KEY（更新签名私钥），见 docs/packaging.md'
           } else {
-            pnpm tauri build --bundles nsis
+            pnpm --dir frontend tauri build --bundles nsis
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 

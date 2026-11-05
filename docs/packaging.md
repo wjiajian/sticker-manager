@@ -3,8 +3,8 @@
 从源码打包。macOS 和 Windows x64 均已通过构建，Windows 11 运行验收见 [Windows 验收报告](windows-validation.md)。macOS 沿用临时签名，Windows 安装包未签名。
 
 ```bash
-pnpm tauri build --bundles app
-CI=true pnpm tauri build --bundles app,dmg
+pnpm --dir frontend tauri build --bundles app
+CI=true pnpm --dir frontend tauri build --bundles app,dmg
 ```
 
 产物分别在 `target/release/bundle/macos/表情管理器.app` 和 `target/release/bundle/dmg/`。只要 DMG 时可用 `--bundles dmg`，但 Tauri 会清理作为中间产物的 `.app`；要同时保留两者就用 `--bundles app,dmg`。`CI=true` 跳过 DMG 的访达窗口美化，避免构建时弹出自动化权限提示。当前未配置 Apple 开发者签名和公证；`tauri.conf.json` 的 `bundle.macOS.signingIdentity` 设为 `"-"`，打包时对整个 .app 做临时签名（ad-hoc）。不做这一步时只有编译器给可执行文件加的签名，Info.plist 和资源没有纳入签名，从浏览器下载后系统会直接报“已损坏”，隐私与安全性里也没有放行按钮（0.1.2 的 DMG 就是这样）。本地打包默认不生成更新包，不需要更新签名私钥。
@@ -13,7 +13,7 @@ CI=true pnpm tauri build --bundles app,dmg
 
 在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow 手动触发。只构建 Apple Silicon（arm64）的 DMG，完成后在运行详情页的 Artifacts 下载，保留 14 天。
 
-运行时勾选「发布到 Release」，会以 `v` 加 `package.json` 的版本号为 tag 创建正式 Release，附上 DMG `sticker-manager_<版本>_aarch64.dmg`、更新包 `sticker-manager_<版本>_aarch64.app.tar.gz` 和 `latest.json`，说明取 `CHANGELOG.md` 里该版本的小节，与应用更新对话框里显示的一致。附件都用 ASCII 文件名，因为 GitHub 会去掉附件名里的中文。该 tag 的 Release 已存在时，只覆盖上传这三个文件，不改说明；旧名字的附件要手动删除。tag 指向运行时选择的分支的最新提交，发布前先确认版本号已更新：`package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 三处必须一致，不一致时构建直接失败。
+运行时勾选「发布到 Release」，会以 `v` 加 `frontend/package.json` 的版本号为 tag 创建正式 Release，附上 DMG `sticker-manager_<版本>_aarch64.dmg`、更新包 `sticker-manager_<版本>_aarch64.app.tar.gz` 和 `latest.json`，说明取 `CHANGELOG.md` 里该版本的小节，与应用更新对话框里显示的一致。附件都用 ASCII 文件名，因为 GitHub 会去掉附件名里的中文。该 tag 的 Release 已存在时，只覆盖上传这三个文件，不改说明；旧名字的附件要手动删除。tag 指向运行时选择的分支的最新提交，发布前先确认版本号已更新：`frontend/package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 三处必须一致，不一致时构建直接失败。
 
 ## 检查更新与签名密钥
 
@@ -53,9 +53,9 @@ env HOME="$release_home" TMPDIR="$release_home/tmp" \
 Windows 构建命令如下，需要 Rust MSVC 工具链、C++ Build Tools、Windows SDK、Node.js 和项目固定版本的 pnpm。
 
 ```powershell
-pnpm install --frozen-lockfile
-pnpm tauri build --debug --no-bundle --target x86_64-pc-windows-msvc -- --locked
-pnpm tauri build --bundles nsis --target x86_64-pc-windows-msvc -- --locked
+pnpm --dir frontend install --frozen-lockfile
+pnpm --dir frontend tauri build --debug --no-bundle --target x86_64-pc-windows-msvc -- --locked
+pnpm --dir frontend tauri build --bundles nsis --target x86_64-pc-windows-msvc -- --locked
 ```
 
 上述带 `--target` 的本地命令把 Debug 程序和安装包放在 `target/x86_64-pc-windows-msvc/` 下。工作流使用 runner 默认 Windows 目标，将安装包和便携 ZIP 整理到 `target/release/bundle/release/`，使用 ASCII 文件名上传。Debug 程序内嵌前端，可按上述命令单独构建。
@@ -81,4 +81,4 @@ Windows 同步文件夹会在记录移动意图前检查非法字符、结尾空
 
 Windows 安装版仓库为 `%APPDATA%\sticker-manager`。目标为空时优先迁移 `com.wjiajian.sticker-manager`，其次兼容旧的 `com.shaojian.sticker-manager`。迁移失败会报告启动错误。
 
-Windows 图标复用 `icons/app-icon.svg`，生成时将根 `viewBox` 改为 `72 72 880 880`，用 `pnpm tauri icon` 生成后保留 ICO 与 128 像素 PNG 到 `icons/windows/`。Windows 平台配置使用这一组资源，以减少任务栏图标内部留白。
+Windows 图标复用 `icons/app-icon.svg`，生成时将根 `viewBox` 改为 `72 72 880 880`，用 `pnpm --dir frontend tauri icon` 生成后保留 ICO 与 128 像素 PNG 到 `icons/windows/`。Windows 平台配置使用这一组资源，以减少任务栏图标内部留白。

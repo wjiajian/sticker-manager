@@ -240,10 +240,10 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 | 入口 | 窗口 | 代码 |
 |---|---|---|
-| `index.html` | 主窗口 | `src/windows/main/` |
-| `panel.html` | 表情面板 | `src/windows/panel/` |
-| `ball.html` | 悬浮球 | `src/windows/ball/` |
-| `preview.html` | 悬停预览 | `src/windows/preview/` |
+| `frontend/index.html` | 主窗口 | `frontend/src/windows/main/` |
+| `frontend/panel.html` | 表情面板 | `frontend/src/windows/panel/` |
+| `frontend/ball.html` | 悬浮球 | `frontend/src/windows/ball/` |
+| `frontend/preview.html` | 悬停预览 | `frontend/src/windows/preview/` |
 
 每个窗口能调用哪些 Tauri 命令，由 `src-tauri/permissions/*.toml` 里的白名单决定（`main.toml`、`panel.toml`、`ball.toml`、`preview.toml`），再由 `src-tauri/capabilities/*.json` 授予对应窗口。名单之外的命令会被 Tauri 拒绝，所以**新增命令时要同时加进用到它的窗口的名单**。更新插件只在 Rust 端调用，不对前端开放。
 
@@ -253,13 +253,14 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 ```text
 .
-├── index.html, panel.html, ball.html, preview.html   前端各窗口入口
-├── src/
-│   ├── windows/{main,panel,ball,preview}/   各窗口的 React 代码
-│   ├── components/                          通用组件
-│   ├── lib/                                 IPC 封装、查询、平台判断等
-│   ├── stores/                              Zustand 状态
-│   └── styles/global.css                    主题变量（浅色和深色）
+├── frontend/                    前端：依赖和 Vite、TypeScript 配置都在这里
+│   ├── index.html, panel.html, ball.html, preview.html   各窗口入口
+│   └── src/
+│       ├── windows/{main,panel,ball,preview}/   各窗口的 React 代码
+│       ├── components/                          通用组件
+│       ├── lib/                                 IPC 封装、查询、平台判断等
+│       ├── stores/                              Zustand 状态
+│       └── styles/global.css                    主题变量（浅色和深色）
 ├── crates/core/                 sticker-core：核心逻辑
 │   └── src/
 │       ├── import.rs, import/   导入（文件、文件夹、zip）
@@ -278,6 +279,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 │   └── tauri.conf.json
 ├── design/README.md             界面设计规范
 ├── docs/                        技术文档、ADR、术语表、测试、打包、待办、README 配图
+├── website/                     软件官网（占位，尚未搭建）
 └── .github/                     macOS／Windows 独立构建与发布 workflow、更新清单脚本
 ```
 
@@ -288,28 +290,30 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 - macOS 14 及以上，装好 Xcode 命令行工具；或 Windows x64，装好 C++ Build Tools、Windows SDK 和 WebView2 Runtime（见[打包说明](docs/packaging.md#windows-x64-构建与验收)）
 - Rust stable（workspace 使用 edition 2024）
 - Node.js（CI 用 22）
-- pnpm 11（`package.json` 的 `packageManager` 固定为 `pnpm@11.22.0`）
+- pnpm 11（`frontend/package.json` 的 `packageManager` 固定为 `pnpm@11.22.0`）
 
 #### 安装依赖并启动
 
+前端依赖和脚本都在 `frontend/` 里，下面的命令在仓库根目录运行：
+
 ```bash
-pnpm install
+pnpm --dir frontend install
 ```
 
 ```bash
-pnpm tauri dev
+pnpm --dir frontend tauri dev
 ```
 
-`pnpm tauri dev` 会先执行 `tauri.conf.json` 里的 `beforeDevCommand`（`pnpm dev`，在 1420 端口启动 Vite），再编译并启动应用。前端改动热更新，Rust 改动自动重新编译。
+`tauri dev` 会先执行 `tauri.conf.json` 里的 `beforeDevCommand`（`pnpm dev`，在 1420 端口启动 Vite），再编译并启动应用。前端改动热更新，Rust 改动自动重新编译。
 
-`package.json` 里的脚本：
+`frontend/package.json` 里的脚本（在 `frontend/` 里运行，或者在根目录加上 `--dir frontend`）：
 
 | 脚本 | 作用 |
 |---|---|
 | `pnpm dev` | 只启动 Vite 开发服务器，一般由 `tauri dev` 调用 |
-| `pnpm build` | `tsc && vite build`，构建前端到 `dist/` |
+| `pnpm build` | `tsc && vite build`，构建前端到 `frontend/dist/` |
 | `pnpm typecheck` | `tsc` 类型检查 |
-| `pnpm tauri <命令>` | 调用 Tauri CLI，比如 `dev`、`build` |
+| `pnpm tauri <命令>` | 回到仓库根目录调用 Tauri CLI，比如 `dev`、`build`；相对路径参数按根目录算 |
 
 本地打包 DMG 的命令和注意事项见 [docs/packaging.md](docs/packaging.md)。
 
@@ -319,7 +323,7 @@ pnpm tauri dev
 > 开发构建默认打开的是真实仓库（见[数据存放位置](#数据存放位置)）。调试和测试时请换成临时仓库。
 
 ```bash
-STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm tauri dev
+STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm --dir frontend tauri dev
 ```
 
 - 必须是绝对路径。相对路径会直接报启动错误，因为它会落在 `src-tauri/` 下，写入的文件又会触发 `tauri dev` 重新编译。
@@ -348,25 +352,25 @@ cargo test --workspace
 ```
 
 ```bash
-pnpm typecheck
+pnpm --dir frontend typecheck
 ```
 
 ```bash
-pnpm build
+pnpm --dir frontend build
 ```
 
 ```bash
 git diff --check
 ```
 
-macOS 与 Windows 分别使用独立、手动触发的安装包构建工作流，均运行 `pnpm typecheck` 和打包；Windows 可勾选 `validate` 额外运行 Rust 格式、Clippy 和测试。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
+macOS 与 Windows 分别使用独立、手动触发的安装包构建工作流，均运行类型检查和打包；Windows 可勾选 `validate` 额外运行 Rust 格式、Clippy 和测试。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
 
 ### 发布流程
 
 macOS 继续使用「构建 macOS 安装包」（[build-macos.yml](.github/workflows/build-macos.yml)）；Windows 使用独立的「构建 Windows 安装包」（[build-windows.yml](.github/workflows/build-windows.yml)）。两者均手动触发，默认只生成构建产物，勾选 `release` 才发布。下列步骤以 macOS 为例。
 
 1. **写更新记录**：在 [CHANGELOG.md](CHANGELOG.md) 里写好这个版本的 `## <版本号>` 小节。写法见文件开头的注释：面向用户，只写能感知到的变化，每条一句话，升级须知放在最前面，不用 `###` 标题。这个小节会原样显示在应用的更新对话框里，也会用作 Release 说明；找不到对应版本时退回「未发布」小节。
-2. **改版本号**：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三处必须一致，不一致时 workflow 直接失败。`crates/core/Cargo.toml` 的版本号习惯上一起改。
+2. **改版本号**：`frontend/package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三处必须一致，不一致时 workflow 直接失败。`crates/core/Cargo.toml` 的版本号习惯上一起改。
 3. **提交并推送**。
 4. **触发构建**：在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow。`release` 勾选项（「发布到 Release」）决定发不发版：
    - 不勾选：只构建，DMG 在运行详情页的 Artifacts 里下载，保留 14 天。
