@@ -1,0 +1,122 @@
+---
+import { matches, stickerSrc, stickers } from '../data/stickers';
+import Icon from './Icon.astro';
+
+const MAX_RESULTS = 12;
+const DEFAULT_QUERY = '开心';
+const DEFAULT_COPIED = 'zhouwu';
+const chips = ['开心', '下班', '困惑', '生气'];
+
+const firstResults = new Set(
+  stickers
+    .filter((sticker) => matches(sticker, DEFAULT_QUERY))
+    .slice(0, MAX_RESULTS)
+    .map((sticker) => sticker.key),
+);
+const tiles = await Promise.all(
+  stickers.map(async (sticker) => ({ ...sticker, src: await stickerSrc(sticker.key, 80) })),
+);
+---
+
+<div class="stage try-stage" data-try-panel data-max={MAX_RESULTS}>
+  <div class="panel try-panel">
+    <div class="panel-top">
+      <label class="search">
+        <Icon name="search" size={16} />
+        <span class="sr-only">搜索表情</span>
+        <input class="search-input" type="text" value={DEFAULT_QUERY} placeholder="搜索表情" />
+      </label>
+    </div>
+    <div class="chips">
+      {
+        chips.map((label) => (
+          <button
+            class="chip"
+            type="button"
+            data-chip={label}
+            aria-pressed={label === DEFAULT_QUERY ? 'true' : 'false'}
+          >
+            {label}
+          </button>
+        ))
+      }
+    </div>
+    <div class="tile-grid try-grid" data-results>
+      {
+        tiles.map((tile) => (
+          <button
+            class="tile tile-button"
+            type="button"
+            aria-label={`复制 ${tile.name}`}
+            data-keywords={tile.keywords}
+            data-copied={tile.key === DEFAULT_COPIED ? '' : undefined}
+            hidden={!firstResults.has(tile.key)}
+          >
+            <img src={tile.src} alt="" width="80" height="80" loading="lazy" />
+            <span class="tile-badge" hidden={tile.key !== DEFAULT_COPIED}>
+              已复制
+            </span>
+          </button>
+        ))
+      }
+    </div>
+    <div class="try-empty" data-empty hidden>没有找到相关表情</div>
+    <div class="panel-hint">单击复制 · 拖出发送 · Esc 收起</div>
+    <span class="sr-only" role="status" data-status></span>
+  </div>
+  <p class="try-note">这是网页里的演示，可以直接输入试试。单击只显示已复制，不会写入剪贴板。</p>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-try-panel]');
+  if (root) {
+    const max = Number(root.dataset.max);
+    const input = root.querySelector('input')!;
+    const grid = root.querySelector<HTMLElement>('[data-results]')!;
+    const empty = root.querySelector<HTMLElement>('[data-empty]')!;
+    const status = root.querySelector<HTMLElement>('[data-status]')!;
+    const chips = [...root.querySelectorAll<HTMLButtonElement>('[data-chip]')];
+    const tiles = [...root.querySelectorAll<HTMLButtonElement>('[data-keywords]')];
+
+    const markCopied = (copied: HTMLButtonElement | null) => {
+      for (const tile of tiles) {
+        tile.toggleAttribute('data-copied', tile === copied);
+        tile.querySelector<HTMLElement>('.tile-badge')!.hidden = tile !== copied;
+      }
+    };
+
+    const search = () => {
+      const query = input.value.trim().toLowerCase();
+      const terms = query.split(/\s+/).filter(Boolean);
+      let shown = 0;
+      for (const tile of tiles) {
+        const keywords = tile.dataset.keywords ?? '';
+        const match = shown < max && terms.every((term) => keywords.includes(term));
+        tile.hidden = !match;
+        if (match) shown += 1;
+      }
+      grid.hidden = shown === 0;
+      empty.hidden = shown > 0;
+      for (const chip of chips) {
+        chip.setAttribute('aria-pressed', String(chip.dataset.chip === input.value.trim()));
+      }
+      markCopied(null);
+    };
+
+    input.addEventListener('input', search);
+
+    for (const chip of chips) {
+      chip.addEventListener('click', () => {
+        input.value = chip.dataset.chip ?? '';
+        search();
+      });
+    }
+
+    for (const tile of tiles) {
+      tile.addEventListener('click', () => {
+        markCopied(tile);
+        status.textContent = tile.getAttribute('aria-label')?.replace('复制 ', '已复制 ') ?? '';
+      });
+    }
+  }
+</script>

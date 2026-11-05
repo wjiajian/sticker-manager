@@ -15,6 +15,7 @@ For every agent working in this repository.
 ## Development
 
 - Frontend dependencies and scripts live in `frontend/`. From the repository root, run them with `pnpm --dir frontend <script>`, for example `pnpm --dir frontend tauri dev`.
+- The website lives in `website/` and has its own dependencies, independent of `frontend/`. From the repository root, run it with `pnpm --dir website <script>`, for example `pnpm --dir website dev`.
 - Run the checks in `docs/testing.md` before finishing a change.
 - When adding a Tauri command, add it to the allowlists in `src-tauri/permissions/` for the windows that use it. Otherwise Tauri rejects the call at runtime, and neither the build nor the tests catch it.
 

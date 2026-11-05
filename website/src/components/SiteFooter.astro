@@ -1,0 +1,64 @@
+---
+import {
+  CHANGELOG_URL,
+  ISSUES_URL,
+  LICENSE_URL,
+  REPO_URL,
+  STICKER_PACK_URL,
+  sitePath,
+} from '../data/links';
+---
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-links">
+      <a href={sitePath('docs/')}>使用文档</a>
+      <a href={CHANGELOG_URL}>更新记录</a>
+      <a href={REPO_URL}>GitHub</a>
+      <a href={LICENSE_URL}>MIT 许可</a>
+    </div>
+    <p>隐私说明：官网托管在 GitHub Pages，本身不加统计，也不放 Cookie。</p>
+    <p>
+      页面里的表情来自 <a href={STICKER_PACK_URL}>deepseek-fanart-meme-pack</a
+      >，原作者未知，与 DeepSeek 官方无关，也不在本项目的 MIT 许可范围内。权利人可以通过{' '}
+      <a href={ISSUES_URL}>GitHub Issue</a> 要求移除。
+    </p>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    padding: 32px 24px;
+    background: var(--band);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--ink2);
+  }
+
+  .footer-inner {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 1152px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .footer p {
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  @media (max-width: 720px) {
+    .footer {
+      padding: 32px 16px;
+    }
+  }
+</style>

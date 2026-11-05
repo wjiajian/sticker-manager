@@ -279,7 +279,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 │   └── tauri.conf.json
 ├── design/README.md             界面设计规范
 ├── docs/                        技术文档、ADR、术语表、测试、打包、待办、README 配图
-├── website/                     软件官网（占位，尚未搭建）
+├── website/                     软件官网和使用文档（Astro + Starlight）
 └── .github/                     macOS／Windows 独立构建与发布 workflow、更新清单脚本
 ```
 
@@ -379,6 +379,8 @@ macOS 继续使用「构建 macOS 安装包」（[build-macos.yml](.github/workf
 Windows 采用相同的版本检查、可选更新签名和 Release 上传流程，附件为 NSIS 安装包、便携 ZIP 和独立的 `latest-windows.json`，不覆盖 macOS 的 `latest.json`。便携版始终手动升级。
 
 附件都用 ASCII 文件名，因为 GitHub 会去掉附件名里的中文。
+
+发布 Release 后，两个工作流都会触发「部署官网」（[deploy-website.yml](.github/workflows/deploy-website.yml)），让官网首屏显示新版本。
 
 ### 贡献
 

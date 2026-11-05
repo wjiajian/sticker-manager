@@ -1,0 +1,58 @@
+---
+import '@fontsource-variable/manrope/wght.css';
+import '../styles/tokens.css';
+import '../styles/site.css';
+import { sitePath } from '../data/links';
+
+interface Props {
+  title: string;
+  description: string;
+  noindex?: boolean;
+}
+
+const { title, description, noindex = false } = Astro.props;
+const pageUrl = new URL(Astro.url.pathname, Astro.site).href;
+const imageUrl = new URL(sitePath('og.png'), Astro.site).href;
+---
+
+<!doctype html>
+<html lang="zh-CN" data-platform="other">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)" />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={pageUrl} />}
+
+    <link rel="icon" href={sitePath('favicon.svg')} type="image/svg+xml" />
+    <link rel="icon" href={sitePath('favicon-32.png')} type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href={sitePath('apple-touch-icon.png')} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:site_name" content="表情管理器" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={pageUrl} />
+    <meta property="og:image" content={imageUrl} />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <script is:inline>
+      // 在首次绘制前选好按钮文案和快捷键写法。iPadOS 的 UA 和 Mac 相同，要靠触控点区分。
+      (function () {
+        var ua = navigator.userAgent;
+        var platform = 'other';
+        if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) platform = 'mobile';
+        else if (/Macintosh/.test(ua)) platform = navigator.maxTouchPoints > 1 ? 'mobile' : 'mac';
+        else if (/Windows/.test(ua)) platform = 'win';
+        document.documentElement.dataset.platform = platform;
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">跳到主要内容</a>
+    <slot />
+  </body>
+</html>

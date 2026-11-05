@@ -1,0 +1,12 @@
+{
+  "pagefind.clear_search": "清除",
+  "pagefind.load_more": "加载更多结果",
+  "pagefind.search_label": "搜索使用文档",
+  "pagefind.filters_label": "筛选",
+  "pagefind.zero_results": "没有找到「[SEARCH_TERM]」",
+  "pagefind.many_results": "「[SEARCH_TERM]」有 [COUNT] 个结果",
+  "pagefind.one_result": "「[SEARCH_TERM]」有 1 个结果",
+  "pagefind.alt_search": "没有找到「[SEARCH_TERM]」，这里是「[DIFFERENT_TERM]」的结果",
+  "pagefind.search_suggestion": "没有找到「[SEARCH_TERM]」，可以试试这些词：",
+  "pagefind.searching": "正在搜索「[SEARCH_TERM]」…"
+}

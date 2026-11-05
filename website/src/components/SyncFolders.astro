@@ -1,0 +1,36 @@
+---
+import Icon from './Icon.astro';
+
+const folders = [
+  ['开心', '7 张'],
+  ['打工', '4 张'],
+  ['困惑', '2 张'],
+];
+---
+
+<div class="stage sync-stage">
+  <div
+    class="folders"
+    role="img"
+    aria-label="同步位置里的文件夹：开心、打工、困惑各是一个文件夹，未分类的图片放在根目录"
+  >
+    <div class="folders-title">我的网盘 › 表情</div>
+    {
+      folders.map(([name, count]) => (
+        <div class="folder">
+          <Icon name="folder" />
+          <span>{name}</span>
+          <span class="folder-count">{count}</span>
+        </div>
+      ))
+    }
+    <div class="folder">
+      <Icon name="image" />
+      <span>收到了.png</span>
+      <span class="folder-count">未分类</span>
+    </div>
+  </div>
+  <p class="sync-note">
+    每个分类是一个文件夹。你也可以直接在网盘里建文件夹、放图片，下次同步时会收进来。
+  </p>
+</div>

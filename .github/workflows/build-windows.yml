@@ -16,6 +16,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     permissions:
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -112,3 +113,10 @@ jobs:
             gh release create $env:TAG @files --target $env:GITHUB_SHA --title $env:TAG --notes-file target/release/bundle/release-notes.md
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # GITHUB_TOKEN 发布 Release 不会触发别的 workflow，只有 workflow_dispatch 例外。这里手动触发官网重新部署，让首屏显示新版本；失败也不影响发布结果。
+      - if: inputs.release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-website.yml --ref main

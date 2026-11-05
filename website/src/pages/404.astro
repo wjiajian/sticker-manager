@@ -1,0 +1,70 @@
+---
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteNav from '../components/SiteNav.astro';
+import { sitePath } from '../data/links';
+import { stickerSrc } from '../data/stickers';
+import Base from '../layouts/Base.astro';
+
+const sticker = await stickerSrc('ji', 160);
+---
+
+<Base title="没有找到这个页面 · 表情管理器" description="这个页面不存在。" noindex>
+  <SiteNav />
+  <main id="main" class="missing">
+    <img src={sticker} alt="一张写着寄的表情" width="160" height="160" />
+    <h1>没有找到这个页面</h1>
+    <p>链接可能写错了，或者页面已经搬走了。</p>
+    <div class="missing-actions">
+      <a class="cta" href={sitePath()}>回到首页</a>
+      <a class="missing-link" href={sitePath('docs/')}>查看使用文档</a>
+    </div>
+  </main>
+  <SiteFooter />
+</Base>
+
+<style>
+  .missing {
+    box-sizing: border-box;
+    min-height: 640px;
+    padding: 64px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .missing img {
+    border-radius: 12px;
+    background: #ffffff;
+  }
+
+  .missing h1 {
+    margin: 24px 0 0;
+    font-size: 36px;
+    line-height: 40px;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  .missing p {
+    margin: 16px 0 0;
+    color: var(--ink2);
+    font-size: 18px;
+    line-height: 28px;
+    text-wrap: pretty;
+  }
+
+  .missing-actions {
+    margin-top: 32px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  .missing-link {
+    font-weight: 600;
+  }
+</style>

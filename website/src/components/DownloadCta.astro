@@ -1,0 +1,85 @@
+---
+import { RELEASES_URL, sitePath } from '../data/links';
+import { release } from '../data/release';
+import Icon from './Icon.astro';
+
+const version = [`版本 ${release.version}`, release.released].filter(Boolean).join(' · ');
+const docs = sitePath('docs/');
+const homeUrl = new URL(sitePath(), Astro.site).href;
+---
+
+<div class="download">
+  <a class="cta for-mac" href={RELEASES_URL}><Icon name="download" />下载 macOS 版</a>
+  <a class="cta for-win" href={RELEASES_URL}><Icon name="download" />下载 Windows 版</a>
+  <a class="cta for-other" href={RELEASES_URL}><Icon name="download" />前往下载页</a>
+  <button class="cta for-mobile" type="button" data-copy-link={homeUrl}>
+    <span data-copy-label aria-live="polite">复制链接，到电脑上打开</span>
+  </button>
+
+  <div class="download-meta">
+    <span class="for-mac">{version} · macOS 14 以上 · Apple 芯片</span>
+    <span class="for-mac">
+      在发布页下载 .dmg 文件，第一次打开需要在系统设置里放行一次，<a href={docs}>查看安装说明</a>
+    </span>
+
+    <span class="for-win">{version} · Windows x64</span>
+    <span class="for-win">在发布页下载 x64-setup.exe 文件，<a href={docs}>查看安装说明</a></span>
+
+    <span class="for-other">{version} · macOS 14 以上的 Apple 芯片电脑和 Windows x64</span>
+    <span class="for-other">
+      macOS 下载 .dmg 文件，Windows 下载 x64-setup.exe 文件，<a href={docs}>查看安装说明</a>
+    </span>
+
+    <span class="for-mobile">{version} · 这是电脑软件，支持 macOS 和 Windows</span>
+    <span class="for-mobile" data-copy-fallback hidden>
+      复制没有成功，请手动复制这个地址：{homeUrl}
+    </span>
+
+    <slot />
+  </div>
+</div>
+
+<style>
+  .download {
+    display: flex;
+    flex-direction: column;
+    align-items: inherit;
+  }
+
+  .download-meta {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--ink2);
+    text-wrap: pretty;
+  }
+
+  .download-meta a {
+    color: var(--accent);
+  }
+</style>
+
+<script>
+  const IDLE_LABEL_DELAY = 2000;
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy-link]')) {
+    const label = button.querySelector('[data-copy-label]');
+    const fallback = button.parentElement?.querySelector<HTMLElement>('[data-copy-fallback]');
+    const idleLabel = label?.textContent ?? '';
+
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copyLink ?? location.href);
+        if (label) label.textContent = '已复制，到电脑上打开';
+        setTimeout(() => {
+          if (label) label.textContent = idleLabel;
+        }, IDLE_LABEL_DELAY);
+      } catch {
+        if (fallback) fallback.hidden = false;
+      }
+    });
+  }
+</script>

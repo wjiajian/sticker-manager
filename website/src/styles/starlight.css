@@ -1,0 +1,38 @@
+/* 使用文档沿用官网的字体和配色 */
+
+:root {
+  --sl-font: 'Manrope Variable', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei';
+
+  --sl-color-white: #f4f3ef;
+  --sl-color-gray-1: #d3d1c9;
+  --sl-color-gray-2: #bdbbb4;
+  --sl-color-gray-3: #9b9a94;
+  --sl-color-gray-4: #74736e;
+  --sl-color-gray-5: #313131;
+  --sl-color-gray-6: #1f1f1f;
+  --sl-color-black: #181818;
+
+  --sl-color-accent-low: #4a1d08;
+  --sl-color-accent: #c2410c;
+  --sl-color-accent-high: #ffccad;
+}
+
+:root[data-theme='light'] {
+  --sl-color-white: #1f1f1f;
+  --sl-color-gray-1: #2e2d2a;
+  --sl-color-gray-2: #4a4945;
+  --sl-color-gray-3: #686762;
+  --sl-color-gray-4: #85837b;
+  --sl-color-gray-5: #e2e0d9;
+  --sl-color-gray-6: #f3f2ee;
+  --sl-color-gray-7: #fafaf8;
+  --sl-color-black: #ffffff;
+
+  --sl-color-accent-low: #ffe4d3;
+  --sl-color-accent: #c2410c;
+  --sl-color-accent-high: #9a3412;
+}
+
+.site-title {
+  color: var(--sl-color-white);
+}

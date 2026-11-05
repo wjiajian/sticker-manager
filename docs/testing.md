@@ -8,6 +8,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm --dir frontend typecheck
 pnpm --dir frontend build
+pnpm --dir website build
 git diff --check
 ```
 

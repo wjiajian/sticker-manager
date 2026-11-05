@@ -1,0 +1,55 @@
+name: 部署官网
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - website/**
+      - .github/workflows/deploy-website.yml
+  # 两个发版 workflow 结束时也会触发，让首屏显示新版本。
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: website/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - run: pnpm --dir website install --frozen-lockfile
+
+      - run: pnpm --dir website build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

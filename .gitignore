@@ -1,6 +1,7 @@
 node_modules/
 dist/
 target/
+.astro/
 src-tauri/gen/schemas/
 .DS_Store
 *.log
