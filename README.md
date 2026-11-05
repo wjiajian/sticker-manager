@@ -53,8 +53,6 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 - [数据和备份](https://wjiajian.github.io/sticker-manager/docs/data/)：表情存在哪里，怎样备份和恢复
 - [常见问题](https://wjiajian.github.io/sticker-manager/docs/faq/)：打不开、同步提示等问题
 
-官网打不开时，可以直接看仓库里的[文档源文件](website/src/content/docs/docs/)。
-
 ## 开发者篇
 
 ### 技术栈
