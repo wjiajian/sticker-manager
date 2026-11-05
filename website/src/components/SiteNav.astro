@@ -1,0 +1,28 @@
+---
+import { getImage } from 'astro:assets';
+import icon from '../assets/icon.png';
+import { REPO_URL, sitePath } from '../data/links';
+import Icon from './Icon.astro';
+
+interface Props {
+  home?: boolean;
+}
+
+const { home = false } = Astro.props;
+const logo = await getImage({ src: icon, width: 48, format: 'webp' });
+const homeHref = home ? '#top' : sitePath();
+---
+
+<div class="nav-shell">
+  <nav class="nav" aria-label="主导航">
+    <a class="nav-brand" href={homeHref} aria-label="表情管理器首页">
+      <img src={logo.src} alt="" width="24" height="24" />
+      <span>表情管理器</span>
+    </a>
+    <a class="nav-link" href={homeHref} aria-current={home ? 'page' : undefined}>首页</a>
+    <a class="nav-link" href={sitePath('docs/')}>使用文档</a>
+    <a class="nav-link nav-icon" href={REPO_URL} aria-label="在 GitHub 上查看">
+      <Icon name="github" />
+    </a>
+  </nav>
+</div>

@@ -1,0 +1,264 @@
+---
+import DownloadCta from '../components/DownloadCta.astro';
+import HeroStage from '../components/HeroStage.astro';
+import Icon from '../components/Icon.astro';
+import MainWindowMock from '../components/MainWindowMock.astro';
+import Shortcut from '../components/Shortcut.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteNav from '../components/SiteNav.astro';
+import SyncFolders from '../components/SyncFolders.astro';
+import TryPanel from '../components/TryPanel.astro';
+import { sitePath } from '../data/links';
+import { stickerSrc } from '../data/stickers';
+import Base from '../layouts/Base.astro';
+import '../styles/home.css';
+
+const title = '表情管理器：macOS 和 Windows 上的表情包管理工具';
+const description =
+  '在任何应用里按快捷键呼出表情面板，输入文字搜索，单击复制。发出去的是原图，免费开源，不用注册账号。';
+
+const transparentSticker = await stickerSrc('zuiqiang', 200);
+
+const taglineLines = [
+  ['表情包', '散落在', '聊天记录'],
+  ['和', '下载文件夹里，'],
+  ['现在', '都在', '一个地方。'],
+];
+
+const faqs = [
+  ['免费吗？', '免费。代码在 GitHub 上以 MIT 许可开源，也不用注册账号。'],
+  [
+    '为什么系统会拦截？',
+    '安装包没有 Apple 开发者签名，也没有经过公证，macOS 第一次打开时会拦下来。在「系统设置 › 隐私与安全性」里点「仍要打开」，放行一次就行。Windows 安装包同样没有代码签名，也可能弹出提示。',
+  ],
+  ['支持哪些系统？', 'macOS 14 及以上的 Apple 芯片电脑，以及 Windows x64。Windows 有安装版和便携版。'],
+  ['Intel Mac 能用吗？', '暂时不能，目前只发布 Apple 芯片版本。'],
+  [
+    '数据存在哪？',
+    '表情和整理信息都在本机的一个文件夹里。开了同步后，也会存到你选的存储里。同步内容没有端到端加密，存储服务能看到你的原图。',
+  ],
+  [
+    '能在哪些聊天软件里用？',
+    '能粘贴图片的地方都能用，比如微信、QQ 和飞书。粘贴后显示成图片还是文件，由聊天软件决定。',
+  ],
+  ['能在多台电脑上用吗？', '能。在「偏好设置 › 同步」里选同一个存储位置，两边的表情就会合并。'],
+];
+---
+
+<Base title={title} description={description}>
+  <SiteNav home />
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <h1 id="hero-title" class="hero-title">
+            <span>想发的那张表情，</span>
+            <span>一搜就有</span>
+          </h1>
+          <p class="hero-sub">
+            <span>在任何应用里按 <Shortcut /> 呼出表情面板，</span>
+            <span>输入文字搜索，单击复制，回到聊天窗口粘贴。</span>
+          </p>
+          <DownloadCta>
+            <span>免费开源 · 不用注册账号 · 表情只存在你的电脑和你选的存储里</span>
+          </DownloadCta>
+        </div>
+        <HeroStage />
+      </div>
+    </section>
+
+    <section id="try" class="section" aria-labelledby="try-title">
+      <div class="wrap split">
+        <div class="split-text reveal">
+          <h2 id="try-title" class="sec-title">不用离开聊天窗口</h2>
+          <p class="sec-body">
+            按 <Shortcut />，面板出现在鼠标所在的屏幕上。直接打字搜索，名称、配文和分类都能搜到，单击就复制好了。
+          </p>
+          <ul class="points">
+            <li><strong>也能拖进去</strong>：把表情直接拖进聊天窗口发送。</li>
+            <li><strong>常用的按数字键</strong>：没在搜索时，按 1 到 8 直接复制最近用过的表情。</li>
+            <li><strong>悬浮球一点就开</strong>：不想按快捷键，就单击屏幕边缘的悬浮球。</li>
+          </ul>
+        </div>
+        <div class="split-visual reveal">
+          <TryPanel />
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="original-title">
+      <div class="wrap split">
+        <div class="split-visual reveal">
+          <div class="stage original-stage">
+            <figure>
+              <img
+                src={transparentSticker}
+                alt="背景透明的最强表情，直接贴在浅蓝色底上"
+                width="200"
+                height="200"
+                loading="lazy"
+              />
+              <figcaption>WebP · 透明背景还在</figcaption>
+            </figure>
+            <figure>
+              <img
+                class="original-gif"
+                src={sitePath('media/cooking.gif')}
+                alt="循环播放的动图表情，角色在锅边挥动木勺"
+                width="172"
+                height="200"
+                loading="lazy"
+              />
+              <figcaption>GIF · 动画还在</figcaption>
+            </figure>
+          </div>
+        </div>
+        <div class="split-text reveal">
+          <h2 id="original-title" class="sec-title">发出去的是原图</h2>
+          <p class="sec-body">
+            复制和拖出的都是原文件，不压缩，也不转格式。PNG、JPG、WebP、GIF 和 APNG 都保留透明背景和动画。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-band" aria-labelledby="organize-title">
+      <div class="wrap">
+        <div class="sec-intro reveal">
+          <h2 id="organize-title" class="sec-title">整理一次，以后都省事</h2>
+          <p class="sec-body">把聊天记录、下载文件夹和相册里的表情都导进来，每张归到一个分类。</p>
+        </div>
+        <ul class="three reveal">
+          <li><strong>按文件夹自动分类</strong>导入文件夹时，文件夹名就是分类名。</li>
+          <li>
+            <strong>同一张图只存一份</strong>重复导入不会多出一张，已有的表情保持原来的名字和分类。
+          </li>
+          <li><strong>配文也能搜</strong>给表情写上「收到」，以后搜「收到」就能找到。</li>
+        </ul>
+        <div class="reveal">
+          <MainWindowMock />
+        </div>
+      </div>
+    </section>
+
+    <section class="section tagline-section" aria-label="一句话说明">
+      <p id="tagline" class="tagline">
+        {
+          taglineLines.map((words) => (
+            <span class="tagline-line">
+              {words.map((word) => (
+                <span class="word">{word}</span>
+              ))}
+            </span>
+          ))
+        }
+      </p>
+    </section>
+
+    <section class="section" aria-labelledby="sync-title">
+      <div class="wrap split">
+        <div class="split-text reveal">
+          <h2 id="sync-title" class="sec-title">多台电脑同步，用你自己的存储</h2>
+          <p class="sec-body">
+            没有自建服务器，也不经过任何第三方服务。选一个存储位置，另一台电脑连到同一个位置，两边的表情就会合并。
+          </p>
+          <ul class="points">
+            <li><strong>同步文件夹</strong>：放在 iCloud 云盘、Dropbox 这类同步盘里。</li>
+            <li><strong>WebDAV</strong>：填地址、用户名和密码。</li>
+            <li><strong>Cloudflare R2 和 S3 兼容存储</strong>：用你自己的存储桶。</li>
+          </ul>
+        </div>
+        <div class="split-visual reveal">
+          <SyncFolders />
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-flush" aria-label="其他功能">
+      <div class="wrap cards reveal">
+        <article class="card">
+          <Icon name="undo" size={24} />
+          <h3>删错了能找回</h3>
+          <p>删除的表情在「最近删除」里保留 30 天，刚删完的 10 秒内还能直接撤销。</p>
+        </article>
+        <article class="card">
+          <Icon name="halfCircle" size={24} />
+          <h3>浅色和深色</h3>
+          <p>默认跟随系统，也可以固定一种，主窗口、表情面板和悬浮球一起切换。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="faq" class="section section-band" aria-labelledby="faq-title">
+      <div class="wrap">
+        <h2 id="faq-title" class="sec-title reveal">常见问题</h2>
+        <dl class="faq reveal">
+          {
+            faqs.map(([question, answer]) => (
+              <div>
+                <dt>{question}</dt>
+                <dd>{answer}</dd>
+              </div>
+            ))
+          }
+        </dl>
+      </div>
+    </section>
+
+    <section class="section final" aria-labelledby="final-title">
+      <div class="final-inner reveal">
+        <h2 id="final-title" class="sec-title">下次想发表情，搜一下就有</h2>
+        <p class="sec-body final-body">免费开源，不用注册账号。</p>
+        <DownloadCta />
+      </div>
+    </section>
+  </main>
+
+  <SiteFooter />
+</Base>
+
+<script>
+  const root = document.documentElement;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (!reduced && 'IntersectionObserver' in window) {
+    root.classList.add('armed');
+
+    const reveals = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add('in');
+          reveals.unobserve(entry.target);
+        }
+      },
+      { threshold: 0.12 },
+    );
+    document.querySelectorAll('.reveal').forEach((element) => reveals.observe(element));
+
+    // 随滚动逐词点亮，点亮后不再变暗。
+    const tagline = document.getElementById('tagline')!;
+    const words = [...tagline.querySelectorAll('.word')];
+    let lit = 0;
+    let frame = 0;
+
+    const update = () => {
+      frame = 0;
+      const box = tagline.getBoundingClientRect();
+      const view = window.innerHeight;
+      const progress = (view * 0.8 - box.top) / (box.height + view * 0.3);
+      const next = Math.min(words.length, Math.max(lit, Math.ceil(progress * words.length)));
+      for (let index = lit; index < next; index += 1) words[index]?.classList.add('on');
+      lit = next;
+      if (lit === words.length) window.removeEventListener('scroll', onScroll);
+    };
+
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    update();
+  }
+</script>

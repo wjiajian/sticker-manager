@@ -1,0 +1,124 @@
+---
+import { stickerSrc } from '../data/stickers';
+import Icon from './Icon.astro';
+
+const library = [
+  ['全部表情', 18],
+  ['最近使用', 6],
+  ['收藏', 3],
+  ['未分类', 2],
+  ['最近删除', 0],
+] as const;
+
+const categories = [
+  ['开心', 7, '#F2B705'],
+  ['打工', 4, '#3E7BFA'],
+  ['困惑', 2, '#8A8A8A'],
+  ['生气', 2, '#E5484D'],
+  ['晚安', 1, '#7A5AF8'],
+] as const;
+
+const wallKeys = [
+  'zuiqiang',
+  'xiaban',
+  'moyu',
+  'nandaoshuo',
+  'bukeyi',
+  'zhouwu',
+  'zuohaole',
+  'ciallo',
+  'ji',
+  'nicaisha',
+  'youele',
+  'chibaobao',
+  'taibangle',
+  'dadeyaolaila',
+  'touxian',
+];
+const wall = await Promise.all(
+  wallKeys.map(async (key) => ({ key, src: await stickerSrc(key, 120) })),
+);
+const selected = await stickerSrc('zuohaole', 200);
+---
+
+<div
+  class="mock"
+  role="img"
+  aria-label="表情管理器主窗口：左栏是仓库和分类，中间是表情网格和导入结果，右侧详情栏显示选中表情的分类和配文"
+>
+  <div class="window-bar mock-bar">
+    <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+    <div class="mock-search-wrap">
+      <div class="mock-search">
+        <Icon name="search" size={16} />
+        <span class="mock-search-text">搜索表情、分类或配文</span>
+        <span class="mock-shortcut">⌘K</span>
+      </div>
+    </div>
+    <div class="mock-import">导入表情</div>
+  </div>
+
+  <div class="mock-body">
+    <div class="mock-side">
+      <div class="mock-side-title">仓库</div>
+      {
+        library.map(([name, count], index) => (
+          <div class:list={['mock-row', { 'mock-row-on': index === 0 }]}>
+            <span>{name}</span>
+            <span>{count}</span>
+          </div>
+        ))
+      }
+      <div class="mock-side-title mock-side-gap">分类</div>
+      {
+        categories.map(([name, count, color]) => (
+          <div class="mock-row mock-category">
+            <i style={`background:${color}`} />
+            <span>{name}</span>
+            <span>{count}</span>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="mock-main">
+      <div class="mock-head">
+        <div class="mock-heading">
+          <span class="mock-title">全部表情</span>
+          <span class="mock-count">18 张</span>
+        </div>
+        <div class="mock-tabs">
+          <span class="mock-tab-on">全部</span>
+          <span>静态</span>
+          <span>动图</span>
+        </div>
+      </div>
+      <div class="mock-result">
+        <span>新增 12 张，3 张已存在</span>
+        <span class="mock-result-action">给这批表情设分类…</span>
+      </div>
+      <div class="mock-grid">
+        {
+          wall.map(({ key, src }) => (
+            <div class="mock-tile" data-copied={key === 'zuohaole' ? '' : undefined}>
+              <img src={src} alt="" width="120" height="120" loading="lazy" />
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <div class="mock-detail">
+      <div class="mock-preview">
+        <img src={selected} alt="" width="200" height="200" loading="lazy" />
+      </div>
+      <div class="mock-name">我坐好了</div>
+      <div class="mock-copy">复制</div>
+      <div class="mock-label">分类</div>
+      <div class="mock-category-value"><i></i><span>回复</span></div>
+      <div class="mock-label">配文</div>
+      <div class="mock-caption">收到</div>
+    </div>
+  </div>
+</div>
+<p class="mock-note">示意图按 macOS 版绘制，Windows 版的窗口样式和快捷键略有不同。</p>

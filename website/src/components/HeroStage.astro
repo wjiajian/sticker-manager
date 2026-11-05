@@ -1,0 +1,84 @@
+---
+import { stickerSrc } from '../data/stickers';
+import Icon from './Icon.astro';
+import StickerTile from './StickerTile.astro';
+
+const tileKeys = [
+  'xiaban',
+  'moyu',
+  'zhouwu',
+  'touxian',
+  'chibaobao',
+  'sidiaole',
+  'youele',
+  'ji',
+  'ciallo',
+  'huozhe',
+  'bulai',
+  'zuohaole',
+];
+const tiles = await Promise.all(tileKeys.map((key) => stickerSrc(key, 80)));
+const sent = await stickerSrc('xiaban', 128);
+const reply = await stickerSrc('zhouwu', 128);
+---
+
+<div
+  class="stage hero-stage"
+  role="img"
+  aria-label="电脑桌面上开着一个聊天窗口，刚从旁边的表情面板复制了一张下班表情发出去，屏幕右侧边缘有黄色的悬浮球"
+>
+  <div class="chat">
+    <div class="window-bar">
+      <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="chat-title">产品小组</span>
+    </div>
+    <div class="chat-body">
+      <div class="message">
+        <span class="avatar avatar-lin">林</span>
+        <span class="bubble">版本发完了吗</span>
+      </div>
+      <div class="message">
+        <span class="avatar avatar-zhe">哲</span>
+        <span class="bubble">发完了，今天能准点走</span>
+      </div>
+      <div class="message message-mine">
+        <img class="sent" src={sent} alt="" width="128" height="128" />
+      </div>
+      <div class="message">
+        <span class="avatar avatar-lin">林</span>
+        <img class="sent sent-white" src={reply} alt="" width="128" height="128" />
+      </div>
+    </div>
+    <div class="chat-input">发消息</div>
+  </div>
+
+  <div class="panel hero-panel">
+    <div class="panel-top">
+      <div class="search search-active">
+        <Icon name="search" size={16} />
+        <span>下班</span>
+      </div>
+      <div class="pin"><Icon name="pushPin" size={16} /></div>
+    </div>
+    <div class="tile-grid">
+      {tiles.map((src, index) => <StickerTile src={src} copied={index === 0} />)}
+    </div>
+    <div class="panel-hint">单击复制 · 拖出发送 · Esc 收起</div>
+  </div>
+
+  <div class="ball">
+    <svg
+      viewBox="16 22 32 28"
+      width="36"
+      height="32"
+      fill="none"
+      stroke="#1F1F1F"
+      stroke-width="3.5"
+      stroke-linecap="round"
+      aria-hidden="true"
+    >
+      <path d="M21 31q4 -5 8 0M35 31q4 -5 8 0"></path>
+      <path d="M24 41q8 8 16 0"></path>
+    </svg>
+  </div>
+</div>
