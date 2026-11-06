@@ -5,8 +5,9 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSyncStatus, syncLabel, deviceTime, syncStateLabel, restoringLibrary } from "../main/useSyncStatus";
 import { SyncIcon } from "../main/SyncIcon";
-import { ipc, type Sticker } from "../../lib/ipc";
+import { ipc, type Sticker, type StickerPageFilter } from "../../lib/ipc";
 import { keepFirstStickerPage, useLibraryChangedEvents, useLibraryOverview, useStickerPages, useStickers, useCategories } from "../../lib/queries";
+import { LIBRARY_VIEWS } from "../main/libraryViews";
 import { StickerImage } from "../main/StickerImage";
 import { sortStickers, useUsageSnapshot } from "../main/stickerList";
 import { useDragOut } from "../main/useDragOut";
@@ -14,6 +15,7 @@ import { usePanelActions } from "./usePanelActions";
 import { previewDescription, previewSticker } from "../../lib/preview";
 import { usePreview } from "./usePreview";
 import { GridSkeleton, useDelayedLoading } from "../../components/Skeleton";
+import { CategoryFilter, type CategoryFilterOption } from "./CategoryFilter";
 
 const EMPTY: Sticker[] = [];
 
@@ -35,8 +37,20 @@ export function Panel() {
   const usage = useUsageSnapshot(session);
   const overview = useLibraryOverview();
   const recentQuery = useStickers("recent");
-  const pages = useStickerPages();
   const categories = useCategories();
+  const [chosenFilter, setChosenFilter] = useState<StickerPageFilter>("all");
+  function libraryOption(filter: "all" | "uncategorized"): CategoryFilterOption {
+    const { label, icon } = LIBRARY_VIEWS.find(({ view }) => view === filter)!;
+    return { filter, name: label, icon, count: overview.data?.[filter] };
+  }
+  const filterOptions: CategoryFilterOption[] = [
+    libraryOption("all"),
+    libraryOption("uncategorized"),
+    ...(categories.data ?? []).map((category) => ({ filter: { category: category.id }, name: category.name, count: category.stickerCount, color: category.color })),
+  ];
+  // 选中的分类被删掉（比如其他设备同步过来）时退回全部表情。
+  const filterOption = filterOptions.find(({ filter }) => JSON.stringify(filter) === JSON.stringify(chosenFilter)) ?? filterOptions[0];
+  const pages = useStickerPages(filterOption.filter);
   const eventError = useLibraryChangedEvents();
   const actions = usePanelActions();
   const resetActions = actions.reset;
@@ -95,6 +109,7 @@ export function Panel() {
     function opened() {
       if (disposed) return;
       setText(""); setQuery(""); setSelectedId(null); setError(null); setSession((count) => count + 1);
+      setChosenFilter("all");
       composingRef.current = false; setComposing(false);
       resetActions();
       keepFirstStickerPage(client);
@@ -203,13 +218,16 @@ export function Panel() {
               </div>
             </section>
             <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="all-heading" aria-busy={pages.isPending}>
-              <div className="mb-2 flex shrink-0 justify-between px-1 text-xs text-ink-secondary [&_h2]:font-semibold [&_h2]:text-ink-tertiary">
-                <h2 id="all-heading">全部表情</h2>
-                {overview.data && <span>{overview.data.all} 张</span>}
+              <div className="mb-2 flex shrink-0 justify-between gap-2 px-1 text-xs text-ink-secondary [&_h2]:font-semibold [&_h2]:text-ink-tertiary">
+                <CategoryFilter key={session} headingId="all-heading" options={filterOptions} selected={filterOption}
+                  onSelect={(filter) => { setChosenFilter(filter); allScroll.current?.scrollTo({ top: 0 }); }}
+                  onClose={() => input.current?.focus({ preventScroll: true })} />
+                {filterOption.count !== undefined && <span className="shrink-0">{filterOption.count} 张</span>}
               </div>
               <div ref={allScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {pages.isPending ? allSkeleton ? <GridSkeleton panel /> : null
-                  : <div className="grid grid-cols-4 gap-2">{all.map((sticker) => tile(sticker, "all"))}</div>}
+                  : all.length ? <div className="grid grid-cols-4 gap-2">{all.map((sticker) => tile(sticker, "all"))}</div>
+                  : <div className="flex h-full items-center justify-center text-ink-secondary"><p>这里还没有表情</p></div>}
                 {hasNextPage && <div ref={sentinel} className="h-px" aria-hidden />}
               </div>
             </section>

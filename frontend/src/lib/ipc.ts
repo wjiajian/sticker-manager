@@ -12,6 +12,8 @@ export interface LibraryOverview {
 
 export type FixedLibraryView = "all" | "recent" | "favorites" | "uncategorized" | "recentlyDeleted";
 export type LibraryView = FixedLibraryView | { category: string };
+/** 分页读取能用的筛选。 */
+export type StickerPageFilter = "all" | "uncategorized" | { category: string };
 
 export interface Category {
   id: string;
@@ -141,7 +143,7 @@ export const ipc = {
   globalShortcutError: () => invoke<string | null>("global_shortcut_error"),
   libraryOverview: () => invoke<LibraryOverview>("library_overview"),
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
-  listStickersPage: (after: StickerCursor | null, limit: number) => invoke<StickerPage>("list_stickers_page", { after, limit }),
+  listStickersPage: (filter: StickerPageFilter, after: StickerCursor | null, limit: number) => invoke<StickerPage>("list_stickers_page", { filter, after, limit }),
   searchStickers: (query: string) => invoke<Sticker[]>("search_stickers", { query }),
   categories: () => invoke<CategorySummary[]>("categories"),
   sticker: (id: string) => invoke<Sticker | null>("sticker", { id }),
