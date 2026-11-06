@@ -5,7 +5,7 @@ import { Button } from "../../components/Button";
 import { Switch } from "../../components/Switch";
 import { ipc, type Settings, type SyncStatus, type UpdateStatus } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
-import { navigation, selectedNavigation } from "./Sidebar";
+import { navigation, selectedNavigation } from "./libraryViews";
 import { SyncPreferences } from "./SyncPreferences";
 import { downloadLabel, focusOpener } from "./useUpdate";
 import { syncTime } from "./useSyncStatus";

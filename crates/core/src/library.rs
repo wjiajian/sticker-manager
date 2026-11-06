@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{Connection, Row, params_from_iter};
+use rusqlite::{Connection, Row, ToSql, params_from_iter};
 use serde::{Deserialize, Serialize};
 
 use crate::{Category, Device, Error, Result, db, deletion::RETENTION_MS};
@@ -69,6 +69,15 @@ pub struct Sticker {
 pub struct StickerCursor {
     pub added_at: i64,
     pub id: String,
+}
+
+/// 分页读取时能用的筛选。这几种都按添加时间倒序，分页位置才通用。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StickerPageFilter {
+    All,
+    Uncategorized,
+    Category(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -151,31 +160,39 @@ impl Library {
         self.query_stickers(filter, order, category_id.as_slice())
     }
 
-    /// 按添加时间倒序分页列出未删除的表情，`after` 为空时从第一页开始。
+    /// 按添加时间倒序分页列出符合筛选的未删除表情，`after` 为空时从第一页开始。
     /// 读取期间新导入的表情排在最前面，不会让后面的页重复出现已读过的表情。
     pub fn list_stickers_page(
         &self,
+        filter: &StickerPageFilter,
         after: Option<&StickerCursor>,
         limit: u32,
     ) -> Result<StickerPage> {
         let limit = limit.max(1) as usize;
+        let (category_filter, category_id) = match filter {
+            StickerPageFilter::All => ("", None),
+            StickerPageFilter::Uncategorized => ("AND category_id IS NULL", None),
+            StickerPageFilter::Category(id) => ("AND category_id = ?4", Some(id)),
+        };
+        let added_at = after.map(|cursor| cursor.added_at);
+        let id = after.map(|cursor| cursor.id.as_str());
+        let fetch = limit as i64 + 1;
+        let mut parameters: Vec<&dyn ToSql> = vec![&added_at, &id, &fetch];
+        if let Some(category_id) = category_id {
+            parameters.push(category_id);
+        }
         // 多读一张来判断还有没有下一页；先在子查询里分页，使用次数等列只为这一页计算。
         let mut statement = self.conn.prepare(&format!(
             "SELECT {STICKER_COLUMNS} FROM stickers s WHERE s.id IN (
-                 SELECT id FROM stickers WHERE deleted_at IS NULL
+                 SELECT id FROM stickers WHERE deleted_at IS NULL {category_filter}
                      AND (?1 IS NULL OR added_at < ?1 OR (added_at = ?1 AND id < ?2))
                  ORDER BY added_at DESC, id DESC LIMIT ?3)
              ORDER BY s.added_at DESC, s.id DESC"
         ))?;
         let mut stickers = statement
-            .query_map(
-                rusqlite::params![
-                    after.map(|cursor| cursor.added_at),
-                    after.map(|cursor| cursor.id.as_str()),
-                    limit as i64 + 1
-                ],
-                |row| Sticker::from_row(row, &self.root),
-            )?
+            .query_map(parameters.as_slice(), |row| {
+                Sticker::from_row(row, &self.root)
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let more = stickers.len() > limit;
         stickers.truncate(limit);
@@ -392,21 +409,77 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        let first = library.list_stickers_page(None, 2).unwrap();
+        let first = library
+            .list_stickers_page(&StickerPageFilter::All, None, 2)
+            .unwrap();
         assert_eq!(ids(&first), ["a", "c"]);
         // 第一页读完后才导入的表情排在最前，不会出现在后面的页里。
         library.conn.execute(
             "INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at) VALUES ('new', 'h7', 'png', 'new', 1, 1, 1, 99)",
             [],
         ).unwrap();
-        let second = library.list_stickers_page(first.next.as_ref(), 2).unwrap();
+        let second = library
+            .list_stickers_page(&StickerPageFilter::All, first.next.as_ref(), 2)
+            .unwrap();
         assert_eq!(ids(&second), ["b", "d"]);
         assert_eq!(second.stickers[0].category.as_ref().unwrap().name, "打工");
-        let last = library.list_stickers_page(second.next.as_ref(), 2).unwrap();
+        let last = library
+            .list_stickers_page(&StickerPageFilter::All, second.next.as_ref(), 2)
+            .unwrap();
         assert_eq!(ids(&last), ["e"]);
         assert_eq!(last.next, None);
         // 刚好读完一整页时也知道没有下一页，不用再请求一次空页。
-        assert_eq!(library.list_stickers_page(None, 6).unwrap().next, None);
+        assert_eq!(
+            library
+                .list_stickers_page(&StickerPageFilter::All, None, 6)
+                .unwrap()
+                .next,
+            None
+        );
+    }
+
+    #[test]
+    fn pages_only_contain_stickers_matching_the_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        library.conn.execute_batch(
+            "INSERT INTO categories (id, name, color, position) VALUES
+                ('work', '打工', '#3E7BFA', 0),
+                ('cat', '猫', '#3E7BFA', 1);
+             INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at, deleted_at, category_id) VALUES
+                ('a', 'h1', 'png', 'a', 1, 1, 1, 50, NULL, 'work'),
+                ('b', 'h2', 'png', 'b', 1, 1, 1, 40, NULL, NULL),
+                ('c', 'h3', 'png', 'c', 1, 1, 1, 30, NULL, 'work'),
+                ('d', 'h4', 'png', 'd', 1, 1, 1, 20, NULL, 'cat'),
+                ('e', 'h5', 'png', 'e', 1, 1, 1, 10, NULL, 'work'),
+                ('gone', 'h6', 'png', 'gone', 1, 1, 1, 5, 60, 'work'),
+                ('lost', 'h7', 'png', 'lost', 1, 1, 1, 4, 60, NULL);",
+        ).unwrap();
+        let ids = |page: &StickerPage| {
+            page.stickers
+                .iter()
+                .map(|s| s.id.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let work = StickerPageFilter::Category("work".into());
+        let first = library.list_stickers_page(&work, None, 2).unwrap();
+        assert_eq!(ids(&first), ["a", "c"]);
+        // 分页位置在筛选后的列表里接着往下读，不会混进其他分类。
+        let second = library
+            .list_stickers_page(&work, first.next.as_ref(), 2)
+            .unwrap();
+        assert_eq!(ids(&second), ["e"]);
+        assert_eq!(second.next, None);
+
+        let uncategorized = library
+            .list_stickers_page(&StickerPageFilter::Uncategorized, None, 10)
+            .unwrap();
+        assert_eq!(ids(&uncategorized), ["b"]);
+
+        let empty = StickerPageFilter::Category("missing".into());
+        let page = library.list_stickers_page(&empty, None, 10).unwrap();
+        assert!(page.stickers.is_empty());
     }
 
     #[test]

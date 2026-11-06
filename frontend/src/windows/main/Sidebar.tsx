@@ -4,14 +4,11 @@ import { CategoryDot } from "../../components/CategoryDot";
 import { ipc, type CategorySummary, type SyncStatus } from "../../lib/ipc";
 import { useCategories, useLibraryMutation, useLibraryOverview } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
-import { LIBRARY_VIEWS } from "./libraryViews";
+import { LIBRARY_VIEWS, navigation, selectedNavigation } from "./libraryViews";
 import { CategoryCreateDialog } from "./CategoryCreateDialog";
 import { useCategoryMenu, type RenameTarget } from "./useCategoryMenu";
 import { SyncCard } from "./SyncCard";
 import { CategorySkeleton, useDelayedLoading } from "../../components/Skeleton";
-
-export const navigation = "interactive relative flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover active:scale-98";
-export const selectedNavigation = "bg-surface font-semibold windows:before:absolute windows:before:top-2 windows:before:left-0 windows:before:h-3 windows:before:w-0.75 windows:before:rounded-full windows:before:bg-accent";
 
 export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => void; onSync: (button: HTMLButtonElement) => void; sync?: SyncStatus }) {
   const { data: overview } = useLibraryOverview();

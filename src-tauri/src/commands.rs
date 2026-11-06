@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use serde::{Serialize, Serializer};
 use sticker_core::{
     Category, CategorySummary, ImportReport, Library, LibraryOverview, LibraryView, Sticker,
-    StickerCursor, StickerPage,
+    StickerCursor, StickerPage, StickerPageFilter,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -74,11 +74,12 @@ pub async fn list_stickers(app: AppHandle, view: LibraryView) -> CommandResult<V
 #[tauri::command]
 pub async fn list_stickers_page(
     app: AppHandle,
+    filter: StickerPageFilter,
     after: Option<StickerCursor>,
     limit: u32,
 ) -> CommandResult<StickerPage> {
     with_library(app, move |library| {
-        Ok(library.list_stickers_page(after.as_ref(), limit)?)
+        Ok(library.list_stickers_page(&filter, after.as_ref(), limit)?)
     })
     .await
 }
