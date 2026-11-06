@@ -51,6 +51,8 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const sortMenu = useSortMenu();
   const [tileSizeError, setTileSizeError] = useState<string | null>(null);
   const recentlyDeleted = !searchQuery && view === "recentlyDeleted";
+  // 单个分类里每张都一样；最近删除的格子底部写着剩余天数。
+  const showCategory = Boolean(searchQuery) || (typeof view === "string" && view !== "recentlyDeleted");
   const { data: categories } = useCategories();
   const label = searchQuery ? `搜索“${searchQuery}”` : typeof view === "string"
     ? LIBRARY_VIEWS.find((v) => v.view === view)?.label
@@ -183,6 +185,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
               onSelect={(mode) => choose(sticker, mode)}
               onMenu={(x, y) => menus.popup(sticker, x, y)}
               actions={actions}
+              showCategory={showCategory}
             />
           ))}
         </TileGrid>

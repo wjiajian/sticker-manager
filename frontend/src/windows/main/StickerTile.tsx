@@ -1,5 +1,6 @@
 import { CheckIcon } from "@phosphor-icons/react";
 import { useRef, type Ref } from "react";
+import { CategoryDot } from "../../components/CategoryDot";
 import type { Sticker } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
 import { useUiStore } from "../../stores/ui";
@@ -14,7 +15,7 @@ const THUMBNAIL_SIZE = 256;
 /** 点击怎样改变选中：换成这一张、加入或移出多选、从起点连选到这一张。 */
 export type SelectMode = "replace" | "toggle" | "range";
 
-export function StickerTile({ sticker, selected, onSelect, onMenu, actions, buttonRef, compact = false }: {
+export function StickerTile({ sticker, selected, onSelect, onMenu, actions, buttonRef, compact = false, showCategory = false }: {
   sticker: Sticker;
   selected: boolean;
   onSelect: (mode: SelectMode) => void;
@@ -22,6 +23,7 @@ export function StickerTile({ sticker, selected, onSelect, onMenu, actions, butt
   actions: StickerActions;
   buttonRef?: Ref<HTMLButtonElement>;
   compact?: boolean;
+  showCategory?: boolean;
 }) {
   const drag = useDragOut((isPressed) => actions.drag(sticker, isPressed), sticker.deletedAt !== null || actions.busy);
   const days = usePurgeDays(sticker.purgeAt);
@@ -30,12 +32,14 @@ export function StickerTile({ sticker, selected, onSelect, onMenu, actions, butt
   // 格子大到缩略图要被放大时，静态表情换成原图才清晰。动图继续用静止的缩略图，不在网格里播放。
   const thumbnailTooSmall = useUiStore((s) => s.stickerTileSize * window.devicePixelRatio > THUMBNAIL_SIZE);
   const useOriginal = thumbnailTooSmall && !compact && !sticker.animated;
+  const categoryName = showCategory && days === null ? sticker.category?.name ?? "未分类" : null;
   return (
     <button
       ref={buttonRef}
       id={compact ? undefined : `sticker-${sticker.id}`}
       type="button"
       aria-label={sticker.name}
+      aria-description={categoryName ?? undefined}
       aria-pressed={selected}
       aria-haspopup="menu"
       onPointerDownCapture={(event) => {
@@ -80,7 +84,12 @@ export function StickerTile({ sticker, selected, onSelect, onMenu, actions, butt
           {selected && <CheckIcon size={12} weight="bold" />}
         </span>
         {days !== null ? <span className="absolute bottom-2 left-1/2 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-sm bg-surface px-2 py-0.5 text-xs font-semibold text-ink-secondary windows:rounded-xs">{days > 0 ? `剩 ${days} 天` : "即将删除"}</span>
-          : sticker.caption && <span title={sticker.caption} className="absolute bottom-2 left-1/2 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-sm bg-ink px-2 py-0.5 text-xs font-semibold text-surface windows:rounded-xs">{sticker.caption}</span>}
+          : sticker.caption && <span title={sticker.caption} className={`absolute ${categoryName === null ? "bottom-2" : "bottom-7.5"} left-1/2 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-sm bg-ink px-2 py-0.5 text-xs font-semibold text-surface windows:rounded-xs`}>{sticker.caption}</span>}
+        {/* 固定在格子上，距边和格子内边距相同：方形表情的底边和分类条重合，各格的分类条高度和宽度都一致。 */}
+        {categoryName !== null && <span title={categoryName} className="absolute inset-x-[5px] bottom-[5px] flex items-center justify-center gap-1 bg-scrim px-1 py-0.5 text-xs font-semibold text-on-scrim">
+          {sticker.category && <CategoryDot color={sticker.category.color} />}
+          <span className="truncate">{categoryName}</span>
+        </span>}
         {sticker.animated && (
           <span aria-label="动图" className="absolute top-2 right-2 rounded-sm bg-surface px-1 text-xs font-semibold windows:rounded-xs">GIF</span>
         )}

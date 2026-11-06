@@ -34,6 +34,8 @@
   --color-brand: #ffc94a;
   --color-brand-ink: #1f1f1f;
   --color-overlay: rgb(31 31 31 / 0.2); /* 模态遮罩 */
+  --color-scrim: rgb(31 31 31 / 0.65); /* 压在表情上的文字底，深浅外观相同 */
+  --color-on-scrim: #ffffff;
   --color-ball-track: #e2e0d9;
   --color-switch-off: #686762;
   --shadow-ball: 0 1px 2px rgb(31 31 31 / 0.18), 0 4px 8px rgb(31 31 31 / 0.12), 0 10px 22px rgb(31 31 31 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -2px 3px rgb(31 31 31 / 0.08);
