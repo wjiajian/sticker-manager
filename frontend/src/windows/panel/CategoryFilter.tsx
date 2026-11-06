@@ -65,6 +65,13 @@ export function CategoryFilter({ headingId, options, selected, onSelect, onClose
     if (open) document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
   }, [open, activeId]);
 
+  useEffect(() => {
+    if (!open) return;
+    // 固定的面板失去焦点时不会收起，列表要和原生弹出菜单一样自己收起。
+    window.addEventListener("blur", close);
+    return () => window.removeEventListener("blur", close);
+  }, [open]);
+
   function show() {
     setActive(options.indexOf(selected));
     setOpen(true);
