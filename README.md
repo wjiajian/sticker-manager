@@ -10,6 +10,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
 ![平台 Windows x64](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
+<a href="https://linux.do" alt="LINUX DO"><img src="https://shorturl.at/ggSqS" /></a>
 
 [官网](https://wjiajian.github.io/sticker-manager/) · [下载](https://github.com/wjiajian/sticker-manager/releases/latest) · [使用文档](https://wjiajian.github.io/sticker-manager/docs/) · [开发者篇](#开发者篇) · [更新记录](CHANGELOG.md)
 
