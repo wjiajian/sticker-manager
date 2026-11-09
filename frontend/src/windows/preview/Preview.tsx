@@ -71,7 +71,8 @@ export function Preview() {
   if (!content) return null;
   return <div aria-hidden="true" className="pointer-events-none p-16">
     <div ref={card} className={`flex w-42 flex-col gap-2 rounded-2xl bg-surface p-3 shadow-preview ${content.fade ? "transition-opacity duration-300 ease-standard" : ""} ${content.fade && shown !== content.requestId ? "opacity-0" : "opacity-100"}`}>
-      <div className="flex size-36 shrink-0 items-center justify-center rounded-lg bg-tile p-4">
+      {/* 内边距 7：表情约占图片区的 90%，和主窗口、面板的格子一致。 */}
+      <div className="flex size-36 shrink-0 items-center justify-center rounded-lg bg-tile p-[7px]">
         {content.image ? <img src={content.image} alt="" draggable={false} decoding="async" className="h-full w-full object-contain" />
           : <span className="text-xs text-ink-secondary">图片无法显示</span>}
       </div>
