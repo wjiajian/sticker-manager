@@ -168,11 +168,19 @@ fn log_compaction_roundtrip(kind: &str) {
         a.sync(&storage, &manifest);
     }
     let device = a.lib.lock().unwrap().device.id.clone();
+    // WebDAV 的列举会带上目录本身（`ops/{device}/`），S3 没有目录对象；只数日志文件。
     let files = storage
         .list(&format!(".sticker-manager/ops/{device}/"))
-        .unwrap();
-    assert_eq!(files.len(), 1);
-    assert!(files[0].key.ends_with("000000000001-000000000033.jsonl"));
+        .unwrap()
+        .into_iter()
+        .filter(|f| !f.key.ends_with('/'))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        files.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
+        [format!(
+            ".sticker-manager/ops/{device}/000000000001-000000000033.jsonl"
+        )]
+    );
     b.sync(&storage, &manifest);
     assert_eq!(a.state(), b.state());
     a.lib
