@@ -438,6 +438,8 @@ impl NetworkStorage {
         object_timeout: Duration,
     ) -> Result<Self> {
         let config = config.normalized()?;
+        // reqwest 不自带加密实现，这里用更新插件已经编入的 ring；重复安装的错误可以忽略。
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             // 保留系统代理默认行为；限制重定向，reqwest 会移除跨主机认证头。

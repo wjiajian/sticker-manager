@@ -10,3 +10,27 @@ license = "MIT"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+# 发布包按体积优化；导入时的解码、缩略图和哈希保持速度优先。
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "s"
+strip = true
+
+[profile.release.package]
+adler2 = { opt-level = 3 }
+crc32fast = { opt-level = 3 }
+fdeflate = { opt-level = 3 }
+flate2 = { opt-level = 3 }
+gif = { opt-level = 3 }
+image = { opt-level = 3 }
+image-webp = { opt-level = 3 }
+miniz_oxide = { opt-level = 3 }
+png = { opt-level = 3 }
+sha2 = { opt-level = 3 }
+simd-adler32 = { opt-level = 3 }
+weezl = { opt-level = 3 }
+zlib-rs = { opt-level = 3 }
+zune-core = { opt-level = 3 }
+zune-jpeg = { opt-level = 3 }
