@@ -41,9 +41,6 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 <sub>截图和录屏来自 macOS 版。</sub>
 
-- [使用文档](#使用文档)：[安装](https://wjiajian.github.io/sticker-manager/docs/) · [快速上手](https://wjiajian.github.io/sticker-manager/docs/quick-start/) · [常见问题](https://wjiajian.github.io/sticker-manager/docs/faq/)
-- [开发者篇](#开发者篇)：[技术栈](#技术栈) · [目录结构](#目录结构) · [本地开发](#本地开发) · [提交前检查](#提交前检查) · [发布流程](#发布流程) · [贡献](#贡献)
-
 ## 使用文档
 
 安装和使用说明都在[官网](https://wjiajian.github.io/sticker-manager/docs/)上：
@@ -58,15 +55,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 
 ### 技术栈
 
-| 部分 | 选择 |
-|---|---|
-| 应用外壳 | [Tauri 2](https://tauri.app/) |
-| 核心库 | Rust，`crates/core`（crate 名 `sticker-core`）：仓库、分类、导入、搜索、删除、同步和合并规则。不依赖 Tauri，可以单独测试 |
-| 桌面壳 | `src-tauri`：Tauri 命令、窗口、托盘、悬浮球、表情面板、悬停预览、剪贴板、开机自启和应用内更新 |
-| 前端 | React + TypeScript + Vite，Tailwind CSS v4，Zustand（界面状态）+ TanStack Query（调用 Rust 命令取数据），Phosphor Icons |
-| 元数据 | SQLite（rusqlite），只由 Rust 读写 |
-| 同步网络层 | OpenDAL（WebDAV、S3 / R2）+ reqwest（rustls），不依赖 OpenSSL |
-| 包管理 | pnpm；Rust workspace（`crates/core`、`src-tauri`），edition 2024 |
+[Tauri 2](https://tauri.app/) 应用。核心逻辑是不依赖 Tauri 的 Rust 库 `crates/core`（crate 名 `sticker-core`），`src-tauri` 是桌面壳，界面用 React + TypeScript + Vite + Tailwind CSS v4，元数据存在 SQLite 里，只由 Rust 读写。完整选型和实现说明见 [docs/tech-stack.md](docs/tech-stack.md)。
 
 前端是多入口的 Vite 应用，每个窗口一个 HTML 入口：
 
@@ -77,9 +66,7 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 | `frontend/ball.html` | 悬浮球 | `frontend/src/windows/ball/` |
 | `frontend/preview.html` | 悬停预览 | `frontend/src/windows/preview/` |
 
-每个窗口能调用哪些 Tauri 命令，由 `src-tauri/permissions/*.toml` 里的白名单决定（`main.toml`、`panel.toml`、`ball.toml`、`preview.toml`），再由 `src-tauri/capabilities/*.json` 授予对应窗口。名单之外的命令会被 Tauri 拒绝，所以**新增命令时要同时加进用到它的窗口的名单**。更新插件只在 Rust 端调用，不对前端开放。
-
-更详细的说明（剪贴板策略、同步触发时机、外观、默认设置等）见 [docs/tech-stack.md](docs/tech-stack.md)。
+每个窗口能调用哪些 Tauri 命令，由 `src-tauri/permissions/` 里的白名单决定（`main.toml`、`panel.toml`、`ball.toml`、`preview.toml`），再由 `src-tauri/capabilities/*.json` 授予对应窗口。名单之外的命令会在运行时被 Tauri 拒绝，构建和测试都发现不了，所以**新增命令时要同时加进用到它的窗口的名单**。
 
 ### 目录结构
 
@@ -108,120 +95,78 @@ macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分�
 │   ├── permissions/             各窗口的命令白名单
 │   ├── capabilities/            把权限授予各窗口
 │   ├── icons/                   应用和托盘图标
-│   └── tauri.conf.json
+│   └── tauri.conf.json, tauri.windows.conf.json
 ├── design/README.md             界面设计规范
-├── docs/                        技术文档、ADR、术语表、测试、打包、待办、README 配图
-├── website/                     软件官网和使用文档（Astro + Starlight）
-└── .github/                     macOS／Windows 独立构建与发布 workflow、更新清单脚本
+├── docs/                        开发文档（见下表）和 README 配图
+├── website/                     官网和使用文档（Astro + Starlight），依赖独立
+└── .github/                     构建、发布和官网部署的 workflow，更新清单脚本
 ```
+
+| 文档 | 内容 |
+|---|---|
+| [docs/tech-stack.md](docs/tech-stack.md) | 技术选型，以及仓库、剪贴板、同步、外观等的实现说明 |
+| [docs/GLOSSARY.md](docs/GLOSSARY.md) | 术语表，界面文案和讨论都按它来 |
+| [docs/adr/](docs/adr/) | 关键取舍的理由，包括同步格式和合并规则 |
+| [docs/testing.md](docs/testing.md) | 提交前检查、网络同步的集成测试、真实窗口测试 |
+| [docs/packaging.md](docs/packaging.md) | 本地打包、发布流程、更新签名、试运行发布版 |
+| [docs/windows-validation.md](docs/windows-validation.md) | Windows 上验收过什么，还有什么没验 |
+| [design/README.md](design/README.md) | 界面设计规范 |
+| [website/README.md](website/README.md) | 官网的开发和部署 |
 
 ### 本地开发
 
-#### 环境要求
+环境要求：
 
-- macOS 14 及以上，装好 Xcode 命令行工具；或 Windows x64，装好 C++ Build Tools、Windows SDK 和 WebView2 Runtime（见[打包说明](docs/packaging.md#windows-x64-构建与验收)）
+- macOS 14 及以上，装好 Xcode 命令行工具；或 Windows x64，装好 Rust MSVC 工具链、C++ Build Tools、Windows SDK 和 WebView2 Runtime
 - Rust stable（workspace 使用 edition 2024）
 - Node.js（CI 用 22）
 - pnpm 11（`frontend/package.json` 的 `packageManager` 固定为 `pnpm@11.22.0`）
 
-#### 安装依赖并启动
-
-前端依赖和脚本都在 `frontend/` 里，下面的命令在仓库根目录运行：
+前端依赖和脚本都在 `frontend/` 里，命令在仓库根目录运行：
 
 ```bash
 pnpm --dir frontend install
 ```
 
 ```bash
-pnpm --dir frontend tauri dev
-```
-
-`tauri dev` 会先执行 `tauri.conf.json` 里的 `beforeDevCommand`（`pnpm dev`，在 1420 端口启动 Vite），再编译并启动应用。前端改动热更新，Rust 改动自动重新编译。
-
-`frontend/package.json` 里的脚本（在 `frontend/` 里运行，或者在根目录加上 `--dir frontend`）：
-
-| 脚本 | 作用 |
-|---|---|
-| `pnpm dev` | 只启动 Vite 开发服务器，一般由 `tauri dev` 调用 |
-| `pnpm build` | `tsc && vite build`，构建前端到 `frontend/dist/` |
-| `pnpm typecheck` | `tsc` 类型检查 |
-| `pnpm tauri <命令>` | 回到仓库根目录调用 Tauri CLI，比如 `dev`、`build`；相对路径参数按根目录算 |
-
-本地打包 DMG 的命令和注意事项见 [docs/packaging.md](docs/packaging.md)。
-
-#### 用 `STICKER_LIBRARY_DIR` 隔离仓库
-
-> [!WARNING]
-> 开发构建默认打开的是真实仓库（见[数据和备份](https://wjiajian.github.io/sticker-manager/docs/data/)）。调试和测试时请换成临时仓库。
-
-```bash
 STICKER_LIBRARY_DIR="$(mktemp -d)" pnpm --dir frontend tauri dev
 ```
 
-- 必须是绝对路径。相对路径会直接报启动错误，因为它会落在 `src-tauri/` 下，写入的文件又会触发 `tauri dev` 重新编译。
-- 目录不存在时会自动新建。
-- 只在开发构建里生效；release 构建会忽略这个变量。macOS 打包版通过隔离 `HOME` 验收；Windows 便携版通过程序旁的 `portable.flag` 和临时程序目录隔离，做法见 [docs/packaging.md](docs/packaging.md)。
+`tauri dev` 先在 1420 端口启动 Vite，再编译并启动应用。前端改动热更新，Rust 改动自动重新编译。
 
-另外两个只在开发构建里生效的调试变量：
+> [!WARNING]
+> 不设 `STICKER_LIBRARY_DIR` 时，开发构建打开的是真实仓库（位置见[数据和备份](https://wjiajian.github.io/sticker-manager/docs/data/)）。调试和测试请一律指向临时目录。
+
+只在开发构建里生效的环境变量，发布版全部忽略：
 
 | 变量 | 作用 |
 |---|---|
+| `STICKER_LIBRARY_DIR` | 仓库目录。必须是绝对路径，相对路径会报启动错误；目录不存在时自动新建 |
 | `STICKER_UPDATE_ENDPOINT` | 改从指定的 `latest.json` 地址检查更新，并打开自动检查；开发构建只下载和校验签名，不安装 |
 | `STICKER_FORCE_METERED=1` | 把当前网络当作按流量计费，用来测试自动暂停同步 |
+
+发布版不认 `STICKER_LIBRARY_DIR`，试运行打包版时怎样隔离见 [docs/packaging.md](docs/packaging.md#试运行发布版)。
 
 ### 提交前检查
 
 ```bash
 cargo fmt --all --check
-```
-
-```bash
 cargo clippy --workspace --all-targets -- -D warnings
-```
-
-```bash
 cargo test --workspace
-```
-
-```bash
 pnpm --dir frontend typecheck
-```
-
-```bash
 pnpm --dir frontend build
-```
-
-```bash
 pnpm --dir website build
-```
-
-```bash
 git diff --check
 ```
 
-macOS 与 Windows 分别使用独立、手动触发的安装包构建工作流，均运行类型检查和打包；Windows 可勾选 `validate` 额外运行 Rust 格式、Clippy 和测试。WebDAV 和 S3 的网络集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
+应用代码没有自动触发的 CI，这些检查要在本地跑。WebDAV 和 S3 的集成测试默认忽略，需要本机容器，跑法见 [docs/testing.md](docs/testing.md)。
 
-### 发布流程
+### 发布
 
-macOS 继续使用「构建 macOS 安装包」（[build-macos.yml](.github/workflows/build-macos.yml)）；Windows 使用独立的「构建 Windows 安装包」（[build-windows.yml](.github/workflows/build-windows.yml)）。两者均手动触发，默认只生成构建产物，勾选 `release` 才发布。下列步骤以 macOS 为例。
-
-1. **写更新记录**：在 [CHANGELOG.md](CHANGELOG.md) 里写好这个版本的 `## <版本号>` 小节。写法见文件开头的注释：面向用户，只写能感知到的变化，每条一句话，升级须知放在最前面，不用 `###` 标题。这个小节会原样显示在应用的更新对话框里，也会用作 Release 说明；找不到对应版本时退回「未发布」小节。
-2. **改版本号**：`frontend/package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三处必须一致，不一致时 workflow 直接失败。`crates/core/Cargo.toml` 的版本号习惯上一起改。
-3. **提交并推送**。
-4. **触发构建**：在仓库的 Actions 页面选「构建 macOS 安装包」，点 Run workflow。`release` 勾选项（「发布到 Release」）决定发不发版：
-   - 不勾选：只构建，DMG 在运行详情页的 Artifacts 里下载，保留 14 天。
-   - 勾选：以 `v<版本号>` 为 tag 创建 Release，tag 指向所选分支的最新提交。附件是 `sticker-manager_<版本>_aarch64.dmg`、更新包 `sticker-manager_<版本>_aarch64.app.tar.gz` 和 `latest.json`。如果这个 tag 的 Release 已经存在，只覆盖上传这三个文件，不改说明。
-
-Windows 采用相同的版本检查、可选更新签名和 Release 上传流程，附件为 NSIS 安装包、便携 ZIP 和独立的 `latest-windows.json`，不覆盖 macOS 的 `latest.json`。便携版始终手动升级。
-
-附件都用 ASCII 文件名，因为 GitHub 会去掉附件名里的中文。
-
-发布 Release 后，两个工作流都会触发「部署官网」（[deploy-website.yml](.github/workflows/deploy-website.yml)），让官网首屏显示新版本。
+每个版本开一个短期的 `release/*` 分支，只放版本号、更新记录、阻塞发布的修复和最后的验证。macOS 和 Windows 各有一个手动触发的构建 workflow，勾选 `release` 才会发布到 GitHub Release。完整步骤见 [docs/packaging.md](docs/packaging.md#发布流程)。
 
 ### 贡献
 
-- 界面文案和讨论使用 [GLOSSARY.md](docs/GLOSSARY.md) 里的术语
-- 测试实例一律用 `STICKER_LIBRARY_DIR` 指向临时目录（绝对路径），不碰真实仓库；试运行发布版时隔离 `HOME`。
-- 测试时不修改系统设置（低数据模式、减少动态效果、外观等）。需要的话请用户自己切换。
-- 新增 Tauri 命令时，记得加进用到它的窗口在 `src-tauri/permissions/` 里的白名单。
-- 其余约定见 [AGENTS.md](AGENTS.md)。
+- 界面文案和讨论使用 [GLOSSARY.md](docs/GLOSSARY.md) 里的术语。
+- PR 标题用约定式提交格式，标题和描述用英文，模板见 [PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)。
+- 真实窗口测试的规矩（临时仓库、不改系统设置、尽量不抢前台）和其余约定见 [AGENTS.md](AGENTS.md)。

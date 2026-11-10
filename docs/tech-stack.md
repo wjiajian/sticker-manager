@@ -12,36 +12,27 @@
 | 前端状态 | Zustand（界面状态）+ TanStack Query（调用 Rust 命令取数据） |
 | 图标 | Phosphor Icons（`@phosphor-icons/react`） |
 | 核心逻辑 | Rust，独立库 `crates/core/`，不依赖 Tauri |
-| 元数据 | SQLite，只由 Rust 读写 |
-| 存储后端接入 | 阻塞文件接口；同步文件夹用 `std::fs`，WebDAV / S3 / R2 用 OpenDAL 0.59.5 |
+| 元数据 | SQLite（rusqlite），只由 Rust 读写 |
+| 存储后端接入 | 阻塞文件接口；同步文件夹用 `std::fs`，WebDAV / S3 / R2 用 OpenDAL + reqwest（rustls），不依赖 OpenSSL |
 | 凭据 | 本机仓库 `local/credentials.json`（权限只限当前用户，不同步） |
 | 悬浮球窗口 | macOS：`tauri-nspanel`；Windows：置顶、不激活窗口 |
 | 拖出发送 | `tauri-plugin-drag` |
 | 全局快捷键 | `tauri-plugin-global-shortcut` |
 | 开机自启 | `tauri-plugin-autostart` |
-| 自动更新 | `tauri-plugin-updater`，读 GitHub Releases 最新版本附带的 `latest.json`；只在 Rust 端调用，前端不开放插件命令（发布流程见 [packaging.md](packaging.md)） |
-| 包管理 | pnpm；Rust workspace |
+| 自动更新 | `tauri-plugin-updater`，读 GitHub Releases 最新版本附带的更新清单（macOS `latest.json`，Windows `latest-windows.json`）；只在 Rust 端调用，前端不开放插件命令（发布流程见 [packaging.md](packaging.md)） |
+| 包管理 | pnpm；Rust workspace（`crates/core`、`src-tauri`），edition 2024 |
 
 ## 代码结构
 
-```
-/
-├── frontend/            React 界面（主窗口、悬浮球、展开面板、悬停预览）及前端配置
-├── src-tauri/           Tauri 外壳：窗口、托盘、快捷键、剪贴板、拖拽，以及转发给核心库的命令
-├── crates/
-│   └── core/            仓库、分类、导入、同步与合并规则；可单独测试
-├── design/              界面设计规范
-├── docs/                技术文档、ADR、术语表、待办
-└── website/             软件官网（占位，尚未搭建）
-```
+目录结构、各窗口的前端入口和命令白名单的规则见 [README](../README.md#开发者篇)。同步合并规则是最容易出错的部分，放在 `crates/core/` 里，脱离界面写单元测试。
 
-同步合并规则是最容易出错的部分，放在 `crates/core/` 里，脱离界面写单元测试。
+### 悬停预览窗口
 
-`src-tauri/permissions/` 里给每个窗口列了允许调用的命令（主窗口 `main.toml`，表情面板 `panel.toml`，悬浮球 `ball.toml`，悬停预览 `preview.toml`）。有了这个目录，Tauri 会拒绝名单之外的命令，所以新增命令时要同时加进用到它的窗口的名单。
-
-表情面板的预览使用 `frontend/preview.html` 独立入口，启动时创建隐藏窗口。macOS 使用不能成为 key/main 的非激活 NSPanel，层级比表情面板高一级、跨桌面与全屏并忽略鼠标；Windows 使用不可聚焦、置顶、不进任务栏、忽略鼠标的透明窗口。窗口固定为 296×392，卡片宽 168，CSS 绘制阴影并保留透明边距；页面只接收名称、次数、分类名和图片路径，不查询仓库。
-
-`capabilities/preview.json` 只授权事件监听、取消监听和 `preview_session` / `preview_ready`；面板额外允许 `show_preview` / `hide_preview`。原生层记录面板本次打开来源，在 `geometry.rs` 中计算卡片位置，macOS 全程使用 AppKit 左下原点的逻辑坐标；页面以 CSS 像素报告格子位置。单调递增的请求编号阻止旧解码回执重新显示或移动窗口。
+- 使用 `frontend/preview.html` 独立入口，启动时创建隐藏窗口，固定 296×392。卡片宽 168，阴影由 CSS 绘制，四周留透明边距。
+- macOS 是不能成为 key/main 的非激活 NSPanel，层级比表情面板高一级，跨桌面与全屏并忽略鼠标；Windows 是不可聚焦、置顶、不进任务栏、忽略鼠标的透明窗口。
+- 页面只接收名称、次数、分类名和图片路径，不查询仓库。`capabilities/preview.json` 只授权事件监听、取消监听和 `preview_session` / `preview_ready`；面板额外允许 `show_preview` / `hide_preview`。
+- 原生层记录面板本次打开的来源，在 `geometry.rs` 里计算卡片位置，macOS 全程使用 AppKit 左下原点的逻辑坐标；页面以 CSS 像素报告格子位置。
+- 单调递增的请求编号阻止过期的解码回执重新显示或移动窗口。
 
 ### 代码命名
 
@@ -78,8 +69,8 @@
 
 - macOS 仓库位于 `~/Library/Application Support/com.wjiajian.sticker-manager/`，Windows 安装版位于 `%APPDATA%\sticker-manager\`。Windows 首次启动可从旧标识符目录自动迁移，目标已有内容时保留目标仓库。便携版使用程序旁的 `data` 目录，启用方式见[打包说明](packaging.md)。
 - 表情文件按内容哈希存放；导入已有的图会合并，提示"新增 N 张，M 张已存在"。
-- 第一版支持的格式：PNG、JPG、WebP（含动图）、GIF、APNG；不支持视频。
-- 支持直接选中或拖入 `.zip`（zip 9.2.2，关闭默认 features、仅 `deflate`，纯 Rust）。包内递归识别图片，隐藏 / 系统文件和 `__MACOSX/` 忽略；嵌套压缩包及其他格式跳过，文件夹中的 `.zip` 不展开。文件名优先 UTF-8，非 UTF-8 用 GB18030 解码（encoding_rs）。不支持加密及 Deflate / Stored 以外的压缩方式；实际解压量限制为单条目 100 MB、整包 2 GB、10000 条目。
+- 支持的格式：PNG、JPG、WebP（含动图）、GIF、APNG；不支持视频。
+- 支持直接选中或拖入 `.zip`（`zip` crate 关闭默认 features、仅 `deflate`，纯 Rust）。包内递归识别图片，隐藏 / 系统文件和 `__MACOSX/` 忽略；嵌套压缩包及其他格式跳过，文件夹中的 `.zip` 不展开。文件名优先 UTF-8，非 UTF-8 用 GB18030 解码（encoding_rs）。不支持加密及 Deflate / Stored 以外的压缩方式；实际解压量限制为单条目 100 MB、整包 2 GB、10000 条目。
 - 压缩包逐条解压到 `objects/` 里的临时文件后立即导入，同一时间只有一个临时文件（macOS 图形应用默认只能同时打开 256 个文件）。条目读完时校验 CRC，损坏的条目只算它自己失败，其余照常导入；目录区读不出来时整包失败。取消在条目之间生效，已导入的保留。
 - 导入在锁外读取、哈希、解码和生成缩略图，逐张在短事务内重新查重并提交；准备阶段先短暂持锁查重，已有同图且原图和缩略图都在时跳过解码；原图发布仍按 Library → files 加锁，与同步清理协调。全窗口单批互斥，约 150ms 推送进度、每秒通知仓库变化，支持取消和给整批结果设分类；导入文件夹时新表情按所在那一层文件夹名归入分类，已在库里的不改。
 - 缩略图在每台设备上各自生成，不同步。
@@ -90,19 +81,20 @@
 
 - **复制**：macOS 统一只写一个含 `public.file-url` 的剪贴板条目，指向按表情名命名的原文件副本。不解码、不取动图首帧、不附 PNG，保留源文件的格式、透明通道和动画数据；目标应用可能呈现为图片或文件卡片，发送后是否播放仍由目标应用决定。主窗口按钮、⌘C 和悬浮面板单击使用同一策略。
 - **复制为文件**：macOS 已合并进“复制”，不再单列菜单项；⌘⇧C 保留为同一操作的快捷键。Windows 的 Ctrl+Shift+C 仍只写文件引用。
-- Windows 已验证普通复制写入 CF_DIB、PNG、CF_HDROP，复制为文件只写 CF_HDROP，透明 PNG 的 alpha 和原 GIF 字节均保留。聊天应用内的粘贴与发送效果待人工验收，格式策略沿用现有实现。详见 [Windows 验收报告](windows-validation.md)。
+- Windows 的普通复制写入 CF_DIB、PNG 和 CF_HDROP，复制为文件只写 CF_HDROP，透明 PNG 的 alpha 和原 GIF 字节都保留。聊天应用里粘贴和发送的效果还没有人工验收，见 [Windows 验收记录](windows-validation.md)。
 - **拖出发送**：在系统层发起拖拽，交出副本。
 - **在访达 / 资源管理器中显示**：显示副本。
 - 以上交出的文件引用都指向临时目录里按表情名命名的副本，保留 7 天，不把仓库里按哈希命名的原文件交给其他应用或用户改动。
-- 依据：2026-11-03 在 QQ 和飞书自己的会话里，文件 URL + PNG、只有 PNG、只有文件 URL 都能粘成图片缩略图，去掉 PNG 没有损失；飞书只有带文件 URL 时才引用原 GIF。代价是 Safari、文本编辑粘不出来（旧应用实测），接受这项取舍，不按前台应用分流。微信的外观、飞书的透明度和发送后的动画还要人工确认（见 [TODO.md](TODO.md)）。
+- 依据：2026-11-03 在 QQ 和飞书自己的会话里，文件 URL + PNG、只有 PNG、只有文件 URL 都能粘成图片缩略图，去掉 PNG 没有损失；飞书只有带文件 URL 时才引用原 GIF。代价是 Safari、文本编辑粘不出来（旧应用实测），接受这项取舍，不按前台应用分流。微信的外观、飞书的透明度和发送后的动画没有人工确认过。
 
 ## 同步
 
 方案见 [ADR 0003](adr/0003-serverless-sync.md)，删除规则见 [ADR 0004](adr/0004-soft-delete-30-days.md)，文件格式和合并细节见 [ADR 0005](adr/0005-sync-format-and-merge.md)。网络后端的容器集成测试怎么跑见 [testing.md](testing.md)。
 
-- **已实现**：同步文件夹、通用 WebDAV、Cloudflare R2 和 S3 兼容后端，共用 `crates/core/src/sync/` 的阻塞 `Storage` 接口及原有同步调度。网络层采用 OpenDAL 0.59.5、reqwest + rustls，不依赖 OpenSSL；连接与请求有按传输量放宽的超时、指数退避、Retry-After（超过 60 秒结束本轮）及取消。WebDAV 直接 PUT，父目录缺失时才建目录，读取方校验半截文件；内存后端用于逐文件延迟和收敛测试。
-- **格式 2**：原图写到分类目录，未分类写根目录；元数据位于 `.sticker-manager/`，最近删除原图位于其 `trash/`。先拉取目录再推送，远端路径变化优先；旧同步仓库需要重新创建。目录缓存按路径、大小、ETag 或修改时间判断差异，没有版本信息时接受同大小替换可能漏检。
-- **持久化**：0005 追加本机路径缓存与可重试移动意图，表情 category_id 不再进入日志。SQLite 0002 迁移为所有本机改动记录操作，即使未开启同步也生效；按字段时钟合并，保留永久删除标记和合并映射。加入或切换仓库先推完整快照。
+- **后端**：同步文件夹、通用 WebDAV、Cloudflare R2 和 S3 兼容存储，共用 `crates/core/src/sync/` 的阻塞 `Storage` 接口和同一套同步调度。网络请求有按传输量放宽的超时、指数退避、Retry-After（超过 60 秒结束本轮）和取消。WebDAV 直接 PUT，父目录缺失时才建目录，读取方校验半截文件。内存后端只用于测试。
+- **格式 2**：原图写到分类目录，未分类写根目录；元数据在 `.sticker-manager/`，最近删除的原图在其中的 `trash/`。每轮先拉取目录再推送，远端路径变化优先。格式 1 的同步仓库不迁移，需要重新创建。目录缓存按路径、大小、ETag 或修改时间判断差异，后端没有版本信息时，同大小的内容替换可能漏检。
+- **Windows 同步文件夹的文件名**：记录移动意图之前检查非法字符、结尾的空格或句点、设备保留名和过长名称，并提示用户改表情名或分类名后重试；旧客户端留下的非法目标也能在改名后重新规划。网络存储不受这些限制。
+- **持久化**：所有本机改动都记录成操作，没开启同步时也记录；按字段时钟合并，保留永久删除标记和合并映射。路径缓存和可重试的移动意图只存在本机。加入或切换同步目标时先推完整快照。
 - **会同步**：表情、分类、收藏、配文、使用记录（使用次数相加，最近一次使用时间取最晚的）。
 - **只在本机**：外观（跟随系统 / 浅色 / 深色）、悬浮球显示、位置和贴边方向、自动收起时间、首次自启初始化标记、同步后端类型、地址 / bucket / 路径 / region 等非机密参数和同步仓库 ID 存在 `<仓库>/local/settings.json`，与 `device.json` 一样不参与同步。开机自启状态每次从系统登记读取，不写入设置文件；全局快捷键也只属于本机。存储凭据（包括用户名和 Access Key ID）以明文写入 `<仓库>/local/credentials.json`（Unix 下权限 0600，临时文件写好后改名替换），不进入设置文件或 IPC 返回值；按设备 id 和目标隔离，读取成功或失败均缓存到设置改变，停止同步删除自己的条目，文件空了就删文件。不用系统钥匙串：没有固定签名身份的构建（未签名或临时签名）每次重新编译都会让钥匙串重新弹授权框；代价是备份或拷走整个仓库文件夹时凭据会跟着走。
 - **触发时机**：
@@ -111,14 +103,14 @@
   - 启动、从睡眠唤醒、手动点击"立即同步"时各同步一次；
   - 唤醒用每秒墙钟采样检测（相邻样本间隔超过 15 秒）；
   - 单工作线程串行同步，运行中再次触发会接着再跑一次。
-- 同步文件夹由同步盘传递文件；其余后端直接联网并使用 reqwest 的系统代理支持。**按流量计费暂停已实现**：网络后端默认启用，macOS 用 Network.framework 路径监视器读取 isExpensive / isConstrained；Windows 用 Windows.Networking.Connectivity 的连接费用 API（每秒检测，已通过 Windows 编译，系统计费状态切换待人工验收）。检测失败按非计费处理。计费时跳过自动同步，手动“立即同步”可跑一轮；网络恢复后立即同步。调试版支持 `STICKER_FORCE_METERED=1`，发布版忽略。
+- 同步文件夹由同步盘传递文件；其余后端直接联网并使用 reqwest 的系统代理支持。**按流量计费暂停已实现**：网络后端默认启用，macOS 用 Network.framework 路径监视器读取 isExpensive / isConstrained；Windows 用 Windows.Networking.Connectivity 的连接费用 API（每秒检测；系统计费状态的切换没有人工验收过）。检测失败按非计费处理。计费时跳过自动同步，手动“立即同步”可跑一轮；网络恢复后立即同步。调试版支持 `STICKER_FORCE_METERED=1`，发布版忽略。
 - **加入新设备**：在偏好设置的“同步”分组选择同一存储目标；网络连接先探测读、写、删除权限，已有仓库显示设备数、表情数并确认加入。设备名默认用电脑名，可修改，保存在本机 `local/device.json`。分组支持取消连接、重新输入凭据、上传/下载原图进度；标题栏显示同步状态，左栏卡片显示后端名和简短地址。
 - 手动暂停保存在本机设置，重启保留；暂停后取消当前轮次，保留上次同步时间与设备列表，所有自动触发跳过。继续同步立即跑一轮。设备列表和上次同步时间缓存于本机 SQLite 的 `sync_device_cache`；0003 迁移增加每张表情的创建来源，用设备 received 计算实际拥有该表情的设备数。
 - **日志维护**：
   - 本机：已推送的 `sync_stream` 行，以及已折叠进 `sync_model`、当前同步目标也已分配序号的 `sync_outbox` 行，在推送和接收的事务里顺带删除；没开启同步时也会折叠和清理。运行中只复用空页，空页够多时才在启动、窗口出现之前 VACUUM。3000 张、真实同步过的仓库上，数据库从 11.6 MB 降到 5.0 MB，清理持锁 18.5 ms，启动 VACUUM 29.6 ms。
   - 远端：同步成功后，本机日志目录里不到 4 MiB 的段攒够 32 个，就把连续的一组（每轮最多 128 个）合成一个段，保留全部历史和格式 1。网络后端在按流量计费的网络上不合并，手动立即同步也一样。
   - 完整条件、中断后的恢复和请求预算见 [ADR 0005](adr/0005-sync-format-and-merge.md)。
-- 第一版不做端到端加密。
+- 不做端到端加密，存储后端能看到原图。
 
 ## 默认设置
 
@@ -134,14 +126,14 @@
 
 ## 发布
 
-- macOS 最低版本为 14.0，设置在 `bundle.macOS.minimumSystemVersion`。启动错误对话框调用的 `NSApplication::activate` 要求 macOS 14；Network.framework 路径监视及费用检测最高要求 10.15，当前 NSPanel 用法不要求更高版本。按 API 要求设定，未在旧系统上运行。打包与隔离 HOME 的试运行方法见[打包说明](packaging.md)。
-- 没有 Apple 开发者签名和公证：`bundle.macOS.signingIdentity` 设为 `"-"`，打包时对整个 .app 做临时签名（ad-hoc），macOS 第一次打开时要在"系统设置 › 隐私与安全性"里点"仍要打开"。只有链接器自带的签名、资源没有封装进签名时，从网上下载的包会提示"已损坏"，而且没有放行按钮。Windows 未签名，会被 SmartScreen 拦一下，点"仍要运行"即可。
-- 公开发布前再补上：Apple 开发者账号签名和公证、Windows 代码签名证书。
+打包、发布流程和更新签名见[打包和发布](packaging.md)。
+
+- macOS 最低版本为 14.0，设置在 `bundle.macOS.minimumSystemVersion`。依据是 API 要求：启动错误对话框调用的 `NSApplication::activate` 要求 macOS 14，其余用到的 API 要求更低。没有在更旧的系统上运行过。
+- 没有 Apple 开发者签名和公证，macOS 只做临时签名；Windows 没有代码签名。两边首次打开都要手动放行。等有了 Apple 开发者账号和 Windows 代码签名证书再补上。
 
 ## 远期设想
 
 还没决定做，先记下来。已经决定要做的在 [TODO.md](TODO.md)。
-
 
 - 用大模型自动识别配文：只在表情还没有配文时自动填入，不覆盖手动填写的。
 - 端到端加密（可选开关）。

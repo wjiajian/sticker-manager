@@ -2,6 +2,8 @@
 
 ## 日常检查
 
+应用代码没有自动触发的 CI，提交前在本地跑：
+
 ```bash
 cargo fmt --all --check
 cargo test --workspace
@@ -49,4 +51,8 @@ cargo test -p sticker-core sync::tests::network_integration::s3_ \
 
 ## 真实窗口测试
 
-测试实例一律用 `STICKER_LIBRARY_DIR` 指向临时目录，不要动真实仓库。发布版忽略这个变量，试运行打包版的做法见[打包说明](packaging.md)。拖拽相关的功能靠日常使用来发现问题。
+- 测试实例一律用 `STICKER_LIBRARY_DIR` 指向临时目录（绝对路径），不要动真实仓库。发布版忽略这个变量，试运行打包版的做法见[打包和发布](packaging.md#试运行发布版)。
+- 优先在后台操作目标窗口，不抢前台、不移动用户的鼠标；只有后台做不了的步骤（比如跨应用拖放）才短暂接管屏幕，并在报告里写明。
+- 不修改系统设置（低数据模式、减少动态效果、外观等）。需要的话请用户自己切换；用户不切换就把这项记为跳过。
+
+完整约定见 [AGENTS.md](../AGENTS.md)。
