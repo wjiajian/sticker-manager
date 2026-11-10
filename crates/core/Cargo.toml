@@ -16,7 +16,8 @@ tempfile = "3"
 thiserror.workspace = true
 uuid = { version = "1", features = ["v4"] }
 opendal = { version = "0.59.5", default-features = false, features = ["services-webdav", "services-s3", "executors-tokio"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "system-proxy"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "net"] }
 http = "1"
 httpdate = "1"
