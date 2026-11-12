@@ -12,6 +12,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0003_sync_presence.sql"),
     include_str!("migrations/0004_categories.sql"),
     include_str!("migrations/0005_sync_tree.sql"),
+    include_str!("migrations/0006_drop_sync_deleted_objects.sql"),
 ];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 
@@ -73,6 +74,40 @@ mod tests {
         open(&path).unwrap();
         let conn = open(&path).unwrap();
         assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
+        assert!(!conn.table_exists(None, "sync_deleted_objects").unwrap());
+    }
+
+    #[test]
+    fn removes_unused_deleted_objects_table_without_changing_library_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..5] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 5).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sync_deleted_objects VALUES ('library', 'objects/deleted.png');
+             INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at)
+             VALUES ('kept', 'hash', 'png', '保留的表情', 1, 1, 1, 1);
+             INSERT INTO sync_file_dirty VALUES ('kept', 7);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
+        assert!(!conn.table_exists(None, "sync_deleted_objects").unwrap());
+        let preserved: (String, i64) = conn
+            .query_row(
+                "SELECT s.name, d.revision FROM stickers s
+                 JOIN sync_file_dirty d ON d.sticker_id = s.id WHERE s.id = 'kept'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(preserved, ("保留的表情".into(), 7));
     }
 
     #[test]

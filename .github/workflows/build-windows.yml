@@ -43,7 +43,7 @@ jobs:
 
       - if: inputs.validate
         run: |
-          node --test .github/scripts/windows-updater-manifest.test.mjs
+          node --test .github/scripts/windows-updater-manifest.test.mjs .github/scripts/changelog-notes.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustup component add rustfmt clippy
           cargo fmt --all --check

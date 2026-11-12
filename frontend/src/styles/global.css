@@ -43,9 +43,6 @@
   --color-accent: #c2410c;
   --color-accent-fill: #c2410c;
   --color-on-accent: #ffffff;
-  --color-selection: #1f1f1f; /* 面板选中的标签 */
-  --color-on-selection: #ffffff;
-  --color-selection-edge: #1f1f1f;
   --color-synced: #1e8a4c;
   --color-category-yellow: #f2b705;
   --color-category-gray: #8a8a8a;
@@ -90,9 +87,6 @@
     --color-accent: #ffccad;
     --color-accent-fill: #c2410c;
     --color-on-accent: #ffffff;
-    --color-selection: #313131;
-    --color-on-selection: #f4f3ef;
-    --color-selection-edge: #ffccad;
     --color-synced: #67cc8d;
     --color-category-yellow: #f2b705;
     --color-category-gray: #a6a6a6;

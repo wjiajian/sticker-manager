@@ -16,6 +16,8 @@ pub(super) struct Scan {
     pub ready: bool,
     pub folders: BTreeSet<String>,
     pub moving: BTreeSet<String>,
+    /// 本轮扫描时列出的全部远端条目，`push_files` 先用它试算，免得空闲轮次再列一次。
+    pub listed: BTreeMap<String, FileEntry>,
 }
 fn cached(library: &Mutex<Library>, target: &str) -> Result<BTreeMap<String, Entry>> {
     let lib = lock(library)?;
@@ -151,7 +153,13 @@ pub(super) fn scan(
     }
     let mut current = BTreeMap::new();
     let mut folders = BTreeSet::new();
-    for file in storage.list("")? {
+    let files_listed = storage.list("")?;
+    let listed = files_listed
+        .iter()
+        .map(|f| (f.key.clone(), f.clone()))
+        .collect::<BTreeMap<_, _>>();
+    // 按存储返回的顺序处理，同一哈希的多份副本分配身份的先后不变。
+    for file in files_listed {
         if let Some(folder) = file
             .key
             .strip_suffix('/')
@@ -226,12 +234,8 @@ pub(super) fn scan(
             byte_size: bytes.len() as i64,
             added_at: 0,
         };
-        let mut thumb = tempfile::NamedTempFile::new_in(root.join("thumbs"))?;
-        image
-            .thumbnail(crate::import::THUMBNAIL_SIZE, crate::import::THUMBNAIL_SIZE)
-            .write_to(&mut thumb, image::ImageFormat::Png)?;
+        let thumb = crate::import::write_thumbnail(root, &image)?;
         tmp.as_file().sync_all()?;
-        thumb.as_file().sync_all()?;
         {
             let _files = files.lock().unwrap();
             tmp.persist(root.join(object.key())).map_err(|e| e.error)?;
@@ -265,6 +269,7 @@ pub(super) fn scan(
         moving,
         ready,
         folders,
+        listed,
     })
 }
 
@@ -695,206 +700,30 @@ struct Move {
     revision: i64,
 }
 
+type Plan = (Vec<Move>, Vec<(String, String)>);
+
 pub(super) fn push_files(
     library: &Mutex<Library>,
     storage: &dyn Storage,
     target: &str,
     root: &Path,
+    scanned: &BTreeMap<String, FileEntry>,
     progress: &dyn Fn(SyncProgress),
 ) -> Result<()> {
     let cache = cached(library, target)?;
+    // 先用本轮扫描时的列表试算：没有要上传、移动的文件，也没有要新建的文件夹，就不再列举远端。
+    // 路径缓存刚按这份列表核对过，空闲时结果和重新列举一样。有活要干时撤销试算，
+    // 重新列举后再算，上传前尽量用最新的远端状态。
+    let (moves, new_folders) = plan(library, storage, target, &cache, scanned, true)?;
+    if moves.is_empty() && new_folders.is_empty() {
+        return Ok(());
+    }
     let listed = storage
         .list("")?
         .into_iter()
         .map(|f| (f.key.clone(), f))
         .collect::<BTreeMap<_, _>>();
-    let chosen = winners(&cache);
-    let mut used = BTreeMap::<String, BTreeSet<String>>::new();
-    let mut folders = BTreeMap::<String, String>::new();
-    for path in listed.keys() {
-        used.entry(path.to_lowercase()).or_default().insert(
-            cache
-                .get(path)
-                .map(|e| e.object.hash.clone())
-                .unwrap_or_default(),
-        );
-        if let Some((Some(c), _, _)) = paths::image(path) {
-            folders
-                .entry(c.to_ascii_lowercase())
-                .or_insert_with(|| c.into());
-        }
-    }
-    let (moves, new_folders) = {
-        let mut lib = lock(library)?;
-        let device = lib.device.id.clone();
-        let tx = lib.conn.transaction()?;
-        let (mut revision, mut model) = store::load(&tx)?;
-        let before = revision;
-        store::flush(&tx, &mut model, &mut revision)?;
-        if revision != before {
-            store::save(&tx, revision, &model)?;
-        }
-        let categories = model.projected(Kind::Category);
-        let new_folders = categories
-            .iter()
-            .filter_map(|(id, e)| {
-                e.fields
-                    .get("name")
-                    .filter(|r| r.stamp.device == device)
-                    .and_then(|r| r.value.as_str())
-                    .filter(|name| {
-                        paths::component(name)
-                            && !listed.keys().any(|p| p.starts_with(&format!("{name}/")))
-                    })
-                    .map(|name| (id.clone(), name.to_owned()))
-            })
-            .collect::<Vec<_>>();
-        for (_, name) in &new_folders {
-            storage.validate_write(&format!("{name}/"))?;
-        }
-        let dirty = {
-            let mut q = tx.prepare("SELECT sticker_id,revision FROM sync_file_dirty")?;
-            q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
-                .collect::<rusqlite::Result<BTreeMap<_, _>>>()?
-        };
-        let local = {
-            let mut q=tx.prepare("SELECT s.id,s.name,c.name,s.deleted_at FROM stickers s LEFT JOIN categories c ON c.id=s.category_id")?;
-            q.query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    (
-                        r.get::<_, String>(1)?,
-                        r.get::<_, Option<String>>(2)?,
-                        r.get::<_, Option<i64>>(3)?,
-                    ),
-                ))
-            })?
-            .collect::<rusqlite::Result<BTreeMap<_, _>>>()?
-        };
-        let pending = {
-            let mut q=tx.prepare("SELECT sticker_id,source,destination,object,revision FROM sync_file_moves WHERE library_id=?1")?;
-            q.query_map([target], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, i64>(4)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        let mut moves = BTreeMap::new();
-        for (id, source, destination, json, rev) in pending {
-            let object: Object = serde_json::from_str(&json)?;
-            let overwritten = cache
-                .get(&destination)
-                .is_some_and(|e| e.object.hash != object.hash)
-                || cache
-                    .get(&source)
-                    .is_some_and(|e| e.object.hash != object.hash);
-            let renamed_incompatible = dirty.get(&id).is_some_and(|current| *current > rev)
-                && storage.validate_write(&destination).is_err();
-            if model.dead(Kind::Sticker, &id) || overwritten || renamed_incompatible {
-                tx.execute(
-                    "DELETE FROM sync_file_moves WHERE library_id=?1 AND sticker_id=?2",
-                    params![target, id],
-                )?;
-            } else {
-                used.entry(destination.to_lowercase())
-                    .or_default()
-                    .insert(object.hash.clone());
-                moves.insert(
-                    id.clone(),
-                    Move {
-                        id,
-                        source,
-                        destination,
-                        object,
-                        revision: rev,
-                    },
-                );
-            }
-        }
-        for (id, e) in model.projected(Kind::Sticker) {
-            if moves.contains_key(&id) {
-                continue;
-            }
-            let Some(object) = e.data else { continue };
-            let Some((name, category, deleted)) = local.get(&id) else {
-                continue;
-            };
-            let source = chosen.get(&object.hash).cloned().unwrap_or_default();
-            let destination = if deleted.is_some() {
-                format!(".sticker-manager/trash/{id}.{}", object.ext)
-            } else if !dirty.contains_key(&id) && !source.is_empty() && !trash(&source) {
-                source.clone()
-            } else {
-                let category = category.as_deref().map(|c| {
-                    folders
-                        .get(&c.to_ascii_lowercase())
-                        .map(String::as_str)
-                        .unwrap_or(c)
-                });
-                let mut n = 1;
-                let path = loop {
-                    let path = match paths::key(category, name, &object.ext, n) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            eprintln!("跳过表情 {id} 的文件路径：{e}");
-                            break None;
-                        }
-                    };
-                    if used
-                        .get(&path.to_lowercase())
-                        .is_none_or(|hs| hs.len() == 1 && hs.contains(&object.hash))
-                        || path == source
-                    {
-                        break Some(path);
-                    }
-                    n += 1;
-                };
-                let Some(path) = path else { continue };
-                path
-            };
-            if source == destination
-                && cache
-                    .get(&source)
-                    .is_some_and(|e| listed.get(&source).is_some_and(|f| *f == e.file))
-            {
-                tx.execute("DELETE FROM sync_file_dirty WHERE sticker_id=?1", [&id])?;
-                continue;
-            }
-            storage.validate_write(&destination)?;
-            let revision = dirty.get(&id).copied().unwrap_or(-1);
-            used.entry(destination.to_lowercase())
-                .or_default()
-                .insert(object.hash.clone());
-            tx.execute(
-                "INSERT INTO sync_file_moves VALUES(?1,?2,?3,?4,?5,?6)",
-                params![
-                    target,
-                    id,
-                    source,
-                    destination,
-                    serde_json::to_string(&object)?,
-                    revision
-                ],
-            )?;
-            moves.insert(
-                id.clone(),
-                Move {
-                    id,
-                    source,
-                    destination,
-                    object,
-                    revision,
-                },
-            );
-        }
-        tx.commit()?;
-        (moves.into_values().collect::<Vec<_>>(), new_folders)
-    };
+    let (moves, new_folders) = plan(library, storage, target, &cache, &listed, false)?;
     for (_, name) in &new_folders {
         storage.write(&format!("{name}/"), b"")?;
     }
@@ -1045,6 +874,207 @@ pub(super) fn push_files(
     Ok(())
 }
 
+/// 算出要上传或移动的文件和要新建的分类文件夹，并记入 `sync_file_moves`。
+/// `trial` 为真且有活要干时撤销整个事务，只把结果交给调用方判断。
+fn plan(
+    library: &Mutex<Library>,
+    storage: &dyn Storage,
+    target: &str,
+    cache: &BTreeMap<String, Entry>,
+    listed: &BTreeMap<String, FileEntry>,
+    trial: bool,
+) -> Result<Plan> {
+    let chosen = winners(cache);
+    let mut used = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut folders = BTreeMap::<String, String>::new();
+    for path in listed.keys() {
+        used.entry(path.to_lowercase()).or_default().insert(
+            cache
+                .get(path)
+                .map(|e| e.object.hash.clone())
+                .unwrap_or_default(),
+        );
+        if let Some((Some(c), _, _)) = paths::image(path) {
+            folders
+                .entry(c.to_ascii_lowercase())
+                .or_insert_with(|| c.into());
+        }
+    }
+    let mut lib = lock(library)?;
+    let device = lib.device.id.clone();
+    let tx = lib.conn.transaction()?;
+    let (mut revision, mut model) = store::load(&tx)?;
+    let before = revision;
+    store::flush(&tx, &mut model, &mut revision)?;
+    if revision != before {
+        store::save(&tx, revision, &model)?;
+    }
+    let categories = model.projected(Kind::Category);
+    let new_folders = categories
+        .iter()
+        .filter_map(|(id, e)| {
+            e.fields
+                .get("name")
+                .filter(|r| r.stamp.device == device)
+                .and_then(|r| r.value.as_str())
+                .filter(|name| {
+                    paths::component(name)
+                        && !listed.keys().any(|p| p.starts_with(&format!("{name}/")))
+                })
+                .map(|name| (id.clone(), name.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    for (_, name) in &new_folders {
+        storage.validate_write(&format!("{name}/"))?;
+    }
+    let dirty = {
+        let mut q = tx.prepare("SELECT sticker_id,revision FROM sync_file_dirty")?;
+        q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+            .collect::<rusqlite::Result<BTreeMap<_, _>>>()?
+    };
+    let local = {
+        let mut q=tx.prepare("SELECT s.id,s.name,c.name,s.deleted_at FROM stickers s LEFT JOIN categories c ON c.id=s.category_id")?;
+        q.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
+                ),
+            ))
+        })?
+        .collect::<rusqlite::Result<BTreeMap<_, _>>>()?
+    };
+    let pending = {
+        let mut q=tx.prepare("SELECT sticker_id,source,destination,object,revision FROM sync_file_moves WHERE library_id=?1")?;
+        q.query_map([target], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut moves = BTreeMap::new();
+    for (id, source, destination, json, rev) in pending {
+        let object: Object = serde_json::from_str(&json)?;
+        let overwritten = cache
+            .get(&destination)
+            .is_some_and(|e| e.object.hash != object.hash)
+            || cache
+                .get(&source)
+                .is_some_and(|e| e.object.hash != object.hash);
+        let renamed_incompatible = dirty.get(&id).is_some_and(|current| *current > rev)
+            && storage.validate_write(&destination).is_err();
+        if model.dead(Kind::Sticker, &id) || overwritten || renamed_incompatible {
+            tx.execute(
+                "DELETE FROM sync_file_moves WHERE library_id=?1 AND sticker_id=?2",
+                params![target, id],
+            )?;
+        } else {
+            used.entry(destination.to_lowercase())
+                .or_default()
+                .insert(object.hash.clone());
+            moves.insert(
+                id.clone(),
+                Move {
+                    id,
+                    source,
+                    destination,
+                    object,
+                    revision: rev,
+                },
+            );
+        }
+    }
+    for (id, e) in model.projected(Kind::Sticker) {
+        if moves.contains_key(&id) {
+            continue;
+        }
+        let Some(object) = e.data else { continue };
+        let Some((name, category, deleted)) = local.get(&id) else {
+            continue;
+        };
+        let source = chosen.get(&object.hash).cloned().unwrap_or_default();
+        let destination = if deleted.is_some() {
+            format!(".sticker-manager/trash/{id}.{}", object.ext)
+        } else if !dirty.contains_key(&id) && !source.is_empty() && !trash(&source) {
+            source.clone()
+        } else {
+            let category = category.as_deref().map(|c| {
+                folders
+                    .get(&c.to_ascii_lowercase())
+                    .map(String::as_str)
+                    .unwrap_or(c)
+            });
+            let mut n = 1;
+            let path = loop {
+                let path = match paths::key(category, name, &object.ext, n) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("跳过表情 {id} 的文件路径：{e}");
+                        break None;
+                    }
+                };
+                if used
+                    .get(&path.to_lowercase())
+                    .is_none_or(|hs| hs.len() == 1 && hs.contains(&object.hash))
+                    || path == source
+                {
+                    break Some(path);
+                }
+                n += 1;
+            };
+            let Some(path) = path else { continue };
+            path
+        };
+        if source == destination
+            && cache
+                .get(&source)
+                .is_some_and(|e| listed.get(&source).is_some_and(|f| *f == e.file))
+        {
+            tx.execute("DELETE FROM sync_file_dirty WHERE sticker_id=?1", [&id])?;
+            continue;
+        }
+        storage.validate_write(&destination)?;
+        let revision = dirty.get(&id).copied().unwrap_or(-1);
+        used.entry(destination.to_lowercase())
+            .or_default()
+            .insert(object.hash.clone());
+        tx.execute(
+            "INSERT INTO sync_file_moves VALUES(?1,?2,?3,?4,?5,?6)",
+            params![
+                target,
+                id,
+                source,
+                destination,
+                serde_json::to_string(&object)?,
+                revision
+            ],
+        )?;
+        moves.insert(
+            id.clone(),
+            Move {
+                id,
+                source,
+                destination,
+                object,
+                revision,
+            },
+        );
+    }
+    let plan = (moves.into_values().collect::<Vec<_>>(), new_folders);
+    if trial && (!plan.0.is_empty() || !plan.1.is_empty()) {
+        return Ok(plan);
+    }
+    tx.commit()?;
+    Ok(plan)
+}
+
 pub(super) fn purge(library: &Mutex<Library>, storage: &dyn Storage, target: &str) -> Result<()> {
     let cache = cached(library, target)?;
     let (_, model) = store::load(&lock(library)?.conn)?;
@@ -1076,21 +1106,30 @@ pub(super) fn purge(library: &Mutex<Library>, storage: &dyn Storage, target: &st
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let categories = model.projected(Kind::Category);
+    let candidates = directories
+        .into_iter()
+        .filter(|(folder, id)| {
+            id.as_ref().is_some_and(|id| {
+                let renamed = categories
+                    .get(&model.resolve(Kind::Category, id))
+                    .and_then(|e| e.fields.get("name"))
+                    .and_then(|r| r.value.as_str())
+                    .is_some_and(|name| !name.eq_ignore_ascii_case(folder));
+                model.dead(Kind::Category, id) || renamed
+            })
+        })
+        .map(|(folder, _)| folder)
+        .collect::<Vec<_>>();
+    // 绝大多数轮次没有已删除或已改名分类的旧文件夹，不必为确认它们是否已空列举远端。
+    if candidates.is_empty() {
+        return Ok(());
+    }
     let listed = storage.list("")?;
-    for (folder, id) in directories {
-        let Some(id) = id else {
-            continue;
-        };
-        let renamed = categories
-            .get(&model.resolve(Kind::Category, &id))
-            .and_then(|e| e.fields.get("name"))
-            .and_then(|r| r.value.as_str())
-            .is_some_and(|name| !name.eq_ignore_ascii_case(&folder));
+    for folder in candidates {
         let prefix = format!("{folder}/");
-        if (model.dead(Kind::Category, &id) || renamed)
-            && !listed
-                .iter()
-                .any(|f| f.key.starts_with(&prefix) && f.key != prefix)
+        if !listed
+            .iter()
+            .any(|f| f.key.starts_with(&prefix) && f.key != prefix)
         {
             storage.delete(&prefix)?;
             lock(library)?.conn.execute(

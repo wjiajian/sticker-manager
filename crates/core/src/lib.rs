@@ -21,5 +21,6 @@ pub use error::{Error, Result};
 pub use import::{ImportFailure, ImportProgress, ImportReport, import_paths_with_progress};
 pub use library::{
     Library, LibraryOverview, LibraryView, Sticker, StickerCursor, StickerPage, StickerPageFilter,
+    read_image,
 };
 pub use organization::{CATEGORY_COLORS, Category, CategorySummary, UNCATEGORIZED};

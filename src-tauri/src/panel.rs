@@ -378,7 +378,7 @@ mod native {
     }
 }
 
-// Windows 本轮仅实现普通置顶窗口；未进行 Windows 编译或运行验证。
+// Windows 用普通的置顶窗口；验收范围见 docs/windows-validation.md。
 #[cfg(not(target_os = "macos"))]
 mod native {
     use super::*;

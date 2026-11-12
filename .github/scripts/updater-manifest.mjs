@@ -1,9 +1,9 @@
 // 把 tauri build 生成的更新包改成固定的 ASCII 文件名，并生成更新检查读取的 latest.json。
 // 用法：VERSION=0.1.2 BASE_URL=https://github.com/<owner>/<repo>/releases/download/v0.1.2 node .github/scripts/updater-manifest.mjs
 // 输出到 target/release/bundle/updater/，另外把说明写到 target/release/bundle/release-notes.md 供 Release 使用。
-// 更新说明取 CHANGELOG.md 里该版本的小节，没有就取“未发布”。
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { changelogNotes } from "./changelog-notes.mjs";
 
 const { VERSION: version, BASE_URL: baseUrl } = process.env;
 if (!version || !baseUrl) throw new Error("需要 VERSION 和 BASE_URL 环境变量");
@@ -21,15 +21,7 @@ const output = "target/release/bundle/updater";
 mkdirSync(output, { recursive: true });
 copyFileSync(archive, join(output, name));
 
-function section(changelog, title) {
-  const lines = changelog.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `## ${title}`);
-  if (start < 0) return null;
-  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
-  return lines.slice(start + 1, end < 0 ? undefined : end).join("\n").trim() || null;
-}
-const changelog = readFileSync("CHANGELOG.md", "utf8");
-const notes = section(changelog, version) ?? section(changelog, "未发布") ?? "";
+const notes = changelogNotes(readFileSync("CHANGELOG.md", "utf8"), version);
 
 const manifest = {
   version,

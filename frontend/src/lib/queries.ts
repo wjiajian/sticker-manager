@@ -87,6 +87,5 @@ export function useLibraryChangedEvents() {
 export function useImportStickers() {
   return useMutation({
     mutationFn: ipc.importStickers,
-
   });
 }

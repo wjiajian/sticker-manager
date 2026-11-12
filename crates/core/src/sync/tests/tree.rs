@@ -470,6 +470,12 @@ fn migration_keeps_clocks_tombstones_aliases_and_removes_old_category_operations
     store::save(&conn, revision, &model).unwrap();
     // 还原 0004 的触发器和表结构，再让正常打开路径执行新迁移。
     conn.execute_batch("DROP TRIGGER sync_stickers_file; DROP TRIGGER sync_categories_file; DROP TRIGGER sync_stickers_create; DROP TABLE sync_path_cache; DROP TABLE sync_file_moves; DROP TABLE sync_file_dirty; DROP TABLE sync_file_revision; DROP TABLE sync_directory_cache;").unwrap();
+    conn.execute_batch(
+        "CREATE TABLE sync_deleted_objects (
+            library_id TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY(library_id, key)
+        );",
+    )
+    .unwrap();
     let v4 = include_str!("../../migrations/0004_categories.sql");
     let triggers = &v4[v4.find("CREATE TRIGGER sync_stickers_create").unwrap()
         ..v4.find("CREATE TRIGGER sync_categories_create").unwrap()];
@@ -1138,4 +1144,149 @@ fn manual_jpeg_extension_is_imported_and_keeps_its_remote_name() {
         .collect::<Vec<_>>();
     keys.sort();
     assert_eq!(keys, ["照片.JPEG", "看戏/截图.jpeg"]);
+}
+
+#[test]
+fn small_image_placed_in_sync_folder_is_not_enlarged_into_its_thumbnail() {
+    let (s, m) = backend();
+    let a = Site::new();
+    s.write("收到.png", &png(1)).unwrap();
+    settle(&[&a], &s, &m);
+    let sticker = a
+        .lib
+        .lock()
+        .unwrap()
+        .list_stickers(LibraryView::All)
+        .unwrap()
+        .remove(0);
+    let thumbnail = image::open(&sticker.thumbnail_path).unwrap();
+    // 和导入一样，缩略图只缩小不放大。
+    assert_eq!((thumbnail.width(), thumbnail.height()), (8, 6));
+}
+
+/// 外壳只在 `changed` 为真时让界面重读列表：本机表有任何变化都必须报告，空转的轮次不报告。
+#[test]
+fn report_says_changed_exactly_when_a_round_alters_local_tables() {
+    let (s, m) = backend();
+    let a = Site::new();
+    let b = Site::new();
+    let checked = |site: &Site| {
+        let before = site.state();
+        let report = site.sync(&s, &m);
+        assert!(
+            report.changed || site.state() == before,
+            "本机表变了，报告却说没有变化"
+        );
+        report.changed
+    };
+    let mut seen = Vec::new();
+    let round = |seen: &mut Vec<bool>| {
+        for _ in 0..4 {
+            checked(&a);
+            seen.push(checked(&b));
+        }
+    };
+    let id = a.import(1);
+    round(&mut seen);
+    {
+        let l = a.lib.lock().unwrap();
+        l.set_sticker_name(&id, "改名").unwrap();
+        l.set_sticker_caption(&id, "配文").unwrap();
+        l.toggle_favorite(&id).unwrap();
+        l.record_usage(&id).unwrap();
+    }
+    round(&mut seen);
+    let category = a.lib.lock().unwrap().create_category("分类", None).unwrap();
+    a.lib
+        .lock()
+        .unwrap()
+        .set_sticker_category(&id, Some(&category.id))
+        .unwrap();
+    round(&mut seen);
+    // 直接放进同步目录的图片，以及从同步目录里拿走的图片。
+    s.write("分类/放进来.png", &png(2)).unwrap();
+    round(&mut seen);
+    s.delete("分类/放进来.png").unwrap();
+    round(&mut seen);
+    a.lib.lock().unwrap().delete_sticker(&id).unwrap();
+    round(&mut seen);
+    a.lib.lock().unwrap().purge_sticker(&id).unwrap();
+    round(&mut seen);
+    assert!(seen.iter().any(|changed| *changed));
+    // 两边都追平之后，再同步只是空转。
+    assert!(!checked(&a));
+    assert!(!checked(&b));
+}
+#[test]
+fn idle_rounds_list_the_whole_remote_once_and_uploads_keep_the_fresh_listings() {
+    struct Lists {
+        inner: MemoryStorage,
+        full: std::sync::atomic::AtomicUsize,
+    }
+    impl Lists {
+        fn take(&self) -> usize {
+            self.full.swap(0, Ordering::SeqCst)
+        }
+    }
+    impl Storage for Lists {
+        fn list(&self, p: &str) -> Result<Vec<storage::FileEntry>> {
+            if p.is_empty() {
+                self.full.fetch_add(1, Ordering::SeqCst);
+            }
+            self.inner.list(p)
+        }
+        fn read(&self, p: &str) -> Result<Option<Vec<u8>>> {
+            self.inner.read(p)
+        }
+        fn write(&self, p: &str, b: &[u8]) -> Result<()> {
+            self.inner.write(p, b)
+        }
+        fn delete(&self, p: &str) -> Result<()> {
+            self.inner.delete(p)
+        }
+    }
+    let (inner, m) = backend();
+    let s = Lists {
+        inner,
+        full: Default::default(),
+    };
+    let (a, b) = (Site::new(), Site::new());
+    let id = a.import(1);
+    a.sync(&s, &m);
+    // 扫描一次；有图要上传，上传前重新列举一次，上传后确认目标再列举一次。
+    assert_eq!(s.take(), 3);
+    a.sync(&s, &m);
+    assert_eq!(s.take(), 1, "空闲轮次只在扫描时列举");
+    b.sync(&s, &m);
+    assert_eq!(s.take(), 1, "只收不发的轮次也只列举一次");
+    assert_eq!(b.state()["stickers"], a.state()["stickers"]);
+
+    let category = {
+        let mut l = a.lib.lock().unwrap();
+        let category = l.create_category("工作", None).unwrap();
+        l.set_sticker_category(&id, Some(&category.id)).unwrap();
+        category
+    };
+    a.sync(&s, &m);
+    assert_eq!(s.take(), 3);
+    a.lib
+        .lock()
+        .unwrap()
+        .rename_category(&category.id, "打工")
+        .unwrap();
+    a.sync(&s, &m);
+    // 移动之外，旧文件夹待删，确认它已空需要再列举一次。
+    assert_eq!(s.take(), 4);
+    assert!(
+        s.inner
+            .list("")
+            .unwrap()
+            .iter()
+            .all(|f| !f.key.starts_with("工作/"))
+    );
+    a.sync(&s, &m);
+    assert_eq!(s.take(), 1);
+    b.sync(&s, &m);
+    assert_eq!(s.take(), 1);
+    assert_eq!(b.state(), a.state());
 }

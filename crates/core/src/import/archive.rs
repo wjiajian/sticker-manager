@@ -1,5 +1,5 @@
 use super::*;
-use zip::{CompressionMethod, ZipArchive};
+use zip::{CompressionMethod, ZipArchive, read::ZipFileEntry};
 
 const ENTRY_LIMIT: u64 = 100 * 1024 * 1024;
 const ARCHIVE_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
@@ -52,7 +52,7 @@ fn extract(
         entry += n as u64;
         *total += n as u64;
         if *total > archive_limit {
-            return Err("压缩包实际解压数据超过 2 GB，剩余条目未导入".into());
+            return Err("压缩包实际解压数据超过 2 GB".into());
         }
         if entry > entry_limit {
             return Err("条目实际解压数据超过 100 MB".into());
@@ -110,19 +110,18 @@ fn import_with_limits(
     let mut zip = match open(path) {
         Ok(zip) if zip.len() == count => zip,
         result => {
-            report.failures.push(ImportFailure {
-                path: path.into(),
-                message: result
+            report.failures.push(ImportFailure::new(
+                path.into(),
+                result
                     .err()
                     .unwrap_or_else(|| "压缩包在导入前发生变化，请重新导入".into()),
-            });
+            ));
             state.processed += count;
             progress(*state);
             return;
         }
     };
     let mut total = 0;
-    let mut stopped: Option<String> = None;
     // 逐条解压后立即导入，同一时间只有一个临时文件。条目读完时校验 CRC，
     // 损坏的条目只算它自己失败；目录区读不出来时已在 open 里整包失败。
     for index in 0..count {
@@ -130,35 +129,30 @@ fn import_with_limits(
             report.cancelled = true;
             return;
         }
+        // 超过限制后剩余条目合并成一条失败，免得几十万条目各占一行。
+        if index >= limits.count {
+            let remaining = importable(&zip, index..count);
+            if remaining > 0 {
+                report.failures.push(ImportFailure {
+                    path: path.into(),
+                    message: format!(
+                        "压缩包条目超过 {ENTRY_COUNT_LIMIT} 个，剩余 {remaining} 个条目未导入"
+                    ),
+                    count: remaining,
+                });
+            }
+            state.processed += count - index;
+            progress(*state);
+            return;
+        }
         let mut display = path.to_path_buf();
         let result = (|| -> std::result::Result<Entry, String> {
             let entry = zip
                 .by_index_data(index)
                 .map_err(|e| format!("条目损坏：{e}"))?;
-            let name = filename(
-                entry.name_raw(),
-                entry.flags().as_u16() & (1 << 11) != 0,
-                || {
-                    entry
-                        .name()
-                        .map(|s| s.into_owned())
-                        .unwrap_or_else(|_| String::from_utf8_lossy(entry.name_raw()).into_owned())
-                },
-            );
-            // 只使用文件名，绝不按压缩包中的路径落盘；同时兼容 Windows 的反斜杠。
-            let name = name.replace('\\', "/");
+            let name = entry_name(&entry);
             display = PathBuf::from(format!("{} › {name}", path.display()));
-            if index >= limits.count {
-                return Err("压缩包条目超过 10000 个，剩余条目未导入".into());
-            }
-            if let Some(reason) = &stopped {
-                return Err(reason.clone());
-            }
-            if entry.is_dir()
-                || name
-                    .split('/')
-                    .any(|p| p == "__MACOSX" || is_hidden(OsStr::new(p)))
-            {
+            if ignored(&entry, &name) {
                 return Ok(Entry::Ignored);
             }
             if entry.is_symlink() || is_zip(Path::new(&name)) {
@@ -176,18 +170,13 @@ fn import_with_limits(
             let mut file =
                 NamedTempFile::new_in(root.join("objects")).map_err(|e| e.to_string())?;
             let mut reader = zip.by_index(index).map_err(|e| format!("条目损坏：{e}"))?;
-            if let Err(error) = extract(
+            extract(
                 &mut reader,
                 &mut file,
                 &mut total,
                 limits.entry,
                 limits.total,
-            ) {
-                if total > limits.total {
-                    stopped = Some(error.clone());
-                }
-                return Err(error);
-            }
+            )?;
             let stem = Path::new(&name)
                 .file_stem()
                 .unwrap_or_default()
@@ -196,19 +185,61 @@ fn import_with_limits(
             Ok(Entry::Image(file, stem))
         })();
         match result {
+            // 解压总量越线：这一项和之后的条目都不再导入。
+            Err(message) if total > limits.total => {
+                let remaining = 1 + importable(&zip, index + 1..count);
+                report.failures.push(ImportFailure {
+                    path: display,
+                    message: format!("{message}，从这一项起 {remaining} 个条目未导入"),
+                    count: remaining,
+                });
+                state.processed += count - index;
+                progress(*state);
+                return;
+            }
+            Err(message) => report.failures.push(ImportFailure::new(display, message)),
             Ok(Entry::Ignored) => {}
             Ok(Entry::Skipped) => report.skipped += 1,
             Ok(Entry::Image(file, stem)) => {
                 process(root, file.path(), &stem, None, &display, report, store)
             }
-            Err(message) => report.failures.push(ImportFailure {
-                path: display,
-                message,
-            }),
         }
         state.processed += 1;
         progress(*state);
     }
+}
+
+fn entry_name(entry: &ZipFileEntry<'_>) -> String {
+    let name = filename(
+        entry.name_raw(),
+        entry.flags().as_u16() & (1 << 11) != 0,
+        || {
+            entry
+                .name()
+                .map(|s| s.into_owned())
+                .unwrap_or_else(|_| String::from_utf8_lossy(entry.name_raw()).into_owned())
+        },
+    );
+    // 只使用文件名，绝不按压缩包中的路径落盘；同时兼容 Windows 的反斜杠。
+    name.replace('\\', "/")
+}
+
+/// 目录、__MACOSX 和隐藏文件直接忽略，不计入跳过或失败。
+fn ignored(entry: &ZipFileEntry<'_>, name: &str) -> bool {
+    entry.is_dir()
+        || name
+            .split('/')
+            .any(|p| p == "__MACOSX" || is_hidden(OsStr::new(p)))
+}
+
+/// 范围内本来要处理的条目数，只读目录区，不解压。读不出的条目算在内，它本来也会记为失败。
+fn importable(zip: &ZipArchive<File>, indices: std::ops::Range<usize>) -> usize {
+    indices
+        .filter(|&index| {
+            zip.by_index_data(index)
+                .map_or(true, |entry| !ignored(&entry, &entry_name(&entry)))
+        })
+        .count()
 }
 
 #[cfg(test)]
@@ -244,13 +275,20 @@ mod tests {
         assert_eq!(filename(&[0xff], false, || "fallback".into()), "fallback");
     }
     #[test]
-    fn archive_limits_fail_only_oversize_entry_or_all_remaining_entries() {
+    fn archive_limits_fail_only_oversize_entry_or_merge_all_remaining_entries() {
         use crate::import::tests::make_zip;
         let dir = tempfile::tempdir().unwrap();
         let zip = dir.path().join("limits.zip");
+        // 末尾两条本来就会忽略，合并后的未导入数量不算它们。
         make_zip(
             &zip,
-            &[("a.txt", &[1; 12]), ("b.txt", &[2; 4]), ("c.txt", &[3; 4])],
+            &[
+                ("a.txt", &[1; 12]),
+                ("b.txt", &[2; 4]),
+                ("c.txt", &[3; 4]),
+                ("__MACOSX/._c.txt", &[4; 1]),
+                (".DS_Store", &[5; 1]),
+            ],
         );
         let mut library = Library::open(&dir.path().join("library")).unwrap();
         let root = library.root.clone();
@@ -258,42 +296,60 @@ mod tests {
             let mut report = ImportReport::default();
             let mut progress = ImportProgress {
                 processed: 0,
-                total: 3,
+                total: 5,
             };
+            let mut reported = 0;
             import_with_limits(
                 &root,
                 &zip,
-                3,
+                5,
                 &mut report,
                 &mut progress,
                 &|| false,
-                &mut |_| {},
+                &mut |_| reported += 1,
                 &mut library,
                 limits,
             );
-            assert_eq!(progress.processed, 3);
-            report
+            assert_eq!(progress.processed, 5);
+            (report, reported)
         };
-        let single = check(ArchiveLimits {
+        let (single, _) = check(ArchiveLimits {
             entry: 10,
             total: 100,
             count: 100,
         });
         assert_eq!((single.failures.len(), single.skipped), (1, 2));
+        assert_eq!(single.failures[0].count, 1);
         assert!(single.failures[0].message.contains("100 MB"));
-        let entire = check(ArchiveLimits {
+        let (entire, reported) = check(ArchiveLimits {
             entry: 100,
             total: 13,
             count: 100,
         });
-        assert_eq!((entire.failures.len(), entire.skipped), (2, 1));
-        assert!(entire.failures.iter().all(|f| f.message.contains("2 GB")));
-        let count = check(ArchiveLimits {
+        assert_eq!((entire.failures.len(), entire.skipped), (1, 1));
+        assert_eq!(entire.failures[0].count, 2);
+        assert!(entire.failures[0].path.ends_with("limits.zip › b.txt"));
+        assert!(entire.failures[0].message.contains("2 GB"));
+        assert!(entire.failures[0].message.contains("2 个条目未导入"));
+        // a 一次，越线后剩余条目一次。
+        assert_eq!(reported, 2);
+        let (count, _) = check(ArchiveLimits {
             entry: 100,
             total: 100,
             count: 1,
         });
-        assert_eq!((count.failures.len(), count.skipped), (2, 1));
-        assert!(count.failures.iter().all(|f| f.message.contains("10000")));
+        assert_eq!((count.failures.len(), count.skipped), (1, 1));
+        assert_eq!(count.failures[0].count, 2);
+        assert!(count.failures[0].message.contains("10000"));
+        assert!(count.failures[0].message.contains("剩余 2 个条目未导入"));
+        let (only_ignored_left, _) = check(ArchiveLimits {
+            entry: 100,
+            total: 100,
+            count: 3,
+        });
+        assert_eq!(
+            (only_ignored_left.failures.len(), only_ignored_left.skipped),
+            (0, 3)
+        );
     }
 }

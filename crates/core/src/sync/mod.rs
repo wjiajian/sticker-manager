@@ -627,17 +627,9 @@ pub fn synchronize_with_maintenance(
         if initial_complete && added > 0 {
             arrived(added);
         }
-        tree::push_files(library, storage, expected_id, &root, progress)?;
+        tree::push_files(library, storage, expected_id, &root, &scan.listed, progress)?;
     }
-    changed |= push(
-        library,
-        storage,
-        expected_id,
-        &root,
-        &device,
-        progress,
-        &mut published,
-    )?;
+    changed |= push(library, storage, expected_id, &device, &mut published)?;
     tree::purge(library, storage, expected_id)?;
     cleanup_purged_files(library, &root, &files)?;
     if let Some(error) = first_error {
@@ -714,9 +706,7 @@ fn push(
     library: &Mutex<Library>,
     storage: &dyn Storage,
     id: &str,
-    _root: &Path,
     device: &Device,
-    _progress: &dyn Fn(SyncProgress),
     published: &mut Vec<Segment>,
 ) -> Result<bool> {
     let (ops, changed) = {
@@ -854,14 +844,7 @@ fn download_objects(
         file.as_file().sync_all()?;
         let format = image::guess_format(&bytes)?;
         let (image, _) = crate::import::decode(file.path(), format)?;
-        let mut thumb = tempfile::NamedTempFile::new_in(root.join("thumbs"))?;
-        image
-            .thumbnail(
-                image.width().min(crate::import::THUMBNAIL_SIZE),
-                image.height().min(crate::import::THUMBNAIL_SIZE),
-            )
-            .write_to(&mut thumb, image::ImageFormat::Png)?;
-        thumb.as_file().sync_all()?;
+        let thumb = crate::import::write_thumbnail(root, &image)?;
         let _files = files.lock().unwrap();
         file.persist(path).map_err(|e| e.error)?;
         thumb.persist(thumbnail).map_err(|e| e.error)?;

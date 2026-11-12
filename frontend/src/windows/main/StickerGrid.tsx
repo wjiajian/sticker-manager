@@ -1,10 +1,10 @@
 import { ArrowsDownUpIcon } from "@phosphor-icons/react";
 import { useIsMutating } from "@tanstack/react-query";
 import { Button } from "../../components/Button";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Sticker, SyncStatus } from "../../lib/ipc";
 import { type useStickers, useCategories, useLibraryOverview } from "../../lib/queries";
-import { GridSkeleton, stickerGridColumns, useDelayedLoading } from "../../components/Skeleton";
+import { GridSkeleton, useDelayedLoading } from "../../components/Skeleton";
 import { ReadError } from "../../components/ReadError";
 import { EmptyLibrary } from "./EmptyLibrary";
 import { useUiStore, type StickerTypeFilter } from "../../stores/ui";
@@ -42,7 +42,26 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const setSelection = useUiStore((s) => s.setSelection);
   const resultFocusRequested = useUiStore((s) => s.resultFocusRequested);
   const requestResultFocus = useUiStore((s) => s.requestResultFocus);
-  const firstTile = useRef<HTMLButtonElement>(null);
+  const firstTile = useRef<HTMLButtonElement | null>(null);
+  const scroller = useRef<HTMLElement>(null);
+  const grid = useRef<HTMLElement>(null);
+  // 网格只挂载看得见的几行，第一张可能还没挂载：先滚到网格开头，挂载时再聚焦。
+  const focusFirstWhenMounted = useRef(false);
+  const firstTileRef = useCallback((button: HTMLButtonElement | null) => {
+    firstTile.current = button;
+    if (!button || !focusFirstWhenMounted.current) return;
+    requestAnimationFrame(() => {
+      if (!focusFirstWhenMounted.current || !button.isConnected) return;
+      focusFirstWhenMounted.current = false;
+      button.focus();
+      button.click();
+    });
+  }, []);
+  // 继续输入会取消聚焦请求（setSearchText 清掉 resultFocusRequested），还在等第一张挂载的那次也作废，
+  // 不然会在输入时选中上一次搜索的结果。订阅在 set 时同步触发，赶在第一张挂载之前。
+  useEffect(() => useUiStore.subscribe((state, previous) => {
+    if (state.searchText !== previous.searchText) focusFirstWhenMounted.current = false;
+  }), []);
   const mutating = useIsMutating() > 0;
   const { data: source, error, isPending } = listing;
   const skeleton = useDelayedLoading(isPending, searchQuery || (typeof view === "string" ? view : view.category));
@@ -97,13 +116,18 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
     if (selectedId && !results.some((sticker) => sticker.id === selectedId)) selectSticker(null);
     if (resultFocusRequested) {
       requestResultFocus(false);
-      firstTile.current?.focus();
-      firstTile.current?.click();
+      if (firstTile.current) {
+        firstTile.current.focus();
+        firstTile.current.click();
+      } else if (results.length) {
+        focusFirstWhenMounted.current = true;
+        grid.current?.scrollIntoView({ block: "start" });
+      }
     }
   }, [results, selectedId, selectSticker, resultFocusRequested, requestResultFocus]);
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6" aria-busy={isPending}>
+    <main ref={scroller} className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6" aria-busy={isPending}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 max-w-full flex-col gap-1">
           <div className="flex items-baseline gap-3">
@@ -175,20 +199,19 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
           </>}
         </div>
       ) : (
-        <TileGrid label={label}>
-          {stickers.map((sticker, index) => (
-            <StickerTile
-              key={sticker.id}
-              buttonRef={index === 0 ? firstTile : undefined}
-              sticker={sticker}
-              selected={selectedIds.includes(sticker.id)}
-              onSelect={(mode) => choose(sticker, mode)}
-              onMenu={(x, y) => menus.popup(sticker, x, y)}
-              actions={actions}
-              showCategory={showCategory}
-            />
-          ))}
-        </TileGrid>
+        <TileGrid label={label} count={stickers.length} scroller={scroller} grid={grid} renderTile={(index) => {
+          const sticker = stickers[index];
+          return <StickerTile
+            key={sticker.id}
+            buttonRef={index === 0 ? firstTileRef : undefined}
+            sticker={sticker}
+            selected={selectedIds.includes(sticker.id)}
+            onSelect={(mode) => choose(sticker, mode)}
+            onMenu={(x, y) => menus.popup(sticker, x, y)}
+            actions={actions}
+            showCategory={showCategory}
+          />;
+        }} />
       )}
       {menus.error && <p role="alert" className="text-xs text-ink-secondary">{menus.error}</p>}
       {sortMenu.error && <p role="alert" className="text-xs text-ink-secondary">{sortMenu.error}</p>}
@@ -197,8 +220,65 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   );
 }
 
-/** 单独订阅大小：拖动滑块时只改列宽，几千个格子不用重新渲染。 */
-function TileGrid({ label, children }: { label?: string; children: ReactNode }) {
+/** 格子间距，与 GridSkeleton 的 gap-3 相同。 */
+const GAP = 12;
+/** 看得见的行之外，上下各多挂载几行，滚动和 Tab 切换时不露白。 */
+const OVERSCAN_ROWS = 3;
+
+/**
+ * 只挂载看得见的几行，几千张表情也只渲染一屏左右的格子。列数按 auto-fill 的规则由网格宽度和
+ * 格子大小算出，排法和 GridSkeleton 一致；格子是正方形，行高等于格宽。大小单独订阅，
+ * 拖动滑块时只重排看得见的格子。
+ */
+function TileGrid({ label, count, scroller, grid, renderTile }: {
+  label?: string;
+  count: number;
+  scroller: RefObject<HTMLElement | null>;
+  grid: RefObject<HTMLElement | null>;
+  renderTile: (index: number) => ReactNode;
+}) {
   const size = useUiStore((s) => s.stickerTileSize);
-  return <section aria-label={label} style={stickerGridColumns(size)} className="grid gap-3">{children}</section>;
+  const [layout, setLayout] = useState({ columns: 1, pitch: size + GAP, start: 0, end: 0 });
+  const measure = useCallback(() => {
+    const section = grid.current;
+    const container = scroller.current;
+    if (!section || !container) return;
+    const box = section.getBoundingClientRect();
+    const columns = Math.max(1, Math.floor((box.width + GAP) / (size + GAP)));
+    const pitch = (box.width - GAP * (columns - 1)) / columns + GAP;
+    const rows = Math.ceil(count / columns);
+    // 网格顶边相对滚动区可见部分顶边的位置，滚过之后是负数。
+    const top = box.top - container.getBoundingClientRect().top;
+    const start = Math.min(rows, Math.max(0, Math.floor(-top / pitch) - OVERSCAN_ROWS));
+    const end = Math.min(rows, Math.max(start, Math.ceil((container.clientHeight - top) / pitch) + OVERSCAN_ROWS));
+    setLayout((old) => old.columns === columns && old.pitch === pitch && old.start === start && old.end === end ? old : { columns, pitch, start, end });
+  }, [grid, scroller, size, count]);
+
+  // 大小、数量或上方内容变化后，在绘制前重算，不闪出空白或旧排法。
+  useLayoutEffect(measure);
+  useEffect(() => {
+    const container = scroller.current;
+    const section = grid.current;
+    if (!container || !section) return;
+    container.addEventListener("scroll", measure, { passive: true });
+    // 窗口宽度变化，以及上方的最近使用、导入结果等改变高度时，网格的位置和列数都会变。
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    const observeChildren = () => { for (const child of container.children) observer.observe(child); };
+    observeChildren();
+    // 最近使用等区块可能晚于网格出现，出现后也要跟踪它们的高度。
+    const children = new MutationObserver(() => { observeChildren(); measure(); });
+    children.observe(container, { childList: true });
+    return () => { container.removeEventListener("scroll", measure); observer.disconnect(); children.disconnect(); };
+  }, [scroller, grid, measure]);
+
+  const { columns, pitch, start, end } = layout;
+  const rows = Math.ceil(count / columns);
+  const first = start * columns;
+  const last = Math.min(count, end * columns);
+  return <section ref={grid} aria-label={label} className="shrink-0" style={{ height: rows ? rows * pitch - GAP : 0, paddingTop: start * pitch }}>
+    <div className="grid" style={{ gap: GAP, gridTemplateColumns: `repeat(${columns},minmax(0,1fr))` }}>
+      {Array.from({ length: Math.max(0, last - first) }, (_, offset) => renderTile(first + offset))}
+    </div>
+  </section>;
 }

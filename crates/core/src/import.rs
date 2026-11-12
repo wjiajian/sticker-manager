@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{Error, Library, Result, time::unix_millis};
 mod archive;
 
-pub(crate) const THUMBNAIL_SIZE: u32 = 256;
+const THUMBNAIL_SIZE: u32 = 256;
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +36,18 @@ pub struct ImportReport {
 pub struct ImportFailure {
     pub path: PathBuf,
     pub message: String,
+    /// 这一条代表几项未导入。压缩包超过限制时剩余条目合并成一条，其余都是 1。
+    pub count: usize,
+}
+
+impl ImportFailure {
+    fn new(path: PathBuf, message: String) -> Self {
+        Self {
+            path,
+            message,
+            count: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize)]
@@ -213,15 +225,21 @@ fn render(
 ) -> Result<(NamedTempFile, (u32, u32), bool)> {
     let (image, animated) = decode(original, format)?;
     let dimensions = (image.width(), image.height());
+    Ok((write_thumbnail(root, &image)?, dimensions, animated))
+}
+
+/// 在 `thumbs/` 里写一个临时缩略图，由调用方改名发布。只缩小不放大：
+/// `DynamicImage::thumbnail` 会把小图放大到给定尺寸，所以边长先和原图取小。
+pub(crate) fn write_thumbnail(root: &Path, image: &DynamicImage) -> Result<NamedTempFile> {
     let mut thumbnail = NamedTempFile::new_in(root.join("thumbs"))?;
     image
         .thumbnail(
-            dimensions.0.min(THUMBNAIL_SIZE),
-            dimensions.1.min(THUMBNAIL_SIZE),
+            image.width().min(THUMBNAIL_SIZE),
+            image.height().min(THUMBNAIL_SIZE),
         )
         .write_to(&mut thumbnail, ImageFormat::Png)?;
     thumbnail.as_file().sync_all()?;
-    Ok((thumbnail, dimensions, animated))
+    Ok(thumbnail)
 }
 
 fn prepare(
@@ -388,7 +406,7 @@ fn run(
                 continue;
             }
             Input::Skip => report.skipped += 1,
-            Input::Failed(path, message) => report.failures.push(ImportFailure { path, message }),
+            Input::Failed(path, message) => report.failures.push(ImportFailure::new(path, message)),
         }
         state.processed += 1;
         progress(state);
@@ -416,10 +434,9 @@ fn process(
         }
     });
     if let Err(e) = result {
-        report.failures.push(ImportFailure {
-            path: display.into(),
-            message: e.to_string(),
-        });
+        report
+            .failures
+            .push(ImportFailure::new(display.into(), e.to_string()));
     }
 }
 

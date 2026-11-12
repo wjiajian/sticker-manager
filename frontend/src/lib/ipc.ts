@@ -61,6 +61,8 @@ export interface StickerPage {
 export interface ImportFailure {
   path: string;
   message: string;
+  /** 这一条代表几项未导入；压缩包超过限制时剩余条目合并成一条。 */
+  count: number;
 }
 
 export interface ImportReport {
