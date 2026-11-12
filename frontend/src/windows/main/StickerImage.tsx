@@ -14,7 +14,9 @@ export function StickerImage({ path, name, lazy = false }: { path: string; name:
       loading={lazy ? "lazy" : "eager"}
       decoding="async"
       onError={() => setFailed(true)}
-      className="h-full w-full object-contain"
+      // 父元素都是带内边距的 flex 容器。h-full 在 WebKit 里会按含内边距的高度
+      // （aspect-ratio 算出的）计算，图片因此盖住上下内边距；拉伸不经过百分比。
+      className="min-h-0 min-w-0 flex-1 self-stretch object-contain"
     />
   );
 }

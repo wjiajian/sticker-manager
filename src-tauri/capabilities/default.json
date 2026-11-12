@@ -9,7 +9,6 @@
     "core:window:allow-start-dragging",
     "dialog:allow-open",
     "dialog:allow-message",
-    "drag:allow-start-drag",
-    "opener:allow-reveal-item-in-dir"
+    "drag:allow-start-drag"
   ]
 }

@@ -96,7 +96,7 @@ impl CredentialStore for FileCredentials {
     }
 }
 
-/// 同一配置首次读取后缓存成功或失败；拒绝访问后也不会每五分钟再弹权限框。
+/// 同一配置首次读取后缓存成功或失败，每轮同步不必重读凭据文件。
 #[derive(Default)]
 pub struct CredentialCache {
     value: Option<(String, Result<Credentials, String>)>,

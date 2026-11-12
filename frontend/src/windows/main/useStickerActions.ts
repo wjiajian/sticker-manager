@@ -5,6 +5,7 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc, type Sticker } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
+import { sameExport } from "../../lib/exportPath";
 import { useSticker } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 
@@ -248,10 +249,4 @@ export function useStickerActions(stickers: Sticker[]) {
   }
 
   return { copy, drag, toggleFavorite, reveal, deleteSticker, deleteStickers, restoreSticker, restoreStickers, purgeSticker, purgeStickers, purgeDeletedStickers, selectedStickers, targetsFor, undo, undoDelete, dismissUndo, busy, claimDragDrop, copiedId, error };
-}
-
-/** 拖放事件里的路径写法可能和导出时不同（比如 /var 与 /private/var），只比较 export-xxx/文件名 这两段。 */
-function sameExport(path: string, exported: string) {
-  const tail = (value: string) => value.normalize("NFC").split(/[\\/]/).slice(-2).join("/");
-  return tail(path) === tail(exported);
 }

@@ -15,6 +15,7 @@ import { StickerImage } from "./StickerImage";
 import { useDragOut } from "./useDragOut";
 import { usePurgeDays } from "./usePurgeDays";
 import type { StickerActions } from "./useStickerActions";
+import { storageSize } from "./useSyncStatus";
 
 export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?: SyncStatus }) {
   const selectedId = useUiStore((s) => s.selectedStickerId);
@@ -75,7 +76,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
           <div className="flex flex-col gap-1">
             <NameEditor key={sticker.id} sticker={sticker} />
             <p className="text-xs text-ink-secondary">
-              {sticker.width} × {sticker.height} · {formatSize(sticker.byteSize)} · {new Date(sticker.addedAt).toLocaleDateString("zh-CN")} 添加
+              {sticker.width} × {sticker.height} · {storageSize(sticker.byteSize)} · {new Date(sticker.addedAt).toLocaleDateString("zh-CN")} 添加
             </p>
             {days !== null && <p className="text-xs text-ink-secondary">{days > 0 ? `${days} 天后彻底删除` : "即将彻底删除"}</p>}
           </div>
@@ -139,10 +140,4 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
       {actions.error && <p role="alert" className="text-xs text-ink-secondary">{actions.error}</p>}
     </aside>
   );
-}
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

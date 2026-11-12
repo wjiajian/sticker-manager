@@ -1,6 +1,7 @@
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { sameExport } from "../../lib/exportPath";
 import { ipc, type Sticker } from "../../lib/ipc";
 
 export function usePanelActions() {
@@ -81,9 +82,4 @@ export function usePanelActions() {
   }, []);
 
   return { copy, drag, busy, copiedKey, error, reset };
-}
-
-function sameExport(path: string, exported: string) {
-  const tail = (value: string) => value.normalize("NFC").split(/[\\/]/).slice(-2).join("/");
-  return tail(path) === tail(exported);
 }

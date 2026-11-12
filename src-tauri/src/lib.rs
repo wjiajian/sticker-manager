@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use sticker_core::Library;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod appearance;
 #[cfg(target_os = "macos")]
@@ -233,9 +233,7 @@ fn start_expiry_cleanup(app: tauri::AppHandle) {
             match result {
                 Ok(count) if count > 0 => {
                     sync::local_changed(&app);
-                    if let Err(error) = app.emit("library-changed", ()) {
-                        eprintln!("通知仓库更新失败：{error}");
-                    }
+                    commands::notify_library_changed(&app);
                 }
                 Ok(_) => {}
                 Err(error) => eprintln!("清理最近删除失败：{error}"),

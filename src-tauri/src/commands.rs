@@ -239,18 +239,28 @@ pub async fn create_category_and_set_stickers(
 
 #[tauri::command]
 pub async fn copy_sticker(app: AppHandle, id: String, file_only: bool) -> CommandResult<()> {
+    // 仓库锁只持有到导出副本为止：之后原文件即使被彻底删除，副本也已经复制好。
+    // 解码和写剪贴板不占锁，同步和其他命令不用等。
     let handle = app.clone();
-    with_library(app, move |library| {
-        let sticker = library.sticker_for_use(&id)?;
+    let sticker_id = id.clone();
+    let path = with_library(app.clone(), move |library| {
+        let sticker = library.sticker_for_use(&sticker_id)?;
+        Ok(handle.state::<ExportDirectory>().prepare(&sticker)?)
+    })
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || {
         // macOS 统一复制原文件，无需解码或取动图首帧；Windows 保持原有策略。
         let image = if cfg!(target_os = "macos") || file_only {
             None
         } else {
-            Some(sticker.read_image()?)
+            Some(sticker_core::read_image(&path)?)
         };
-        let path = handle.state::<ExportDirectory>().prepare(&sticker)?;
         clipboard::write(&path, image.as_ref())
-            .map_err(|error| CommandError::Clipboard(error.to_string()))?;
+            .map_err(|error| CommandError::Clipboard(error.to_string()))
+    })
+    .await??;
+    // 写剪贴板成功后才记使用次数。
+    with_library(app, move |library| {
         library.record_usage(&id).map_err(CommandError::Usage)
     })
     .await

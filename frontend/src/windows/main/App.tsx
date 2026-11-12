@@ -85,7 +85,7 @@ export function App() {
       {update.dialogOpen && <UpdateDialog status={update.status} onClose={update.closeDialog} />}
       <TitleBar busy={busy} onChoose={choose} sync={sync.data} onSync={(button) => openSync(button)} />
       {status && <div role="status" aria-atomic="true" className="max-h-24 shrink-0 overflow-y-auto whitespace-pre-line text-ink-secondary">
-        {status && <p className="px-6 py-2">{status}</p>}
+        <p className="px-6 py-2">{status}</p>
       </div>}
       <ImportBar key={importing.status?.batch ?? 0} status={importing.status} error={importing.error} clearError={importing.clearError} />
       <UndoBar actions={actions} />

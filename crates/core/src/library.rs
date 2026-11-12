@@ -304,14 +304,18 @@ impl Sticker {
         })
     }
 
-    /// 使用与导入共用解码逻辑，动图读取第一帧，保留原始尺寸。
     pub fn read_image(&self) -> Result<image::DynamicImage> {
-        let format = image::ImageReader::open(&self.object_path)?
-            .with_guessed_format()?
-            .format()
-            .ok_or(Error::EmptyImage)?;
-        Ok(crate::import::decode(&self.object_path, format)?.0)
+        read_image(&self.object_path)
     }
+}
+
+/// 使用与导入共用解码逻辑，动图读取第一帧，保留原始尺寸。也用于读导出的副本。
+pub fn read_image(path: &Path) -> Result<image::DynamicImage> {
+    let format = image::ImageReader::open(path)?
+        .with_guessed_format()?
+        .format()
+        .ok_or(Error::EmptyImage)?;
+    Ok(crate::import::decode(path, format)?.0)
 }
 
 #[cfg(test)]

@@ -359,8 +359,11 @@ pub fn start(app: AppHandle) {
                             },
                         )
                     });
-                // 失败前可能已应用其他设备的一段操作，仍然通知两个窗口刷新。
-                let _ = app.emit("library-changed", ());
+                // 没有改动本机表的轮次（比如每 5 分钟的例行拉取）不让各窗口重读全部列表。
+                // 失败前可能已应用其他设备的一段操作，出错时照常通知。
+                if result.as_ref().map_or(true, |report| report.changed) {
+                    crate::commands::notify_library_changed(&app);
+                }
                 match result {
                     Ok(report) => {
                         let mut runtime = state.inner.lock().unwrap();
