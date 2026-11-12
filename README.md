@@ -6,7 +6,7 @@
 
 macOS 和 Windows 上的表情包管理器，把表情收进一个仓库，分类整理，用的时候随手就能取。
 
-[![版本 0.1.7](https://img.shields.io/badge/版本-0.1.7-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
+[![版本 0.2.0](https://img.shields.io/badge/版本-0.2.0-blue)](https://github.com/wjiajian/sticker-manager/releases/latest)
 ![平台 macOS 14+](https://img.shields.io/badge/平台-macOS%2014%2B-lightgrey)
 ![平台 Windows x64](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)
 [![许可证 MIT](https://img.shields.io/badge/许可证-MIT-green)](LICENSE)
