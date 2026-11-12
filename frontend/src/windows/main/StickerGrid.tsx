@@ -50,9 +50,18 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const firstTileRef = useCallback((button: HTMLButtonElement | null) => {
     firstTile.current = button;
     if (!button || !focusFirstWhenMounted.current) return;
-    focusFirstWhenMounted.current = false;
-    requestAnimationFrame(() => { button.focus(); button.click(); });
+    requestAnimationFrame(() => {
+      if (!focusFirstWhenMounted.current || !button.isConnected) return;
+      focusFirstWhenMounted.current = false;
+      button.focus();
+      button.click();
+    });
   }, []);
+  // 继续输入会取消聚焦请求（setSearchText 清掉 resultFocusRequested），还在等第一张挂载的那次也作废，
+  // 不然会在输入时选中上一次搜索的结果。订阅在 set 时同步触发，赶在第一张挂载之前。
+  useEffect(() => useUiStore.subscribe((state, previous) => {
+    if (state.searchText !== previous.searchText) focusFirstWhenMounted.current = false;
+  }), []);
   const mutating = useIsMutating() > 0;
   const { data: source, error, isPending } = listing;
   const skeleton = useDelayedLoading(isPending, searchQuery || (typeof view === "string" ? view : view.category));

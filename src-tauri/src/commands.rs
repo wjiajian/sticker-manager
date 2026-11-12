@@ -261,9 +261,17 @@ pub async fn copy_sticker(app: AppHandle, id: String, file_only: bool) -> Comman
     .await??;
     // 写剪贴板成功后才记使用次数。
     with_library(app, move |library| {
-        library.record_usage(&id).map_err(CommandError::Usage)
+        usage_after_copy(library.record_usage(&id))
     })
     .await
+}
+
+/// 复制已经完成；这期间表情被删除或彻底删除时不再记使用次数，也不把复制算作失败。
+fn usage_after_copy(result: sticker_core::Result<()>) -> CommandResult<()> {
+    match result {
+        Err(sticker_core::Error::StickerUnavailable) => Ok(()),
+        result => result.map_err(CommandError::Usage),
+    }
 }
 
 #[derive(Serialize)]
@@ -316,4 +324,21 @@ pub async fn reveal_sticker(app: AppHandle, id: String) -> CommandResult<()> {
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_succeeds_when_sticker_disappears_before_usage_is_recorded() {
+        assert!(usage_after_copy(Ok(())).is_ok());
+        assert!(usage_after_copy(Err(sticker_core::Error::StickerUnavailable)).is_ok());
+        assert!(matches!(
+            usage_after_copy(Err(sticker_core::Error::CategoryUnavailable)),
+            Err(CommandError::Usage(
+                sticker_core::Error::CategoryUnavailable
+            ))
+        ));
+    }
 }
