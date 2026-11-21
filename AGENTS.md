@@ -7,7 +7,7 @@ For every agent working in this repository.
 
 - When a test requires operating the computer, prefer background mode: screenshot, click, and type only in the target app, without taking the foreground, raising its window, or moving the user's mouse. The user may be using this computer at the same time.
 - Take over the full screen only for steps background mode cannot do (for example cross-app drag and drop, or keys that cannot be sent in the background). Keep it brief, hand control back as soon as you finish, and state in your report which steps took over the screen.
-- Always point test instances at a temporary directory with `STICKER_LIBRARY_DIR` (absolute path). Do not touch the real library at `~/Library/Application Support/com.wjiajian.sticker-manager` (0.1.3 and earlier used `com.shaojian.sticker-manager`; newer versions move it automatically on first launch).
+- Always point test instances at a temporary directory with `STICKER_LIBRARY_DIR` (absolute path). Do not touch the real library at `~/Library/Application Support/com.wjiajian.sticker-manager`.
 - Do not change system settings (Low Data Mode, Reduce Motion, appearance, and so on). If a test needs one, ask the user to switch it themselves; if they do not, record the test as skipped.
 
 
@@ -23,6 +23,7 @@ For every agent working in this repository.
 
 1. Title format: use conventional commit messages
 2. Use English to write PR title and descriptions.
+3. If you are codex, add prefix for branches like codex/.....; claude/pi/dsh/cursor do like this.
 
 
 ## Release versions
