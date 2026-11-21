@@ -11,6 +11,7 @@ import { downloadLabel, focusOpener } from "./useUpdate";
 import { syncTime } from "./useSyncStatus";
 
 type SectionId = "general" | "quick" | "sync" | "library" | "update";
+type BallSizeAction = { kind: "preview"; size: number | null } | { kind: "commit"; size: number };
 const BALL_SIZE = { min: 40, max: 80, step: 4, default: 56 };
 const SECTIONS: { id: SectionId; label: string; icon: Icon }[] = [
   { id: "general", label: "通用", icon: SlidersHorizontalIcon },
@@ -42,9 +43,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const pointerDragging = useRef(false);
   const dragCleanup = useRef<(() => void) | null>(null);
   const ballSizeInFlight = useRef<Promise<void> | null>(null);
-  const ballSizePending = useRef<
-    { kind: "preview"; size: number | null } | { kind: "commit"; size: number } | null
-  >(null);
+  const ballSizePending = useRef<BallSizeAction[]>([]);
   const mounted = useRef(true);
   const tabId = (id: SectionId) => `${title}-tab-${id}`;
   useEffect(() => {
@@ -112,14 +111,15 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
       } catch { /* 保留原始操作错误 */ }
     } finally { working.current = false; setBusy(null); }
   }
-  // 预览、取消与提交共用一个串行队列，只保留最新意图，不与 change() 锁互斥，也不丢弃快速连续调整。
-  function enqueueBallSize(action: { kind: "preview"; size: number | null } | { kind: "commit"; size: number }) {
-    ballSizePending.current = action;
+  // 只合并队尾尚未执行的预览；松手后的提交必须保留，后续预览或取消不能覆盖它。
+  function enqueueBallSize(action: BallSizeAction) {
+    const pending = ballSizePending.current;
+    if (pending.at(-1)?.kind === "preview") pending.pop();
+    pending.push(action);
     if (ballSizeInFlight.current) return;
     const run = async () => {
-      while (ballSizePending.current) {
-        const next = ballSizePending.current;
-        ballSizePending.current = null;
+      while (pending.length) {
+        const next = pending.shift()!;
         try {
           if (next.kind === "preview") {
             await ipc.previewBallSize(next.size);
@@ -144,7 +144,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
             await ipc.previewBallSize(null).catch(() => {});
           }
         } finally {
-          if (next.kind === "commit" && !ballSizePending.current && !pointerDragging.current) {
+          if (next.kind === "commit" && !pending.length && !pointerDragging.current) {
             draftBallSizeRef.current = null;
             if (mounted.current) setDraftBallSize(null);
           }
@@ -166,7 +166,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
     dragCleanup.current?.();
     dragCleanup.current = null;
     pointerDragging.current = false;
-    if (draftBallSizeRef.current !== null || ballSizePending.current || ballSizeInFlight.current) {
+    if (draftBallSizeRef.current !== null || ballSizePending.current.length || ballSizeInFlight.current) {
       draftBallSizeRef.current = null;
       setDraftBallSize(null);
       enqueueBallSize({ kind: "preview", size: null });

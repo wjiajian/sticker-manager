@@ -28,6 +28,7 @@ use windows::{
 
 const MAX_BYTES: usize = 100 * 1024 * 1024;
 const MAX_FILES: usize = 256;
+const UNSUPPORTED_DROP: &str = "拖入来源没有提供图片或文件，请先保存图片后导入";
 
 fn registered(name: &str) -> u16 {
     // SAFETY: HSTRING 在调用期间持有有效的 UTF-16 字符串。
@@ -44,6 +45,28 @@ fn format(id: u16, index: i32, medium: u32) -> FORMATETC {
     }
 }
 
+fn supports_drop(data: &IDataObject) -> bool {
+    [
+        15,
+        registered("FileGroupDescriptorW"),
+        registered("PNG"),
+        17,
+        8,
+    ]
+    .iter()
+    // 微信内部表情拖拽可能返回 S_FALSE；HRESULT::is_ok() 会把它也当成成功。
+    // QueryGetData 只有 S_OK 才表示请求的格式可提供。
+    .any(|id| unsafe { data.QueryGetData(&format(*id, -1, TYMED_HGLOBAL.0 as u32)) == S_OK })
+}
+
+fn copy_effect(supported: bool, allowed: DROPEFFECT) -> DROPEFFECT {
+    if supported && allowed.0 & DROPEFFECT_COPY.0 != 0 {
+        DROPEFFECT_COPY
+    } else {
+        DROPEFFECT_NONE
+    }
+}
+
 struct Medium(STGMEDIUM);
 impl Drop for Medium {
     fn drop(&mut self) {
@@ -53,9 +76,86 @@ impl Drop for Medium {
 }
 
 fn get(data: &IDataObject, request: &FORMATETC) -> Result<Medium, String> {
-    unsafe { data.GetData(request) }
-        .map(Medium)
-        .map_err(|e| e.to_string())
+    let result = unsafe { data.GetData(request) };
+    #[cfg(debug_assertions)]
+    if std::env::var_os("STICKER_DROP_DIAGNOSTICS").is_some() {
+        eprintln!(
+            "drop GetData format={} index={} medium={} result={:?}",
+            request.cfFormat,
+            request.lindex,
+            request.tymed,
+            result
+                .as_ref()
+                .map(|medium| medium.tymed)
+                .map_err(|e| e.code())
+        );
+    }
+    result.map(Medium).map_err(|e| e.to_string())
+}
+
+fn diagnose_formats(data: &IDataObject, stage: &str) {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("STICKER_DROP_DIAGNOSTICS").is_some() {
+        use windows::Win32::System::{
+            Com::{CoTaskMemFree, DATADIR_GET},
+            DataExchange::GetClipboardFormatNameW,
+        };
+        // 只记录格式和结果码，不读取文件名、路径或图片内容。
+        unsafe {
+            for id in [
+                15,
+                registered("FileGroupDescriptorW"),
+                registered("PNG"),
+                17,
+                8,
+            ] {
+                let request = format(id, -1, TYMED_HGLOBAL.0 as u32);
+                eprintln!(
+                    "drop {stage} probe={id} query={:?}",
+                    data.QueryGetData(&request)
+                );
+            }
+            eprintln!(
+                "drop {stage} async={:?}",
+                data.cast::<IDataObjectAsyncCapability>()
+                    .and_then(|op| op.GetAsyncMode())
+            );
+            let formats = match data.EnumFormatEtc(DATADIR_GET.0 as u32) {
+                Ok(formats) => formats,
+                Err(error) => {
+                    eprintln!("drop {stage} EnumFormatEtc={:?}", error.code());
+                    return;
+                }
+            };
+            for _ in 0..64 {
+                let mut entry = [FORMATETC::default()];
+                let mut fetched = 0;
+                let result = formats.Next(&mut entry, Some(&mut fetched));
+                if result.is_err() || fetched == 0 {
+                    eprintln!("drop {stage} enumeration result={result:?} fetched={fetched}");
+                    break;
+                }
+                let request = &entry[0];
+                let mut name = [0u16; 256];
+                let length =
+                    GetClipboardFormatNameW(request.cfFormat as u32, &mut name).max(0) as usize;
+                eprintln!(
+                    "drop {stage} format={} name={} index={} medium={} aspect={} query={:?}",
+                    request.cfFormat,
+                    String::from_utf16_lossy(&name[..length]),
+                    request.lindex,
+                    request.tymed,
+                    request.dwAspect,
+                    data.QueryGetData(request)
+                );
+                if !request.ptd.is_null() {
+                    CoTaskMemFree(Some(request.ptd.cast()));
+                }
+            }
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = (data, stage);
 }
 
 fn bytes(medium: &Medium) -> Result<Vec<u8>, String> {
@@ -281,6 +381,7 @@ fn receive_in_background(
 }
 
 fn receive(data: &IDataObject) -> Result<Received, String> {
+    diagnose_formats(data, "receive");
     if let Ok(medium) = get(data, &format(15, -1, TYMED_HGLOBAL.0 as u32)) {
         let drop = unsafe { HDROP(medium.0.u.hGlobal.0) };
         let count = unsafe { DragQueryFileW(drop, u32::MAX, None) };
@@ -354,7 +455,7 @@ fn receive(data: &IDataObject) -> Result<Received, String> {
             });
         }
     }
-    Err("这个拖入来源没有提供可读取的图片或文件，请先保存图片后导入".into())
+    Err(UNSUPPORTED_DROP.into())
 }
 
 #[implement(IDropTarget)]
@@ -372,31 +473,19 @@ impl IDropTarget_Impl for Target_Impl {
         _: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        let accepted = data.as_ref().is_some_and(|data| {
-            [
-                15,
-                registered("FileGroupDescriptorW"),
-                registered("PNG"),
-                17,
-                8,
-            ]
-            .iter()
-            .any(|id| unsafe {
-                data.QueryGetData(&format(*id, -1, TYMED_HGLOBAL.0 as u32))
-                    .is_ok()
-            })
-        });
-        self.accepted.set(accepted);
+        let supported = data.as_ref().is_some_and(supports_drop);
+        if let Some(data) = data.as_ref() {
+            diagnose_formats(data, "DragEnter");
+        }
+        self.accepted.set(supported);
+        let accepted;
         unsafe {
-            *effect = if accepted {
-                DROPEFFECT_COPY
-            } else {
-                DROPEFFECT_NONE
-            };
+            *effect = copy_effect(supported, *effect);
+            accepted = *effect == DROPEFFECT_COPY;
         }
         let _ = crate::ball::external_drop(&self.app, accepted);
-        if !accepted {
-            let _ = crate::ball::ball_message(self.app.clone(), "拖入来源未提供图片文件".into());
+        if !supported {
+            let _ = crate::ball::ball_message(self.app.clone(), UNSUPPORTED_DROP.into());
         }
         Ok(())
     }
@@ -406,13 +495,11 @@ impl IDropTarget_Impl for Target_Impl {
         _: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        unsafe {
-            *effect = if self.accepted.get() {
-                DROPEFFECT_COPY
-            } else {
-                DROPEFFECT_NONE
-            };
-        }
+        let accepted = unsafe {
+            *effect = copy_effect(self.accepted.get(), *effect);
+            *effect == DROPEFFECT_COPY
+        };
+        let _ = crate::ball::external_drop(&self.app, accepted);
         Ok(())
     }
     fn DragLeave(&self) -> windows::core::Result<()> {
@@ -427,9 +514,16 @@ impl IDropTarget_Impl for Target_Impl {
         _: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
+        if let Some(data) = data.as_ref() {
+            diagnose_formats(data, "Drop");
+        }
+        let accepted = unsafe { copy_effect(data.as_ref().is_some_and(supports_drop), *effect) };
         let _ = self.DragLeave();
         unsafe {
             *effect = DROPEFFECT_NONE;
+        }
+        if accepted == DROPEFFECT_NONE {
+            return Ok(());
         }
         let result = data
             .as_ref()
@@ -537,6 +631,7 @@ mod tests {
     #[implement(IDataObject, IDataObjectAsyncCapability)]
     struct Sample {
         formats: Vec<(u16, i32, Vec<u8>, u32)>,
+        query_result: Option<windows::core::HRESULT>,
         async_state: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
         release_data: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     }
@@ -630,6 +725,9 @@ mod tests {
             }
         }
         fn QueryGetData(&self, request: *const FORMATETC) -> windows::core::HRESULT {
+            if let Some(result) = self.query_result {
+                return result;
+            }
             let request = unsafe { &*request };
             if self.formats.iter().any(|(id, index, _, medium)| {
                 *id == request.cfFormat && *index == request.lindex && request.tymed & medium != 0
@@ -673,6 +771,53 @@ mod tests {
         }
         fn EnumDAdvise(&self) -> windows::core::Result<IEnumSTATDATA> {
             Err(E_NOTIMPL.into())
+        }
+    }
+
+    #[test]
+    fn internal_wechat_drag_s_false_is_not_an_importable_format() {
+        for status in [
+            windows::Win32::Foundation::S_FALSE,
+            windows::core::HRESULT(2),
+        ] {
+            let data: IDataObject = Sample {
+                query_result: Some(status),
+                ..Default::default()
+            }
+            .into();
+            assert!(!supports_drop(&data));
+            assert_eq!(
+                copy_effect(supports_drop(&data), DROPEFFECT_COPY),
+                DROPEFFECT_NONE
+            );
+        }
+        let unsupported: IDataObject = Sample::default().into();
+        assert!(!supports_drop(&unsupported));
+    }
+
+    #[test]
+    fn supported_formats_require_an_explicit_copy_operation() {
+        use windows::Win32::System::Ole::DROPEFFECT_MOVE;
+        for id in [
+            15,
+            registered("FileGroupDescriptorW"),
+            registered("PNG"),
+            17,
+            8,
+        ] {
+            let data: IDataObject = Sample {
+                formats: vec![(id, -1, vec![1], TYMED_HGLOBAL.0 as u32)],
+                ..Default::default()
+            }
+            .into();
+            assert!(supports_drop(&data));
+            assert_eq!(copy_effect(true, DROPEFFECT_COPY), DROPEFFECT_COPY);
+            assert_eq!(
+                copy_effect(true, DROPEFFECT(DROPEFFECT_COPY.0 | DROPEFFECT_MOVE.0)),
+                DROPEFFECT_COPY
+            );
+            assert_eq!(copy_effect(true, DROPEFFECT_MOVE), DROPEFFECT_NONE);
+            assert_eq!(copy_effect(true, DROPEFFECT_NONE), DROPEFFECT_NONE);
         }
     }
 
@@ -751,6 +896,7 @@ mod tests {
             ],
             async_state: Some(state.clone()),
             release_data: Some(release.clone()),
+            ..Default::default()
         }
         .into();
         let (send, receive) = std::sync::mpsc::channel();
@@ -911,6 +1057,105 @@ mod tests {
         assert_eq!(std::fs::read(&received.paths[0]).unwrap(), original);
         let unsupported: IDataObject = Sample::default().into();
         assert!(receive(&unsupported).err().unwrap().contains("没有提供"));
+    }
+
+    #[test]
+    fn ole_images_import_into_library_and_outlive_staging() {
+        for raw_png in [true, false] {
+            let image = if raw_png {
+                image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                    2,
+                    3,
+                    image::Rgba([23, 45, 67, 128]),
+                ))
+            } else {
+                image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                    2,
+                    3,
+                    image::Rgb([23, 45, 67]),
+                ))
+            };
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            let (id, content) = if raw_png {
+                image
+                    .write_to(&mut encoded, image::ImageFormat::Png)
+                    .unwrap();
+                (registered("PNG"), encoded.into_inner())
+            } else {
+                image
+                    .write_to(&mut encoded, image::ImageFormat::Bmp)
+                    .unwrap();
+                (8, encoded.into_inner()[14..].to_vec())
+            };
+            let data: IDataObject = Sample {
+                formats: vec![(id, -1, content, TYMED_HGLOBAL.0 as u32)],
+                ..Default::default()
+            }
+            .into();
+            let received = receive(&data).unwrap();
+            let staged = received.paths[0].clone();
+            let root = tempfile::tempdir().unwrap();
+            let mut library = sticker_core::Library::open(root.path()).unwrap();
+            let report = library.import_paths(&received.paths);
+            assert_eq!((report.added, report.skipped), (1, 0));
+            assert!(report.failures.is_empty());
+            let sticker = library.sticker(&report.sticker_ids[0]).unwrap();
+            drop(received);
+            assert!(!staged.exists());
+            assert_eq!(
+                image::open(sticker.object_path).unwrap().to_rgba8(),
+                image.to_rgba8()
+            );
+            assert!(sticker.thumbnail_path.is_file());
+        }
+    }
+
+    #[test]
+    fn ole_virtual_animation_stream_imports_original_frames_and_deduplicates() {
+        let mut original = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut original);
+            for color in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+                encoder
+                    .encode_frame(image::Frame::new(image::RgbaImage::from_pixel(
+                        2,
+                        3,
+                        image::Rgba(color),
+                    )))
+                    .unwrap();
+            }
+        }
+        let data: IDataObject = Sample {
+            formats: vec![
+                (
+                    registered("FileGroupDescriptorW"),
+                    -1,
+                    file_descriptor("聊天表情.gif"),
+                    TYMED_HGLOBAL.0 as u32,
+                ),
+                (
+                    registered("FileContents"),
+                    0,
+                    original.clone(),
+                    TYMED_ISTREAM.0 as u32,
+                ),
+            ],
+            ..Default::default()
+        }
+        .into();
+        let received = receive(&data).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut library = sticker_core::Library::open(root.path()).unwrap();
+        let report = library.import_paths(&received.paths);
+        assert_eq!((report.added, report.skipped), (1, 0));
+        assert!(report.failures.is_empty());
+        let repeated = library.import_paths(&received.paths);
+        assert_eq!((repeated.added, repeated.existing), (0, 1));
+        let sticker = library.sticker(&report.sticker_ids[0]).unwrap();
+        drop(received);
+        assert!(sticker.animated);
+        assert_eq!((sticker.width, sticker.height), (2, 3));
+        assert_eq!(std::fs::read(sticker.object_path).unwrap(), original);
     }
 
     #[test]
