@@ -147,6 +147,7 @@ pub fn run() {
             commands::prepare_sticker_drag,
             commands::record_sticker_usage,
             commands::toggle_sticker_favorite,
+            commands::set_stickers_favorite,
             commands::reveal_sticker,
             panel::panel_session,
             panel::set_panel_pinned,

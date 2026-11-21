@@ -243,10 +243,13 @@ export function useStickerActions(stickers: Sticker[]) {
   function toggleFavorite(sticker: Sticker) {
     return perform(async () => { await ipc.toggleStickerFavorite(sticker.id); });
   }
+  function setFavorites(targets: Sticker[], favorite: boolean) {
+    return perform(async () => { await ipc.setStickersFavorite(targets.map((sticker) => sticker.id), favorite); });
+  }
 
   function reveal(sticker: Sticker) {
     return perform(() => ipc.revealSticker(sticker.id), false);
   }
 
-  return { copy, drag, toggleFavorite, reveal, deleteSticker, deleteStickers, restoreSticker, restoreStickers, purgeSticker, purgeStickers, purgeDeletedStickers, selectedStickers, targetsFor, undo, undoDelete, dismissUndo, busy, claimDragDrop, copiedId, error };
+  return { copy, drag, toggleFavorite, setFavorites, reveal, deleteSticker, deleteStickers, restoreSticker, restoreStickers, purgeSticker, purgeStickers, purgeDeletedStickers, selectedStickers, targetsFor, undo, undoDelete, dismissUndo, busy, claimDragDrop, copiedId, error };
 }

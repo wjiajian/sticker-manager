@@ -16,6 +16,7 @@ import { useDragOut } from "./useDragOut";
 import { usePurgeDays } from "./usePurgeDays";
 import type { StickerActions } from "./useStickerActions";
 import { storageSize } from "./useSyncStatus";
+import { StickersCategory } from "./StickersCategory";
 
 export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?: SyncStatus }) {
   const selectedId = useUiStore((s) => s.selectedStickerId);
@@ -34,6 +35,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
   const many = actions.selectedStickers;
   if (many.length > 1) {
     const deleted = many.every((item) => item.deletedAt !== null);
+    const allFavorite = many.every((item) => item.favorite);
     return (
       <aside aria-label="表情详情" className="flex w-66 shrink-0 flex-col items-center justify-center gap-4 overflow-y-auto bg-detail p-6 text-center *:shrink-0">
         <p role="status" className="text-lg font-semibold">已选 {many.length} 张</p>
@@ -44,15 +46,29 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
             恢复
           </Button>
           <Button disabled={actions.busy} onClick={() => void actions.purgeStickers(many)} className="disabled:opacity-50">彻底删除</Button>
-        </div> : <Button
-          disabled={actions.busy}
-          onClick={() => void actions.deleteStickers(many)}
-          title={`移到最近删除，30 天内可以恢复 · ${platform === "macos" ? "⌘⌫" : "Delete"}`}
-          className="justify-center disabled:opacity-50"
-        >
-          <TrashIcon size={16} aria-hidden />
-          删除 {many.length} 张
-        </Button>}
+        </div> : <>
+          <div className="flex gap-2">
+            <Button
+              aria-pressed={allFavorite}
+              disabled={actions.busy}
+              onClick={() => void actions.setFavorites(many, !allFavorite)}
+              className="justify-center disabled:opacity-50"
+            >
+              <StarIcon size={16} weight={allFavorite ? "fill" : "regular"} className={allFavorite ? "text-accent" : ""} aria-hidden />
+              {allFavorite ? "取消收藏" : "收藏"}
+            </Button>
+            <Button
+              disabled={actions.busy}
+              onClick={() => void actions.deleteStickers(many)}
+              title={`移到最近删除，30 天内可以恢复 · ${platform === "macos" ? "⌘⌫" : "Delete"}`}
+              className="justify-center disabled:opacity-50"
+            >
+              <TrashIcon size={16} aria-hidden />
+              删除 {many.length} 张
+            </Button>
+          </div>
+          <StickersCategory key={many.map((item) => item.id).join()} stickers={many} />
+        </>}
         {actions.error && <p role="alert" className="text-xs text-ink-secondary">{actions.error}</p>}
       </aside>
     );

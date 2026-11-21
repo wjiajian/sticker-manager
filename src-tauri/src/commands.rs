@@ -314,6 +314,18 @@ pub async fn toggle_sticker_favorite(app: AppHandle, id: String) -> CommandResul
 }
 
 #[tauri::command]
+pub async fn set_stickers_favorite(
+    app: AppHandle,
+    ids: Vec<String>,
+    favorite: bool,
+) -> CommandResult<usize> {
+    with_library(app, move |library| {
+        Ok(library.set_stickers_favorite(&ids, favorite)?)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn reveal_sticker(app: AppHandle, id: String) -> CommandResult<()> {
     let handle = app.clone();
     with_library(app, move |library| {

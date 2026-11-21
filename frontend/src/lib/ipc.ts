@@ -167,6 +167,7 @@ export const ipc = {
   prepareStickerDrag: (id: string) => invoke<{ path: string; thumbnailPath: string }>("prepare_sticker_drag", { id }),
   recordStickerUsage: (id: string) => invoke<void>("record_sticker_usage", { id }),
   toggleStickerFavorite: (id: string) => invoke<boolean>("toggle_sticker_favorite", { id }),
+  setStickersFavorite: (ids: string[], favorite: boolean) => invoke<number>("set_stickers_favorite", { ids, favorite }),
   revealSticker: (id: string) => invoke<void>("reveal_sticker", { id }),
 };
 

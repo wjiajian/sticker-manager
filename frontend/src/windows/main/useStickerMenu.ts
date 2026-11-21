@@ -25,6 +25,8 @@ export function useStickerMenu(actions: StickerActions) {
       await dispose();
       const targets = actions.targetsFor(sticker);
       const items: MenuOptions["items"] = targets.length > 1 ? (sticker.deletedAt === null ? [
+        { id: "favorite-stickers", text: targets.every((item) => item.favorite) ? `取消收藏 ${targets.length} 张` : `收藏 ${targets.length} 张`, action: () => { void actions.setFavorites(targets, !targets.every((item) => item.favorite)); } },
+        { item: "Separator" },
         { id: "delete-stickers", text: `删除 ${targets.length} 张`, action: () => { void actions.deleteStickers(targets); } },
       ] : [
         { id: "restore-stickers", text: `恢复 ${targets.length} 张`, action: () => { void actions.restoreStickers(targets); } },
