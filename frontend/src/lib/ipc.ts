@@ -118,6 +118,8 @@ export const ipc = {
   setDeviceName: (name: string) => invoke<void>("set_device_name", { name }),
   getSettings: () => invoke<Settings>("get_settings"),
   setAppearance: (appearance: Settings["appearance"]) => invoke<Settings>("set_appearance", { appearance }),
+  setBallSize: (size: number) => invoke<Settings>("set_ball_size", { size }),
+  previewBallSize: (size: number | null) => invoke<void>("preview_ball_size", { size }),
   setBallVisible: (visible: boolean) => invoke<Settings>("set_ball_visible", { visible }),
   setBallAutoHide: (seconds: 3 | 10 | null) => invoke<Settings>("set_ball_auto_hide", { seconds }),
   setStickerTileSize: (size: number) => invoke<Settings>("set_sticker_tile_size", { size }),
@@ -174,6 +176,7 @@ export interface Settings {
   version: number;
   appearance: "system" | "light" | "dark";
   ballVisible: boolean;
+  ballSize: number;
   ballAutoHideSeconds: 3 | 10 | null;
   ballPosition: { display: string; edge: "left" | "right"; y: number };
   autostartInitialized: boolean;
@@ -224,6 +227,10 @@ export interface SyncTargetInfo {
   stickers: number;
 }
 export interface BallSnapshot {
+  size: number;
+  dropSize: number;
+  frameWidth: number;
+  tipOffset: number;
   center: { x: number; y: number };
   edge: "left" | "right";
   collapsed: boolean;

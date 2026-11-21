@@ -160,6 +160,8 @@ pub fn run() {
             preview::preview_ready,
             settings::get_settings,
             settings::set_appearance,
+            settings::set_ball_size,
+            ball::preview_ball_size,
             settings::set_ball_visible,
             settings::set_ball_auto_hide,
             settings::set_sticker_tile_size,

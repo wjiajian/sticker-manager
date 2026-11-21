@@ -100,10 +100,39 @@ pub fn show_beside_ball(
     display: &crate::geometry::Display,
     center: crate::geometry::Point,
     edge: crate::settings::Edge,
+    metrics: crate::geometry::BallMetrics,
 ) -> Result<(), String> {
     crate::preview::reset(app)?;
     *app.state::<PanelState>().origin.lock().unwrap() = crate::geometry::PanelOrigin::Ball(edge);
-    let p = crate::geometry::beside_ball(display, center, edge, WIDTH, HEIGHT);
+    set_beside_ball_frame(app, display, center, edge, metrics)?;
+    native::focus(app)?;
+    window(app)?
+        .emit("panel-shown", ())
+        .map_err(|e| e.to_string())?;
+    broadcast_visibility(app)
+}
+
+pub fn reposition_beside_ball(
+    app: &AppHandle,
+    display: &crate::geometry::Display,
+    center: crate::geometry::Point,
+    edge: crate::settings::Edge,
+    metrics: crate::geometry::BallMetrics,
+) -> Result<(), String> {
+    if is_visible(app)? && matches!(origin(app), crate::geometry::PanelOrigin::Ball(_)) {
+        set_beside_ball_frame(app, display, center, edge, metrics)?;
+    }
+    Ok(())
+}
+
+fn set_beside_ball_frame(
+    app: &AppHandle,
+    display: &crate::geometry::Display,
+    center: crate::geometry::Point,
+    edge: crate::settings::Edge,
+    metrics: crate::geometry::BallMetrics,
+) -> Result<(), String> {
+    let p = crate::geometry::beside_ball(display, center, edge, WIDTH, HEIGHT, metrics);
     crate::desktop::set_frame(
         app,
         "panel",
@@ -113,12 +142,7 @@ pub fn show_beside_ball(
             width: WIDTH * display.scale,
             height: HEIGHT * display.scale,
         },
-    )?;
-    native::focus(app)?;
-    window(app)?
-        .emit("panel-shown", ())
-        .map_err(|e| e.to_string())?;
-    broadcast_visibility(app)
+    )
 }
 
 #[cfg(any(not(target_os = "macos"), test))]

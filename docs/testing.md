@@ -2,13 +2,16 @@
 
 ## 日常检查
 
-应用代码没有自动触发的 CI，提交前在本地跑：
+应用 PR 会触发「验证应用」GitHub Actions，在 Windows 和 macOS 上执行下列检查并构建 Debug 应用，也支持手动触发。需要完整安装包时使用「构建 Windows 安装包」或「构建 macOS 安装包」工作流，保持「发布到 Release」关闭。
+
+本地具备构建环境时也可运行：
 
 ```bash
 cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm --dir frontend typecheck
+node --test frontend/tests/ballSizePreview.test.mjs
 pnpm --dir frontend build
 pnpm --dir website build
 git diff --check

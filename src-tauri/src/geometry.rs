@@ -2,6 +2,61 @@
 use crate::settings::{BallPosition, Edge};
 use serde::Serialize;
 
+pub const BALL_SIZE_MIN: u32 = 40;
+pub const BALL_SIZE_MAX: u32 = 80;
+pub const BALL_SIZE_DEFAULT: u32 = BALL_SIZE_MIN + 4 * BALL_SIZE_STEP;
+pub const BALL_SIZE_STEP: u32 = 4;
+
+/// 所有值均为逻辑像素；原生窗口和命中区域只在边界处应用显示器缩放。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BallMetrics {
+    pub size: u32,
+    pub diameter: f64,
+    pub radius: f64,
+    pub drop_diameter: f64,
+    pub drop_radius: f64,
+    pub inset: f64,
+    pub hit_radius: f64,
+    pub drop_hit_radius: f64,
+    pub fast_radius: f64,
+    pub collapsed_width: f64,
+    pub collapsed_half_height: f64,
+    pub panel_offset: f64,
+    pub tip_offset: f64,
+    pub frame_width: f64,
+    pub frame_height: f64,
+}
+impl BallMetrics {
+    pub fn new(size: u32) -> Self {
+        let size = size.clamp(BALL_SIZE_MIN, BALL_SIZE_MAX);
+        let diameter = f64::from(size);
+        let radius = diameter / 2.0;
+        let drop_diameter = diameter + 16.0;
+        let drop_radius = drop_diameter / 2.0;
+        // 拖入球体 + 12px 虚线圈 + 2px 边框 + 2px 余量。
+        let inset = drop_radius + 16.0;
+        let tip_offset = drop_radius + 20.0;
+        Self {
+            size,
+            diameter,
+            radius,
+            drop_diameter,
+            drop_radius,
+            inset,
+            hit_radius: radius + 4.0,
+            drop_hit_radius: drop_radius + 14.0,
+            fast_radius: radius + 132.0,
+            collapsed_width: radius,
+            collapsed_half_height: radius + 16.0,
+            panel_offset: radius + 12.0,
+            tip_offset,
+            frame_width: 300.0,
+            // 三行提示（56px）另留 4px 余量。
+            frame_height: inset + tip_offset + 60.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct Point {
     pub x: f64,
@@ -56,18 +111,21 @@ pub fn display_at(displays: &[Display], point: Point) -> Option<&Display> {
 pub fn restore<'a>(
     displays: &'a [Display],
     position: &BallPosition,
+    metrics: BallMetrics,
 ) -> Option<(&'a Display, Point)> {
     let display = displays
         .iter()
         .find(|d| d.id == position.display)
         .or_else(|| displays.iter().find(|d| d.primary))
         .or_else(|| displays.first())?;
-    Some((display, edge_center(display, position.edge, position.y)))
+    Some((
+        display,
+        edge_center(display, position.edge, position.y, metrics),
+    ))
 }
-pub fn edge_center(display: &Display, edge: Edge, y: f64) -> Point {
+pub fn edge_center(display: &Display, edge: Edge, y: f64, metrics: BallMetrics) -> Point {
     let area = display.area;
-    // 为 72px 拖入状态及外侧 12px 虚线圈保留完整空间。
-    let pad = 52.0 * display.scale;
+    let pad = metrics.inset * display.scale;
     Point {
         x: match edge {
             Edge::Left => area.x + pad,
@@ -79,14 +137,14 @@ pub fn edge_center(display: &Display, edge: Edge, y: f64) -> Point {
         ),
     }
 }
-pub fn snap(display: &Display, center: Point) -> (BallPosition, Point) {
+pub fn snap(display: &Display, center: Point, metrics: BallMetrics) -> (BallPosition, Point) {
     let edge = if center.x < display.area.x + display.area.width / 2.0 {
         Edge::Left
     } else {
         Edge::Right
     };
     let y = ((center.y - display.area.y) / display.area.height).clamp(0.0, 1.0);
-    let center = edge_center(display, edge, y);
+    let center = edge_center(display, edge, y, metrics);
     (
         BallPosition {
             display: display.id.clone(),
@@ -96,11 +154,18 @@ pub fn snap(display: &Display, center: Point) -> (BallPosition, Point) {
         center,
     )
 }
-pub fn beside_ball(display: &Display, center: Point, edge: Edge, width: f64, height: f64) -> Point {
+pub fn beside_ball(
+    display: &Display,
+    center: Point,
+    edge: Edge,
+    width: f64,
+    height: f64,
+    metrics: BallMetrics,
+) -> Point {
     let scale = display.scale;
     let x = match edge {
-        Edge::Left => center.x + 40.0 * scale,
-        Edge::Right => center.x - 40.0 * scale - width * scale,
+        Edge::Left => center.x + metrics.panel_offset * scale,
+        Edge::Right => center.x - metrics.panel_offset * scale - width * scale,
     };
     display.area.clamp(
         Point {
@@ -152,15 +217,14 @@ pub struct BallFrame {
     pub center: Point,
     pub tip_above: bool,
 }
-/// 窗口大小只随球的位置变化：悬停、拖入、提示和收起都不改窗口。改尺寸时网页要晚一两帧
+/// 窗口大小只随设置的球径变化：悬停、拖入、提示和收起都不改窗口。改尺寸时网页要晚一两帧
 /// 才按新偏移重画，球会闪到别处。
-pub fn ball_frame(display: &Display, center: Point, edge: Edge) -> BallFrame {
+pub fn ball_frame(display: &Display, center: Point, edge: Edge, metrics: BallMetrics) -> BallFrame {
     let s = display.scale;
-    let width = 300.0;
-    // 提示离球心 56，最多三行（56 高），上下各留 4。
-    let height = 168.0;
+    let width = metrics.frame_width;
+    let height = metrics.frame_height;
     // 和 edge_center 的边距相同，贴边时窗口外沿正好在显示器边缘。
-    let inset = 52.0;
+    let inset = metrics.inset;
     let above = center.y + (height - inset) * s > display.area.bottom();
     let origin = display.area.clamp(
         Point {
@@ -195,7 +259,13 @@ pub fn ball_frame(display: &Display, center: Point, edge: Edge) -> BallFrame {
 }
 /// 收起时球心移到显示器边缘，只露出一半，窗口不动。返回窗口内的球心，以及露出部分在
 /// 屏幕上的悬停区域。
-pub fn collapsed(display: &Display, frame: &BallFrame, center: Point, edge: Edge) -> (Point, Rect) {
+pub fn collapsed(
+    display: &Display,
+    frame: &BallFrame,
+    center: Point,
+    edge: Edge,
+    metrics: BallMetrics,
+) -> (Point, Rect) {
     let s = display.scale;
     let area = display.area;
     let x = if edge == Edge::Left {
@@ -212,17 +282,107 @@ pub fn collapsed(display: &Display, frame: &BallFrame, center: Point, edge: Edge
             x: if edge == Edge::Left {
                 area.x
             } else {
-                area.right() - 28.0 * s
+                area.right() - metrics.collapsed_width * s
             },
-            y: center.y - 44.0 * s,
-            width: 28.0 * s,
-            height: 88.0 * s,
+            y: center.y - metrics.collapsed_half_height * s,
+            width: metrics.collapsed_width * s,
+            height: 2.0 * metrics.collapsed_half_height * s,
         },
     )
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_metrics_preserve_original_geometry_and_clamp_invalid_sizes() {
+        assert_eq!(BallMetrics::new(0), BallMetrics::new(40));
+        assert_eq!(BallMetrics::new(999), BallMetrics::new(80));
+        assert_eq!(
+            BallMetrics::new(BALL_SIZE_DEFAULT),
+            BallMetrics {
+                size: 56,
+                diameter: 56.0,
+                radius: 28.0,
+                drop_diameter: 72.0,
+                drop_radius: 36.0,
+                inset: 52.0,
+                hit_radius: 32.0,
+                drop_hit_radius: 50.0,
+                fast_radius: 160.0,
+                collapsed_width: 28.0,
+                collapsed_half_height: 44.0,
+                panel_offset: 40.0,
+                tip_offset: 56.0,
+                frame_width: 300.0,
+                frame_height: 168.0,
+            }
+        );
+    }
+
+    #[test]
+    fn sizes_fit_frames_hotspots_and_panel_gaps_at_every_scale_and_edge() {
+        for size in (BALL_SIZE_MIN..=BALL_SIZE_MAX).step_by(BALL_SIZE_STEP as usize) {
+            let m = BallMetrics::new(size);
+            assert!(m.hit_radius >= m.radius * 1.1);
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                for (x, y) in [(0.0, 30.0), (-1920.0, -900.0)] {
+                    let mut d = display();
+                    d.scale = scale;
+                    d.area = Rect {
+                        x,
+                        y,
+                        width: 1440.0 * scale,
+                        height: 820.0 * scale,
+                    };
+                    d.frame = d.area;
+                    for edge in [Edge::Left, Edge::Right] {
+                        for y in [0.0, 0.4, 1.0] {
+                            let c = edge_center(&d, edge, y, m);
+                            let f = ball_frame(&d, c, edge, m);
+                            assert_eq!(f.rect.width, m.frame_width * scale);
+                            assert_eq!(f.rect.height, m.frame_height * scale);
+                            assert!((f.rect.x + f.center.x * scale - c.x).abs() < 1e-9);
+                            assert!((f.rect.y + f.center.y * scale - c.y).abs() < 1e-9);
+                            assert!(f.rect.x >= d.area.x && f.rect.right() <= d.area.right());
+                            assert!(f.rect.y >= d.area.y && f.rect.bottom() <= d.area.bottom());
+                            assert!(
+                                f.center.x >= m.drop_hit_radius && f.center.y >= m.drop_hit_radius
+                            );
+                            assert!(f.center.x + m.drop_hit_radius <= m.frame_width);
+                            assert!(f.center.y + m.drop_hit_radius <= m.frame_height);
+                            if f.tip_above {
+                                assert!(f.center.y - m.tip_offset - 56.0 >= 0.0);
+                            } else {
+                                assert!(f.center.y + m.tip_offset + 56.0 <= m.frame_height);
+                            }
+                            let (collapsed_center, hot) = collapsed(&d, &f, c, edge, m);
+                            assert_eq!(
+                                collapsed_center.x,
+                                if edge == Edge::Left {
+                                    0.0
+                                } else {
+                                    m.frame_width
+                                }
+                            );
+                            assert_eq!(hot.width, m.radius * scale);
+                            assert!(hot.x >= d.area.x && hot.right() <= d.area.right());
+                            assert!(hot.y >= d.area.y && hot.bottom() <= d.area.bottom());
+                            let panel = beside_ball(&d, c, edge, 360.0, 524.0, m);
+                            let gap = match edge {
+                                Edge::Left => panel.x - c.x - m.radius * scale,
+                                Edge::Right => c.x - m.radius * scale - panel.x - 360.0 * scale,
+                            };
+                            assert!((gap - 12.0 * scale).abs() < 1e-9);
+                            let (position, snapped) = snap(&d, c, m);
+                            assert_eq!(position.edge, edge);
+                            assert!((snapped.y - c.y).abs() < 1e-9);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn preview_chooses_side_from_panel_origin() {
@@ -348,7 +508,11 @@ mod tests {
     #[test]
     fn snaps_to_nearest_side_and_clamps_height() {
         let d = display();
-        let (p, c) = snap(&d, Point { x: 20.0, y: -20.0 });
+        let (p, c) = snap(
+            &d,
+            Point { x: 20.0, y: -20.0 },
+            BallMetrics::new(BALL_SIZE_DEFAULT),
+        );
         assert_eq!(p.edge, Edge::Left);
         assert_eq!(c, Point { x: 52.0, y: 82.0 });
         assert_eq!(
@@ -357,7 +521,8 @@ mod tests {
                 Point {
                     x: 1300.0,
                     y: 500.0
-                }
+                },
+                BallMetrics::new(BALL_SIZE_DEFAULT)
             )
             .0
             .edge,
@@ -376,12 +541,20 @@ mod tests {
                 },
                 Edge::Right,
                 360.0,
-                524.0
+                524.0,
+                BallMetrics::new(BALL_SIZE_DEFAULT)
             ),
             Point { x: 996.0, y: 178.0 }
         );
         assert_eq!(
-            beside_ball(&d, Point { x: 52.0, y: 82.0 }, Edge::Left, 360.0, 524.0),
+            beside_ball(
+                &d,
+                Point { x: 52.0, y: 82.0 },
+                Edge::Left,
+                360.0,
+                524.0,
+                BallMetrics::new(BALL_SIZE_DEFAULT)
+            ),
             Point { x: 92.0, y: 30.0 }
         );
         assert_eq!(
@@ -393,7 +566,8 @@ mod tests {
                 },
                 Edge::Right,
                 360.0,
-                524.0
+                524.0,
+                BallMetrics::new(BALL_SIZE_DEFAULT)
             )
             .y,
             326.0
@@ -407,7 +581,7 @@ mod tests {
             edge: Edge::Left,
             y: 0.4,
         };
-        let (d, c) = restore(&displays, &p).unwrap();
+        let (d, c) = restore(&displays, &p, BallMetrics::new(BALL_SIZE_DEFAULT)).unwrap();
         assert_eq!(d.id, "main");
         assert_eq!(c, Point { x: 52.0, y: 358.0 });
     }
@@ -415,10 +589,10 @@ mod tests {
     fn collapsed_ball_sits_on_display_edge_and_window_never_spills() {
         let d = display();
         for edge in [Edge::Left, Edge::Right] {
-            let c = edge_center(&d, edge, 0.4);
-            let f = ball_frame(&d, c, edge);
+            let c = edge_center(&d, edge, 0.4, BallMetrics::new(BALL_SIZE_DEFAULT));
+            let f = ball_frame(&d, c, edge, BallMetrics::new(BALL_SIZE_DEFAULT));
             assert!(f.rect.x >= d.area.x && f.rect.right() <= d.area.right());
-            let (center, visible) = collapsed(&d, &f, c, edge);
+            let (center, visible) = collapsed(&d, &f, c, edge, BallMetrics::new(BALL_SIZE_DEFAULT));
             assert_eq!(center.x, if edge == Edge::Left { 0.0 } else { 300.0 });
             assert_eq!(center.y, f.center.y);
             assert_eq!(visible.width, 28.0);
@@ -428,15 +602,20 @@ mod tests {
     #[test]
     fn frame_keeps_ball_stationary_and_tip_inside_work_area() {
         let d = display();
-        let c = edge_center(&d, Edge::Right, 1.0);
-        let f = ball_frame(&d, c, Edge::Right);
+        let c = edge_center(&d, Edge::Right, 1.0, BallMetrics::new(BALL_SIZE_DEFAULT));
+        let f = ball_frame(&d, c, Edge::Right, BallMetrics::new(BALL_SIZE_DEFAULT));
         assert_eq!(f.rect.x + f.center.x, c.x);
         assert_eq!(f.rect.y + f.center.y, c.y);
         assert!(f.tip_above);
         assert!(f.rect.bottom() <= d.area.bottom());
         for edge in [Edge::Left, Edge::Right] {
             for y in [0.0, 0.4, 1.0] {
-                let frame = ball_frame(&d, edge_center(&d, edge, y), edge);
+                let frame = ball_frame(
+                    &d,
+                    edge_center(&d, edge, y, BallMetrics::new(BALL_SIZE_DEFAULT)),
+                    edge,
+                    BallMetrics::new(BALL_SIZE_DEFAULT),
+                );
                 // 72px 球 + 两侧 12px 留白 + 2px 虚线均不能被裁切。
                 assert!(frame.center.x >= 50.0 && frame.center.y >= 50.0);
                 assert!(frame.center.x + 50.0 <= frame.rect.width);
@@ -470,11 +649,12 @@ mod tests {
             .id,
             "second"
         );
-        let c = edge_center(&d, Edge::Left, 0.4);
-        let f = ball_frame(&d, c, Edge::Left);
+        let c = edge_center(&d, Edge::Left, 0.4, BallMetrics::new(BALL_SIZE_DEFAULT));
+        let f = ball_frame(&d, c, Edge::Left, BallMetrics::new(BALL_SIZE_DEFAULT));
         assert_eq!(f.rect.width, 600.0);
         assert_eq!(f.rect.x, d.area.x);
-        let (center, visible) = collapsed(&d, &f, c, Edge::Left);
+        let (center, visible) =
+            collapsed(&d, &f, c, Edge::Left, BallMetrics::new(BALL_SIZE_DEFAULT));
         assert_eq!(center.x, 0.0);
         assert_eq!(visible.width, 56.0);
     }

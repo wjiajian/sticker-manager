@@ -1,7 +1,7 @@
 //! 悬浮球的原生鼠标检测、吸附和收起。不能成为 key 的 WebView 不依赖 hover 事件。
 use crate::{
     desktop,
-    geometry::{self, BallFrame, Display, Point},
+    geometry::{self, BallFrame, BallMetrics, Display, Point},
     panel,
     settings::{Edge, Settings, SettingsState},
 };
@@ -21,6 +21,10 @@ use tauri::{AppHandle, Emitter, Manager};
 pub struct BallSnapshot {
     center: Point,
     edge: Edge,
+    size: u32,
+    drop_size: u32,
+    frame_width: f64,
+    tip_offset: f64,
     collapsed: bool,
     hovered: bool,
     pressed: bool,
@@ -36,6 +40,7 @@ struct Press {
     center: Point,
 }
 struct Runtime {
+    preview_size: Option<u32>,
     displays: Vec<Display>,
     display: Display,
     center: Point,
@@ -62,9 +67,11 @@ struct BallState {
 pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let settings = app.state::<SettingsState>().get();
     let displays = desktop::displays(app.handle())?;
+    let metrics = BallMetrics::new(settings.ball_size);
     let (display, center) =
-        geometry::restore(&displays, &settings.ball_position).ok_or("没有可用的显示器")?;
+        geometry::restore(&displays, &settings.ball_position, metrics).ok_or("没有可用的显示器")?;
     let runtime = Runtime {
+        preview_size: None,
         display: display.clone(),
         displays,
         center,
@@ -86,7 +93,7 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         tick_queued: AtomicBool::new(false),
         fast: AtomicBool::new(false),
     });
-    native::create(app)?;
+    native::create(app, metrics)?;
     settings_changed(app.handle(), &settings)?;
     let handle = app.handle().clone();
     std::thread::spawn(move || {
@@ -120,9 +127,14 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn render(app: &AppHandle, r: &mut Runtime) -> Result<BallSnapshot, String> {
+fn active_metrics(r: &Runtime, settings: &Settings) -> BallMetrics {
+    BallMetrics::new(r.preview_size.unwrap_or(settings.ball_size))
+}
+
+fn render(app: &AppHandle, r: &mut Runtime, settings: &Settings) -> Result<BallSnapshot, String> {
+    let metrics = active_metrics(r, settings);
     let panel_visible = panel::is_visible(app)?;
-    let frame = geometry::ball_frame(&r.display, r.center, r.edge);
+    let frame = geometry::ball_frame(&r.display, r.center, r.edge, metrics);
     if r.last_frame.as_ref() != Some(&frame) {
         desktop::set_frame(app, "ball", frame.rect)?;
         r.last_frame = Some(frame.clone());
@@ -135,11 +147,15 @@ fn render(app: &AppHandle, r: &mut Runtime) -> Result<BallSnapshot, String> {
     }
     let snapshot = BallSnapshot {
         center: if r.collapsed {
-            geometry::collapsed(&r.display, &frame, r.center, r.edge).0
+            geometry::collapsed(&r.display, &frame, r.center, r.edge, metrics).0
         } else {
             frame.center
         },
         edge: r.edge,
+        size: metrics.size,
+        drop_size: metrics.drop_diameter as u32,
+        frame_width: metrics.frame_width,
+        tip_offset: metrics.tip_offset,
         collapsed: r.collapsed,
         hovered: r.hovered,
         pressed: r.press.is_some(),
@@ -162,9 +178,12 @@ fn tick(app: &AppHandle) -> Result<(), String> {
     let settings = app.state::<SettingsState>().get();
     let state = app.state::<BallState>();
     let mut r = state.runtime.lock().unwrap();
+    let metrics = active_metrics(&r, &settings);
     let displays = desktop::displays(app)?;
     if displays != r.displays {
-        if let Some((display, center)) = geometry::restore(&displays, &settings.ball_position) {
+        if let Some((display, center)) =
+            geometry::restore(&displays, &settings.ball_position, metrics)
+        {
             r.display = display.clone();
             r.center = center;
         }
@@ -199,7 +218,7 @@ fn tick(app: &AppHandle) -> Result<(), String> {
         }
         if !down {
             if r.dragging {
-                let (position, center) = geometry::snap(&r.display, r.center);
+                let (position, center) = geometry::snap(&r.display, r.center, metrics);
                 r.center = center;
                 r.edge = position.edge;
                 save = Some(position);
@@ -213,19 +232,26 @@ fn tick(app: &AppHandle) -> Result<(), String> {
     }
     let distance = (pointer.x - r.center.x).hypot(pointer.y - r.center.y);
     let hit = if r.collapsed {
-        let frame = geometry::ball_frame(&r.display, r.center, r.edge);
-        geometry::collapsed(&r.display, &frame, r.center, r.edge)
+        let frame = geometry::ball_frame(&r.display, r.center, r.edge, metrics);
+        geometry::collapsed(&r.display, &frame, r.center, r.edge, metrics)
             .1
             .contains(pointer)
     } else {
-        distance <= (if r.drop_label.is_some() { 50.0 } else { 32.0 }) * r.display.scale
+        distance
+            <= (if r.drop_label.is_some() {
+                metrics.drop_hit_radius
+            } else {
+                metrics.hit_radius
+            }) * r.display.scale
     };
     if hit != r.hovered {
         r.hovered = hit;
         r.idle_since = Instant::now();
     }
     state.fast.store(
-        r.press.is_some() || r.drop_label.is_some() || distance <= 160.0 * r.display.scale,
+        r.press.is_some()
+            || r.drop_label.is_some()
+            || distance <= metrics.fast_radius * r.display.scale,
         Ordering::Relaxed,
     );
     let import_progress = crate::imports::ball_progress(app).is_some();
@@ -239,6 +265,7 @@ fn tick(app: &AppHandle) -> Result<(), String> {
         || r.drop_label.is_some()
         || r.menu_open
         || r.message.is_some()
+        || r.preview_size.is_some()
         || import_progress
     {
         r.collapsed = false;
@@ -254,7 +281,7 @@ fn tick(app: &AppHandle) -> Result<(), String> {
     {
         r.message = None;
     }
-    render(app, &mut r)?;
+    render(app, &mut r, &settings)?;
     drop(r);
     if let Some(position) = save {
         crate::settings::update(app, |s| s.ball_position = position)?;
@@ -270,6 +297,8 @@ pub fn settings_changed(app: &AppHandle, settings: &Settings) -> Result<(), Stri
         return Ok(());
     };
     let mut r = state.runtime.lock().unwrap();
+    r.preview_size = None;
+    let metrics = active_metrics(&r, settings);
     r.collapsed = false;
     r.idle_since = Instant::now();
     if !settings.ball_visible {
@@ -278,15 +307,55 @@ pub fn settings_changed(app: &AppHandle, settings: &Settings) -> Result<(), Stri
         r.drop_label = None;
         r.hovered = false;
     }
-    render(app, &mut r)?;
-    native::set_visible(app, settings.ball_visible)
+    if !r.dragging {
+        r.center = geometry::edge_center(&r.display, r.edge, settings.ball_position.y, metrics);
+    }
+    render(app, &mut r, settings)?;
+    native::set_visible(app, settings.ball_visible)?;
+    let (display, center, edge) = (r.display.clone(), r.center, r.edge);
+    drop(r);
+    panel::reposition_beside_ball(app, &display, center, edge, metrics)
+}
+#[tauri::command]
+pub fn preview_ball_size(app: AppHandle, size: Option<u32>) -> Result<(), String> {
+    if let Some(size) = size
+        && !(geometry::BALL_SIZE_MIN..=geometry::BALL_SIZE_MAX).contains(&size)
+    {
+        return Err(format!(
+            "悬浮球大小必须在 {} 到 {} 之间",
+            geometry::BALL_SIZE_MIN,
+            geometry::BALL_SIZE_MAX
+        ));
+    }
+    let settings = app.state::<SettingsState>().get();
+    let Some(state) = app.try_state::<BallState>() else {
+        return Ok(());
+    };
+    let mut r = state.runtime.lock().unwrap();
+    r.preview_size = size;
+    let metrics = active_metrics(&r, &settings);
+    if !r.dragging {
+        r.center = geometry::edge_center(&r.display, r.edge, settings.ball_position.y, metrics);
+    }
+    r.collapsed = false;
+    r.idle_since = Instant::now();
+    render(&app, &mut r, &settings)?;
+    let (display, center, edge) = (r.display.clone(), r.center, r.edge);
+    drop(r);
+    panel::reposition_beside_ball(&app, &display, center, edge, metrics)
 }
 #[tauri::command]
 pub fn ball_state(app: AppHandle) -> Result<BallSnapshot, String> {
-    render(&app, &mut app.state::<BallState>().runtime.lock().unwrap())
+    let settings = app.state::<SettingsState>().get();
+    render(
+        &app,
+        &mut app.state::<BallState>().runtime.lock().unwrap(),
+        &settings,
+    )
 }
 #[tauri::command]
 pub fn ball_pointer_down(app: AppHandle) -> Result<(), String> {
+    let settings = app.state::<SettingsState>().get();
     let (pointer, _) = desktop::pointer(&app)?;
     let state = app.state::<BallState>();
     let mut r = state.runtime.lock().unwrap();
@@ -299,7 +368,7 @@ pub fn ball_pointer_down(app: AppHandle) -> Result<(), String> {
         center: r.center,
     });
     r.idle_since = Instant::now();
-    render(&app, &mut r)?;
+    render(&app, &mut r, &settings)?;
     Ok(())
 }
 fn toggle_panel(app: AppHandle) -> Result<(), String> {
@@ -307,15 +376,22 @@ fn toggle_panel(app: AppHandle) -> Result<(), String> {
         panel::hide_panel(app, false)?;
         return Ok(());
     }
-    let (display, center, edge) = {
+    let settings = app.state::<SettingsState>().get();
+    let (display, center, edge, metrics) = {
         let state = app.state::<BallState>();
         let r = state.runtime.lock().unwrap();
-        (r.display.clone(), r.center, r.edge)
+        (
+            r.display.clone(),
+            r.center,
+            r.edge,
+            active_metrics(&r, &settings),
+        )
     };
-    panel::show_beside_ball(&app, &display, center, edge)
+    panel::show_beside_ball(&app, &display, center, edge, metrics)
 }
 #[tauri::command]
 pub fn set_ball_drop(app: AppHandle, paths: Option<Vec<PathBuf>>) -> Result<(), String> {
+    let settings = app.state::<SettingsState>().get();
     let state = app.state::<BallState>();
     let mut r = state.runtime.lock().unwrap();
     r.drop_label = paths.filter(|p| !p.is_empty()).map(|paths| {
@@ -336,27 +412,29 @@ pub fn set_ball_drop(app: AppHandle, paths: Option<Vec<PathBuf>>) -> Result<(), 
     });
     r.collapsed = false;
     r.idle_since = Instant::now();
-    render(&app, &mut r)?;
+    render(&app, &mut r, &settings)?;
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 pub fn external_drop(app: &AppHandle, active: bool) -> Result<(), String> {
+    let settings = app.state::<SettingsState>().get();
     let state = app.state::<BallState>();
     let mut runtime = state.runtime.lock().unwrap();
     runtime.drop_label = active.then(|| "松开导入".into());
     runtime.collapsed = false;
     runtime.idle_since = Instant::now();
-    render(app, &mut runtime)?;
+    render(app, &mut runtime, &settings)?;
     Ok(())
 }
 #[tauri::command]
 pub fn ball_message(app: AppHandle, message: String) -> Result<(), String> {
+    let settings = app.state::<SettingsState>().get();
     let state = app.state::<BallState>();
     let mut r = state.runtime.lock().unwrap();
     r.message = Some((message, Instant::now() + Duration::from_secs(2)));
     r.collapsed = false;
-    render(&app, &mut r)?;
+    render(&app, &mut r, &settings)?;
     Ok(())
 }
 pub fn menu_open(app: &AppHandle, open: bool) {
@@ -377,12 +455,12 @@ mod native {
         CollectionBehavior, ManagerExt, PanelBuilder, PanelLevel, StyleMask, tauri_panel,
     };
     tauri_panel! { panel!(StickerBall { config: {can_become_key_window:false,can_become_main_window:false,is_floating_panel:true} }) }
-    pub fn create(app: &tauri::App) -> tauri::Result<()> {
+    pub fn create(app: &tauri::App, metrics: BallMetrics) -> tauri::Result<()> {
         let theme = crate::appearance::preference(app.handle());
         PanelBuilder::<_, StickerBall>::new(app.handle(), "ball")
             .url(tauri::WebviewUrl::App("ball.html".into()))
             .title("悬浮球")
-            .size(tauri::LogicalSize::new(300.0, 168.0).into())
+            .size(tauri::LogicalSize::new(metrics.frame_width, metrics.frame_height).into())
             .resizable(false)
             .level(PanelLevel::Floating)
             .has_shadow(false)
@@ -435,7 +513,7 @@ mod native {
 #[cfg(not(target_os = "macos"))]
 mod native {
     use super::*;
-    pub fn create(app: &tauri::App) -> tauri::Result<()> {
+    pub fn create(app: &tauri::App, metrics: BallMetrics) -> tauri::Result<()> {
         let builder = tauri::WebviewWindowBuilder::new(
             app,
             "ball",
@@ -443,7 +521,7 @@ mod native {
         )
         .theme(crate::appearance::preference(app.handle()))
         .title("悬浮球")
-        .inner_size(300.0, 168.0)
+        .inner_size(metrics.frame_width, metrics.frame_height)
         .decorations(false)
         .resizable(false)
         .visible(false)

@@ -7,6 +7,7 @@ import { ipc, type Settings, type SyncStatus, type UpdateStatus } from "../../li
 import { platform } from "../../lib/platform";
 import { navigation, selectedNavigation } from "./libraryViews";
 import { SyncPreferences } from "./SyncPreferences";
+import { BallSizeControl } from "./BallSizeControl";
 import { downloadLabel, focusOpener } from "./useUpdate";
 import { syncTime } from "./useSyncStatus";
 
@@ -27,6 +28,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const title = useId();
   const [section, setSection] = useState<SectionId>(focusSync ? "sync" : "general");
   const [settings, setSettings] = useState<Settings | null>(null);
+  const settingsRevision = useRef(0);
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [autoError, setAutoError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +44,13 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
     // showModal 会把焦点给第一个可聚焦元素，这里换成当前分组的侧边选项。
     document.getElementById(tabId(section))?.focus();
     let disposed = false;
-    const listening = listen<Settings>("settings-changed", ({ payload }) => { if (!disposed) setSettings(payload); });
-    void listening.then(() => ipc.getSettings()).then((s) => { if (!disposed) setSettings(s); })
+    let seenSettingsEvent = false;
+    const listening = listen<Settings>("settings-changed", ({ payload }) => {
+      seenSettingsEvent = true;
+      settingsRevision.current += 1;
+      if (!disposed) setSettings(payload);
+    });
+    void listening.then(() => ipc.getSettings()).then((s) => { if (!disposed && !seenSettingsEvent) setSettings(s); })
       .catch((e: unknown) => { if (!disposed) setError(String(e)); });
     void ipc.getAutostart().then((enabled) => { if (!disposed) setAutostart(enabled); })
       .catch((e: unknown) => { if (!disposed) setAutoError(String(e)); });
@@ -76,7 +83,11 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
     try { await operation(); }
     catch (reason) {
       setError(String(reason));
-      try { setSettings(await ipc.getSettings()); } catch { /* 保留原始操作错误 */ }
+      try {
+        const revision = settingsRevision.current;
+        const actual = await ipc.getSettings();
+        if (revision === settingsRevision.current) setSettings(actual);
+      } catch { /* 保留原始操作错误 */ }
     } finally { working.current = false; setBusy(null); }
   }
   async function toggleAutostart() {
@@ -115,7 +126,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
                   {([['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']] as const).map(([value, label]) =>
                     <button key={value} type="button" aria-pressed={settings?.appearance === value}
                       disabled={!!busy || !settings}
-                      onClick={() => void change("appearance", async () => setSettings(await ipc.setAppearance(value)))}
+                      onClick={() => void change("appearance", () => ipc.setAppearance(value))}
                       className="interactive rounded-control px-3 py-1 text-xs font-semibold aria-pressed:bg-surface hover:opacity-82 disabled:opacity-50">{label}</button>)}
                 </div>
               </div>
@@ -132,17 +143,18 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
               <div className="flex items-center justify-between gap-4">
                 <span id={`${title}-ball`}>显示悬浮球</span>
                 <Switch aria-labelledby={`${title}-ball`} checked={settings?.ballVisible ?? false} disabled={!!busy || !settings}
-                  onClick={() => void change("ball", async () => setSettings(await ipc.setBallVisible(!settings!.ballVisible)))} />
+                  onClick={() => void change("ball", () => ipc.setBallVisible(!settings!.ballVisible))} />
               </div>
               <label className={`flex items-center justify-between gap-4 ${settings?.ballVisible ? "" : "text-ink-secondary"}`}>
                 <span>静止后收到屏幕边缘</span>
                 <select value={settings?.ballAutoHideSeconds ?? "never"} disabled={!!busy || !settings?.ballVisible}
                   onChange={(event) => { const seconds = event.target.value === "never" ? null : Number(event.target.value) as 3 | 10;
-                    void change("auto-hide", async () => setSettings(await ipc.setBallAutoHide(seconds))); }}
+                    void change("auto-hide", () => ipc.setBallAutoHide(seconds)); }}
                   className="rounded-control border border-line bg-surface px-3 py-1 disabled:opacity-50">
                   <option value={3}>3 秒</option><option value={10}>10 秒</option><option value="never">不收起</option>
                 </select>
               </label>
+              <BallSizeControl settings={settings} busy={!!busy} onError={setError} />
             </Group>
             <Group title="表情面板">
               <div className="flex items-center justify-between gap-4"><span>呼出快捷键</span><kbd className="rounded-control bg-muted px-3 py-1 font-sans">{platform === "macos" ? "⌃⌥E" : "Ctrl+Alt+E"}</kbd></div>
@@ -174,7 +186,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
               <div className="flex items-center justify-between gap-4">
                 <span id={`${title}-auto-update`}>自动检查更新</span>
                 <Switch aria-labelledby={`${title}-auto-update`} aria-describedby={`${title}-auto-update-note`} checked={settings?.autoCheckUpdates ?? false} disabled={!!busy || !settings}
-                  onClick={() => void change("auto-update", async () => setSettings(await ipc.setAutoCheckUpdates(!settings!.autoCheckUpdates)))} />
+                  onClick={() => void change("auto-update", () => ipc.setAutoCheckUpdates(!settings!.autoCheckUpdates))} />
               </div>
               <p id={`${title}-auto-update-note`} className="text-xs text-ink-secondary">启动时和每天检查一次，发现新版本只提示，确认后才下载</p>
             </Group>
