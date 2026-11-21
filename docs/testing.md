@@ -56,3 +56,22 @@ cargo test -p sticker-core sync::tests::network_integration::s3_ \
 - 不修改系统设置（低数据模式、减少动态效果、外观等）。需要的话请用户自己切换；用户不切换就把这项记为跳过。
 
 完整约定见 [AGENTS.md](../AGENTS.md)。
+
+### Windows 悬浮球大小回归
+
+在仓库根目录执行：
+
+```powershell
+pnpm --dir frontend tauri build --debug --no-bundle
+node .github/scripts/ball-window.test.mjs
+```
+
+脚本使用临时仓库与独立 WebView2 数据目录，通过仅本机可用的调试端口在后台操作隐藏的主窗口，不移动系统鼠标；测试结束时关闭测试进程。覆盖实时预览、松手保存、键盘、恢复默认、Esc 取消、重启持久化，并延迟一次预览请求验证连续提交和后续取消不会覆盖已排队的保存。结果和截图写入 `target/ball-window-results/`。
+
+### Windows 拖入格式诊断
+
+Debug 构建可设置 `STICKER_DROP_DIAGNOSTICS=1`，在标准错误输出中记录 OLE 格式名称、编号、介质和 HRESULT；不记录文件名、路径或图片内容。仍须将 `STICKER_LIBRARY_DIR` 设为临时目录。Release 构建忽略这个诊断开关。
+
+应分别测试文件路径、虚拟文件、PNG/DIB，以及聊天软件只允许内部拖动的表情。`QueryGetData` 必须返回 `S_OK` 才算支持；`S_FALSE` 不能显示“松开导入”。来源未允许复制时也不能接受拖入。
+
+对应回归测试：`cargo test -p sticker-manager windows_drop::tests --locked`。测试涵盖格式协商、后台读取、临时文件生命周期、图片像素、动画原文件和导入去重；真实聊天来源的导出限制仍需人工验证。

@@ -153,11 +153,15 @@ pub fn pointer(app: &AppHandle) -> Result<(Point, bool), String> {
 pub fn set_frame(app: &AppHandle, label: &str, rect: Rect) -> Result<(), String> {
     use tauri::Manager;
     let w = app.get_webview_window(label).ok_or("窗口不可用")?;
-    w.set_size(tauri::PhysicalSize::new(
-        rect.width as u32,
-        rect.height as u32,
+    // 先定位再设尺寸，避免跨不同 DPI 屏幕移动时系统二次缩放覆盖新尺寸。
+    w.set_position(tauri::PhysicalPosition::new(
+        rect.x.round() as i32,
+        rect.y.round() as i32,
     ))
     .map_err(|e| e.to_string())?;
-    w.set_position(tauri::PhysicalPosition::new(rect.x as i32, rect.y as i32))
-        .map_err(|e| e.to_string())
+    w.set_size(tauri::PhysicalSize::new(
+        rect.width.round().max(1.0) as u32,
+        rect.height.round().max(1.0) as u32,
+    ))
+    .map_err(|e| e.to_string())
 }

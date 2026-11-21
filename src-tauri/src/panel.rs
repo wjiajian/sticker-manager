@@ -100,10 +100,11 @@ pub fn show_beside_ball(
     display: &crate::geometry::Display,
     center: crate::geometry::Point,
     edge: crate::settings::Edge,
+    metrics: crate::geometry::BallMetrics,
 ) -> Result<(), String> {
     crate::preview::reset(app)?;
     *app.state::<PanelState>().origin.lock().unwrap() = crate::geometry::PanelOrigin::Ball(edge);
-    let p = crate::geometry::beside_ball(display, center, edge, WIDTH, HEIGHT);
+    let p = crate::geometry::beside_ball(display, center, edge, WIDTH, HEIGHT, metrics);
     crate::desktop::set_frame(
         app,
         "panel",
@@ -119,6 +120,30 @@ pub fn show_beside_ball(
         .emit("panel-shown", ())
         .map_err(|e| e.to_string())?;
     broadcast_visibility(app)
+}
+
+/// 悬浮球调整大小时，若面板正从球旁展开（例如已固定），同步刷新停靠位置避免遮挡。
+pub fn reposition_beside_ball(
+    app: &AppHandle,
+    display: &crate::geometry::Display,
+    center: crate::geometry::Point,
+    edge: crate::settings::Edge,
+    metrics: crate::geometry::BallMetrics,
+) -> Result<(), String> {
+    if !is_visible(app)? || !matches!(origin(app), crate::geometry::PanelOrigin::Ball(_)) {
+        return Ok(());
+    }
+    let p = crate::geometry::beside_ball(display, center, edge, WIDTH, HEIGHT, metrics);
+    crate::desktop::set_frame(
+        app,
+        "panel",
+        crate::geometry::Rect {
+            x: p.x,
+            y: p.y,
+            width: WIDTH * display.scale,
+            height: HEIGHT * display.scale,
+        },
+    )
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
