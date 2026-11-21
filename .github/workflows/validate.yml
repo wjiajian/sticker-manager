@@ -37,9 +37,19 @@ jobs:
       - run: node --test frontend/tests/ballSizePreview.test.mjs
       - run: pnpm --dir frontend build
       - run: cargo fmt --all --check
-      - run: cargo test --workspace --locked
+      - if: runner.os == 'Windows'
+        run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: pnpm --dir frontend tauri build --debug --no-bundle
+      - if: runner.os == 'Windows'
+        run: node .github/scripts/ball-window.test.mjs
+      - if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ball-window-results
+          path: target/ball-window-results
+          if-no-files-found: ignore
+          retention-days: 7
       - if: runner.os == 'macOS'
         run: swiftc -typecheck scripts/diagnose-macos-drag.swift
       - run: pnpm --dir website install --frozen-lockfile

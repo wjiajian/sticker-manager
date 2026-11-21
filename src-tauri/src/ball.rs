@@ -416,7 +416,7 @@ pub fn set_ball_drop(app: AppHandle, paths: Option<Vec<PathBuf>>) -> Result<(), 
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn external_drop(app: &AppHandle, active: bool) -> Result<(), String> {
     let settings = app.state::<SettingsState>().get();
     let state = app.state::<BallState>();
@@ -490,6 +490,11 @@ mod native {
                     .maximizable(false)
             })
             .build()?;
+        if let Some(window) = app.get_webview_window("ball")
+            && let Err(error) = crate::macos_drop::install(&window)
+        {
+            eprintln!("悬浮球图片拖入不可用，文件拖入仍可使用：{error}");
+        }
         Ok(())
     }
     pub fn set_visible(app: &AppHandle, visible: bool) -> Result<(), String> {

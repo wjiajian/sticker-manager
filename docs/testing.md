@@ -2,7 +2,7 @@
 
 ## 日常检查
 
-应用 PR 会触发「验证应用」GitHub Actions，在 Windows 和 macOS 上执行下列检查并构建 Debug 应用，也支持手动触发。需要完整安装包时使用「构建 Windows 安装包」或「构建 macOS 安装包」工作流，保持「发布到 Release」关闭。
+应用 PR 会触发「验证应用」GitHub Actions，在 Windows 上执行下列检查并构建 Debug 应用；macOS 当前只做编译、格式、Clippy 和前端检查，不运行 Rust 测试或真实软件拖入测试。工作流也支持手动触发。需要完整安装包时使用「构建 Windows 安装包」或「构建 macOS 安装包」工作流，保持「发布到 Release」关闭。
 
 本地具备构建环境时也可运行：
 
@@ -16,6 +16,8 @@ pnpm --dir frontend build
 pnpm --dir website build
 git diff --check
 ```
+
+Windows Actions 还会启动 Debug 应用，以临时 `STICKER_LIBRARY_DIR` 和独立 WebView2 数据目录运行 `.github/scripts/ball-window.test.mjs`，验证悬浮球大小预览不写盘、松手保存、键盘调节、恢复默认、Esc 取消和重启保持，并上传截图与日志。OLE 合成来源测试覆盖 PNG、DIB、虚拟文件流的接收与入库；这些测试不代表微信、飞书真实客户端或多显示器 DPI 拖动已验收。
 
 ## 网络同步的容器集成测试
 

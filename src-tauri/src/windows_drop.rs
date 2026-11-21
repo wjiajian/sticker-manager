@@ -914,6 +914,105 @@ mod tests {
     }
 
     #[test]
+    fn ole_images_import_into_library_and_outlive_staging() {
+        for raw_png in [true, false] {
+            let image = if raw_png {
+                image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                    2,
+                    3,
+                    image::Rgba([23, 45, 67, 128]),
+                ))
+            } else {
+                image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                    2,
+                    3,
+                    image::Rgb([23, 45, 67]),
+                ))
+            };
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            let (id, content) = if raw_png {
+                image
+                    .write_to(&mut encoded, image::ImageFormat::Png)
+                    .unwrap();
+                (registered("PNG"), encoded.into_inner())
+            } else {
+                image
+                    .write_to(&mut encoded, image::ImageFormat::Bmp)
+                    .unwrap();
+                (8, encoded.into_inner()[14..].to_vec())
+            };
+            let data: IDataObject = Sample {
+                formats: vec![(id, -1, content, TYMED_HGLOBAL.0 as u32)],
+                ..Default::default()
+            }
+            .into();
+            let received = receive(&data).unwrap();
+            let staged = received.paths[0].clone();
+            let root = tempfile::tempdir().unwrap();
+            let mut library = sticker_core::Library::open(root.path()).unwrap();
+            let report = library.import_paths(&received.paths);
+            assert_eq!((report.added, report.skipped), (1, 0));
+            assert!(report.failures.is_empty());
+            let sticker = library.sticker(&report.sticker_ids[0]).unwrap();
+            drop(received);
+            assert!(!staged.exists());
+            assert_eq!(
+                image::open(sticker.object_path).unwrap().to_rgba8(),
+                image.to_rgba8()
+            );
+            assert!(sticker.thumbnail_path.is_file());
+        }
+    }
+
+    #[test]
+    fn ole_virtual_animation_stream_imports_original_frames_and_deduplicates() {
+        let mut original = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut original);
+            for color in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+                encoder
+                    .encode_frame(image::Frame::new(image::RgbaImage::from_pixel(
+                        2,
+                        3,
+                        image::Rgba(color),
+                    )))
+                    .unwrap();
+            }
+        }
+        let data: IDataObject = Sample {
+            formats: vec![
+                (
+                    registered("FileGroupDescriptorW"),
+                    -1,
+                    file_descriptor("聊天表情.gif"),
+                    TYMED_HGLOBAL.0 as u32,
+                ),
+                (
+                    registered("FileContents"),
+                    0,
+                    original.clone(),
+                    TYMED_ISTREAM.0 as u32,
+                ),
+            ],
+            ..Default::default()
+        }
+        .into();
+        let received = receive(&data).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut library = sticker_core::Library::open(root.path()).unwrap();
+        let report = library.import_paths(&received.paths);
+        assert_eq!((report.added, report.skipped), (1, 0));
+        assert!(report.failures.is_empty());
+        let repeated = library.import_paths(&received.paths);
+        assert_eq!((repeated.added, repeated.existing), (0, 1));
+        let sticker = library.sticker(&report.sticker_ids[0]).unwrap();
+        drop(received);
+        assert!(sticker.animated);
+        assert_eq!((sticker.width, sticker.height), (2, 3));
+        assert_eq!(std::fs::read(sticker.object_path).unwrap(), original);
+    }
+
+    #[test]
     fn virtual_names_cannot_escape_the_staging_directory() {
         let mut data = file_descriptor("../../收到.gif");
         assert_eq!(descriptors(&data).unwrap(), ["收到.gif"]);

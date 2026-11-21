@@ -4270,6 +4270,7 @@ name = "sticker-manager"
 version = "0.2.0"
 dependencies = [
  "block2",
+ "cc",
  "clipboard-win",
  "image",
  "objc2",

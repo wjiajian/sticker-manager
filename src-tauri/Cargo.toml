@@ -11,6 +11,7 @@ name = "sticker_manager_lib"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 serde.workspace = true

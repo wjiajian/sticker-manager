@@ -17,6 +17,8 @@ mod export;
 mod geometry;
 mod identifier;
 mod imports;
+#[cfg(any(target_os = "macos", test))]
+mod macos_drop;
 #[cfg(target_os = "macos")]
 mod menu;
 mod metered;
