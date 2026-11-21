@@ -324,9 +324,12 @@ mod tests {
         settings.save(root.path()).unwrap();
         assert_eq!(Settings::load(root.path()).ball_size, 72);
 
+        let shared = serde_json::to_string(&root.path().join("shared")).unwrap();
         fs::write(
             root.path().join("local/settings.json"),
-            r#"{"ballVisible":false,"ballSize":200,"sync":{"backend":"folder","folder":"/tmp/shared","libraryId":"id"}}"#,
+            format!(
+                r#"{{"ballVisible":false,"ballSize":200,"sync":{{"backend":"folder","folder":{shared},"libraryId":"id"}}}}"#
+            ),
         )
         .unwrap();
         let loaded = Settings::load(root.path());
