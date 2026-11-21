@@ -292,10 +292,11 @@ fn tick(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub fn settings_changed(app: &AppHandle, settings: &Settings) -> Result<(), String> {
+pub fn settings_changed(app: &AppHandle, _settings: &Settings) -> Result<(), String> {
     let Some(state) = app.try_state::<BallState>() else {
         return Ok(());
     };
+    let settings = app.state::<SettingsState>().get();
     let mut r = state.runtime.lock().unwrap();
     r.preview_size = None;
     let metrics = BallMetrics::new(settings.ball_size);
@@ -313,7 +314,7 @@ pub fn settings_changed(app: &AppHandle, settings: &Settings) -> Result<(), Stri
     let display = r.display.clone();
     let center = r.center;
     let edge = r.edge;
-    render(app, &mut r, settings)?;
+    render(app, &mut r, &settings)?;
     drop(r);
     native::set_visible(app, settings.ball_visible)?;
     if settings.ball_visible {
@@ -323,14 +324,8 @@ pub fn settings_changed(app: &AppHandle, settings: &Settings) -> Result<(), Stri
 }
 #[tauri::command]
 pub fn preview_ball_size(app: AppHandle, size: Option<u32>) -> Result<(), String> {
-    if let Some(size) = size
-        && !(geometry::BALL_SIZE_MIN..=geometry::BALL_SIZE_MAX).contains(&size)
-    {
-        return Err(format!(
-            "悬浮球大小必须在 {} 到 {} 之间",
-            geometry::BALL_SIZE_MIN,
-            geometry::BALL_SIZE_MAX
-        ));
+    if let Some(size) = size {
+        geometry::validate_ball_size(size)?;
     }
     let settings = app.state::<SettingsState>().get();
     let Some(state) = app.try_state::<BallState>() else {

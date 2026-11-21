@@ -56,6 +56,25 @@ pub fn display_at(displays: &[Display], point: Point) -> Option<&Display> {
 pub const BALL_SIZE_MIN: u32 = 40;
 pub const BALL_SIZE_MAX: u32 = 80;
 pub const BALL_SIZE_DEFAULT: u32 = 56;
+pub const BALL_SIZE_STEP: u32 = 4;
+
+pub fn normalize_ball_size(size: u32) -> u32 {
+    let clamped = size.clamp(BALL_SIZE_MIN, BALL_SIZE_MAX);
+    let offset = clamped - BALL_SIZE_MIN;
+    let steps = (offset + BALL_SIZE_STEP / 2) / BALL_SIZE_STEP;
+    (BALL_SIZE_MIN + steps * BALL_SIZE_STEP).min(BALL_SIZE_MAX)
+}
+
+pub fn validate_ball_size(size: u32) -> Result<u32, String> {
+    if !(BALL_SIZE_MIN..=BALL_SIZE_MAX).contains(&size)
+        || !(size - BALL_SIZE_MIN).is_multiple_of(BALL_SIZE_STEP)
+    {
+        return Err(format!(
+            "悬浮球大小必须在 {BALL_SIZE_MIN} 到 {BALL_SIZE_MAX} 之间，且为 {BALL_SIZE_STEP} 的倍数"
+        ));
+    }
+    Ok(size)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BallMetrics {
@@ -75,7 +94,7 @@ pub struct BallMetrics {
 
 impl BallMetrics {
     pub fn new(size: u32) -> Self {
-        let size = size.clamp(BALL_SIZE_MIN, BALL_SIZE_MAX);
+        let size = normalize_ball_size(size);
         let drop_size = size + 16;
         let radius = f64::from(size) / 2.0;
         let drop_radius = f64::from(drop_size) / 2.0;
@@ -428,6 +447,14 @@ mod tests {
         assert_eq!(m.frame_height, 168.0);
         assert_eq!(BallMetrics::new(0).size, BALL_SIZE_MIN);
         assert_eq!(BallMetrics::new(999).size, BALL_SIZE_MAX);
+        assert_eq!(normalize_ball_size(41), 40);
+        assert_eq!(normalize_ball_size(42), 44);
+        assert_eq!(normalize_ball_size(55), 56);
+        assert_eq!(normalize_ball_size(79), 80);
+        assert_eq!(validate_ball_size(56), Ok(56));
+        assert!(validate_ball_size(55).is_err());
+        assert!(validate_ball_size(36).is_err());
+        assert!(validate_ball_size(84).is_err());
     }
     #[test]
     fn snaps_to_nearest_side_and_clamps_height() {

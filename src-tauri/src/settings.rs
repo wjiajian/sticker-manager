@@ -33,6 +33,7 @@ pub struct Settings {
     pub ball_visible: bool,
     pub ball_auto_hide_seconds: Option<u32>,
     /// 悬浮球逻辑直径（px），范围 40–80，步进 4，默认 56。
+    #[serde(deserialize_with = "deserialize_ball_size")]
     pub ball_size: u32,
     pub ball_position: BallPosition,
     pub autostart_initialized: bool,
@@ -57,6 +58,17 @@ pub struct SyncSettings {
 }
 fn enabled() -> bool {
     true
+}
+/// 宽容反序列化：遇到负数、超大数、非数字或非步进值时仅规范化/回退本字段，不让整份设置失效。
+fn deserialize_ball_size<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_u64()
+        .map(|n| crate::geometry::normalize_ball_size(u32::try_from(n).unwrap_or(u32::MAX)))
+        .unwrap_or(crate::geometry::BALL_SIZE_DEFAULT))
 }
 impl SyncSettings {
     pub fn new(target: StorageConfig, library_id: String) -> Self {
@@ -171,26 +183,27 @@ pub fn update(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<Set
     drop(current);
     // 三处入口共用这个路径。即使某个系统操作失败，其余订阅者仍收到已保存的实际值。
     // 同步设置由后台保存，不应触碰只能在主线程操作的 NSPanel。
+    let latest = state.get();
     let ball = if ball_changed {
-        crate::ball::settings_changed(app, &next)
+        crate::ball::settings_changed(app, &latest)
     } else {
         Ok(())
     };
     let tray = if visibility_changed {
-        crate::tray::set_ball_checked(app, next.ball_visible)
+        crate::tray::set_ball_checked(app, latest.ball_visible)
     } else {
         Ok(())
     };
     let event = app
-        .emit("settings-changed", &next)
+        .emit("settings-changed", &latest)
         .map_err(|e| e.to_string());
     let appearance = if appearance_changed {
-        crate::appearance::apply(app, next.appearance).map_err(|e| e.to_string())
+        crate::appearance::apply(app, latest.appearance).map_err(|e| e.to_string())
     } else {
         Ok(())
     };
     ball.and(tray).and(appearance).and(event)?;
-    Ok(next)
+    Ok(latest)
 }
 
 #[tauri::command]
@@ -212,16 +225,10 @@ pub fn set_ball_visible(app: AppHandle, visible: bool) -> Result<Settings, Strin
 pub fn set_ball_auto_hide(app: AppHandle, seconds: Option<u32>) -> Result<Settings, String> {
     update(&app, |s| s.ball_auto_hide_seconds = seconds)
 }
-/// 不放进 `validate`：读到范围外的值时运行时夹回范围内就够了，不该让整份设置（含同步配置）回到默认值。
+/// 不放进 `validate`：反序列化时已容错并规范化，不该让整份设置（含同步配置）回到默认值。
 #[tauri::command]
 pub fn set_ball_size(app: AppHandle, size: u32) -> Result<Settings, String> {
-    if !(crate::geometry::BALL_SIZE_MIN..=crate::geometry::BALL_SIZE_MAX).contains(&size) {
-        return Err(format!(
-            "悬浮球大小必须在 {} 到 {} 之间",
-            crate::geometry::BALL_SIZE_MIN,
-            crate::geometry::BALL_SIZE_MAX
-        ));
-    }
+    let size = crate::geometry::validate_ball_size(size)?;
     update(&app, |s| s.ball_size = size)
 }
 /// 不放进 `validate`：读到范围外的值时界面夹回范围内就够了，不该让整份设置（含同步配置）回到默认值。
@@ -315,7 +322,7 @@ mod tests {
         assert_eq!(settings.ball_size, crate::geometry::BALL_SIZE_DEFAULT);
     }
     #[test]
-    fn ball_size_round_trip_and_out_of_range_value_preserves_other_settings() {
+    fn ball_size_round_trip_and_invalid_values_preserve_other_settings() {
         let root = tempfile::tempdir().unwrap();
         let settings = Settings {
             ball_size: 72,
@@ -325,21 +332,25 @@ mod tests {
         assert_eq!(Settings::load(root.path()).ball_size, 72);
 
         let shared = serde_json::to_string(&root.path().join("shared")).unwrap();
-        fs::write(
-            root.path().join("local/settings.json"),
-            format!(
-                r#"{{"ballVisible":false,"ballSize":200,"sync":{{"backend":"folder","folder":{shared},"libraryId":"id"}}}}"#
-            ),
-        )
-        .unwrap();
-        let loaded = Settings::load(root.path());
-        assert!(!loaded.ball_visible);
-        assert_eq!(loaded.ball_size, 200);
-        assert!(loaded.sync.is_some());
-        assert_eq!(
-            crate::geometry::BallMetrics::new(loaded.ball_size).size,
-            crate::geometry::BALL_SIZE_MAX
-        );
+        for (raw, expected) in [
+            ("200", crate::geometry::BALL_SIZE_MAX),
+            ("55", 56),
+            ("-10", crate::geometry::BALL_SIZE_DEFAULT),
+            ("999999999999999", crate::geometry::BALL_SIZE_MAX),
+            (r#""invalid""#, crate::geometry::BALL_SIZE_DEFAULT),
+        ] {
+            fs::write(
+                root.path().join("local/settings.json"),
+                format!(
+                    r#"{{"ballVisible":false,"ballSize":{raw},"sync":{{"backend":"folder","folder":{shared},"libraryId":"id"}}}}"#
+                ),
+            )
+            .unwrap();
+            let loaded = Settings::load(root.path());
+            assert!(!loaded.ball_visible, "raw={raw}");
+            assert_eq!(loaded.ball_size, expected, "raw={raw}");
+            assert!(loaded.sync.is_some(), "raw={raw}");
+        }
     }
     #[test]
     fn sync_settings_round_trip_and_corrupt_backend_falls_back() {
