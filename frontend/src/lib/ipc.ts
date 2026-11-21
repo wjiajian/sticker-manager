@@ -120,6 +120,8 @@ export const ipc = {
   setAppearance: (appearance: Settings["appearance"]) => invoke<Settings>("set_appearance", { appearance }),
   setBallVisible: (visible: boolean) => invoke<Settings>("set_ball_visible", { visible }),
   setBallAutoHide: (seconds: 3 | 10 | null) => invoke<Settings>("set_ball_auto_hide", { seconds }),
+  setBallSize: (size: number) => invoke<Settings>("set_ball_size", { size }),
+  previewBallSize: (size: number | null) => invoke<void>("preview_ball_size", { size }),
   setStickerTileSize: (size: number) => invoke<Settings>("set_sticker_tile_size", { size }),
   getAutostart: () => invoke<boolean>("get_autostart"),
   setAutostart: (enabled: boolean) => invoke<{ enabled: boolean | null; error: string | null }>("set_autostart", { enabled }),
@@ -176,6 +178,7 @@ export interface Settings {
   appearance: "system" | "light" | "dark";
   ballVisible: boolean;
   ballAutoHideSeconds: 3 | 10 | null;
+  ballSize: number;
   ballPosition: { display: string; edge: "left" | "right"; y: number };
   autostartInitialized: boolean;
   sync: (({ backend: "folder"; folder: string } | NetworkTarget) & { libraryId: string; paused: boolean; pauseOnMetered: boolean }) | null;
@@ -227,6 +230,10 @@ export interface SyncTargetInfo {
 export interface BallSnapshot {
   center: { x: number; y: number };
   edge: "left" | "right";
+  size: number;
+  dropSize: number;
+  frameWidth: number;
+  tipOffset: number;
   collapsed: boolean;
   hovered: boolean;
   pressed: boolean;

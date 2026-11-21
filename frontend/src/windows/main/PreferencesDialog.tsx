@@ -11,6 +11,7 @@ import { downloadLabel, focusOpener } from "./useUpdate";
 import { syncTime } from "./useSyncStatus";
 
 type SectionId = "general" | "quick" | "sync" | "library" | "update";
+const BALL_SIZE = { min: 40, max: 80, step: 4, default: 56 };
 const SECTIONS: { id: SectionId; label: string; icon: Icon }[] = [
   { id: "general", label: "通用", icon: SlidersHorizontalIcon },
   { id: "quick", label: "悬浮球与面板", icon: SmileyIcon },
@@ -35,15 +36,28 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const [busy, setBusy] = useState<string | null>(null);
   const working = useRef(false);
   const [checkError, setCheckError] = useState<string | null>(null);
+  const [draftBallSize, setDraftBallSize] = useState<number | null>(null);
+  const draftBallSizeRef = useRef<number | null>(null);
+  const settingsRef = useRef<Settings | null>(null);
+  const pointerDragging = useRef(false);
+  const dragCleanup = useRef<(() => void) | null>(null);
+  const previewInFlight = useRef<Promise<void> | null>(null);
+  const pendingPreview = useRef<number | null | undefined>(undefined);
+  const mounted = useRef(true);
   const tabId = (id: SectionId) => `${title}-tab-${id}`;
   useEffect(() => {
+    mounted.current = true;
     const element = dialog.current!;
     element.showModal();
     // showModal 会把焦点给第一个可聚焦元素，这里换成当前分组的侧边选项。
     document.getElementById(tabId(section))?.focus();
     let disposed = false;
-    const listening = listen<Settings>("settings-changed", ({ payload }) => { if (!disposed) setSettings(payload); });
-    void listening.then(() => ipc.getSettings()).then((s) => { if (!disposed) setSettings(s); })
+    const listening = listen<Settings>("settings-changed", ({ payload }) => {
+      if (!disposed) { settingsRef.current = payload; setSettings(payload); }
+    });
+    void listening.then(() => ipc.getSettings()).then((s) => {
+      if (!disposed) { settingsRef.current = s; setSettings(s); }
+    })
       .catch((e: unknown) => { if (!disposed) setError(String(e)); });
     void ipc.getAutostart().then((enabled) => { if (!disposed) setAutostart(enabled); })
       .catch((e: unknown) => { if (!disposed) setAutoError(String(e)); });
@@ -51,7 +65,20 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
       .catch((e: unknown) => { if (!disposed) setError(String(e)); });
     void ipc.globalShortcutError().then((value) => { if (!disposed) setShortcutError(value); })
       .catch((e: unknown) => { if (!disposed) setShortcutError(String(e)); });
-    return () => { disposed = true; element.close(); void listening.then((cleanup) => cleanup(), () => {}); };
+    return () => {
+      disposed = true;
+      mounted.current = false;
+      dragCleanup.current?.();
+      dragCleanup.current = null;
+      if (draftBallSizeRef.current !== null || pointerDragging.current) {
+        pointerDragging.current = false;
+        draftBallSizeRef.current = null;
+        pendingPreview.current = undefined;
+        void ipc.previewBallSize(null).catch(() => {});
+      }
+      element.close();
+      void listening.then((cleanup) => cleanup(), () => {});
+    };
   }, []);
 
   function select(id: SectionId) {
@@ -76,9 +103,85 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
     try { await operation(); }
     catch (reason) {
       setError(String(reason));
-      try { setSettings(await ipc.getSettings()); } catch { /* 保留原始操作错误 */ }
+      try {
+        const current = await ipc.getSettings();
+        settingsRef.current = current;
+        setSettings(current);
+      } catch { /* 保留原始操作错误 */ }
     } finally { working.current = false; setBusy(null); }
   }
+  function queueBallSizePreview(value: number | null) {
+    pendingPreview.current = value;
+    if (previewInFlight.current) return;
+    const run = async () => {
+      while (pendingPreview.current !== undefined) {
+        const next = pendingPreview.current;
+        pendingPreview.current = undefined;
+        try { await ipc.previewBallSize(next); }
+        catch (reason) { if (mounted.current) setError(String(reason)); }
+      }
+    };
+    const task = run().finally(() => {
+      if (previewInFlight.current === task) previewInFlight.current = null;
+    });
+    previewInFlight.current = task;
+  }
+  async function commitBallSize(size: number) {
+    pendingPreview.current = undefined;
+    const inflight = previewInFlight.current;
+    if (inflight) await inflight;
+    const current = settingsRef.current;
+    if (!current || size === current.ballSize) {
+      draftBallSizeRef.current = null;
+      if (mounted.current) setDraftBallSize(null);
+      await ipc.previewBallSize(null).catch(() => {});
+      return;
+    }
+    await change("ball-size", async () => {
+      try {
+        const saved = await ipc.setBallSize(size);
+        settingsRef.current = saved;
+        if (mounted.current) setSettings(saved);
+      } catch (reason) {
+        void ipc.previewBallSize(null).catch(() => {});
+        throw reason;
+      } finally {
+        draftBallSizeRef.current = null;
+        if (mounted.current) setDraftBallSize(null);
+      }
+    });
+  }
+  function cancelBallSizePreview() {
+    dragCleanup.current?.();
+    dragCleanup.current = null;
+    pointerDragging.current = false;
+    pendingPreview.current = undefined;
+    if (draftBallSizeRef.current !== null) {
+      draftBallSizeRef.current = null;
+      setDraftBallSize(null);
+      void ipc.previewBallSize(null).catch(() => {});
+    }
+  }
+  function startBallSizeDrag() {
+    dragCleanup.current?.();
+    pointerDragging.current = true;
+    const finish = () => {
+      dragCleanup.current?.();
+      dragCleanup.current = null;
+      pointerDragging.current = false;
+      if (draftBallSizeRef.current !== null) {
+        void commitBallSize(draftBallSizeRef.current);
+      }
+    };
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+    dragCleanup.current = () => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }
+  const savedBallSize = Math.min(BALL_SIZE.max, Math.max(BALL_SIZE.min, settings?.ballSize ?? BALL_SIZE.default));
+  const displayBallSize = draftBallSize ?? savedBallSize;
   async function toggleAutostart() {
     setAutoError(null);
     try {
@@ -92,7 +195,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const split = Math.max(0, path.length - 28);
   // 分组只是隐藏不卸载：同步表单填到一半切走再切回来，内容和进行中的连接都要还在。
   const page = (id: SectionId) => ({ prefix: title, id, active: section === id });
-  return <dialog ref={dialog} aria-labelledby={title} onCancel={(event) => { event.preventDefault(); onClose(); }}
+  return <dialog ref={dialog} aria-labelledby={title} onCancel={(event) => { event.preventDefault(); cancelBallSizePreview(); onClose(); }}
     className="m-auto h-140 max-h-[calc(100%-48px)] w-180 max-w-[calc(100%-48px)] overflow-hidden rounded-card border border-line bg-surface text-ink backdrop:bg-overlay">
     <div className="flex h-full">
       <div className="flex w-44 shrink-0 flex-col gap-4 bg-chrome px-3 pt-6">
@@ -143,6 +246,39 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
                   <option value={3}>3 秒</option><option value={10}>10 秒</option><option value="never">不收起</option>
                 </select>
               </label>
+              <div className={`flex items-center justify-between gap-4 ${settings?.ballVisible ? "" : "text-ink-secondary"}`}>
+                <label htmlFor={`${title}-ball-size`}>悬浮球大小</label>
+                <div className="flex items-center gap-3">
+                  {displayBallSize !== BALL_SIZE.default && (
+                    <button type="button" disabled={!!busy || !settings?.ballVisible}
+                      onClick={() => void commitBallSize(BALL_SIZE.default)}
+                      className="text-xs text-ink-secondary underline underline-offset-4 hover:text-ink disabled:opacity-50">恢复默认</button>
+                  )}
+                  <input id={`${title}-ball-size`} type="range" aria-valuetext={`${displayBallSize} 像素`}
+                    min={BALL_SIZE.min} max={BALL_SIZE.max} step={BALL_SIZE.step} value={displayBallSize}
+                    disabled={!!busy || !settings?.ballVisible}
+                    onPointerDown={startBallSizeDrag}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      draftBallSizeRef.current = next;
+                      setDraftBallSize(next);
+                      setError(null);
+                      queueBallSizePreview(next);
+                    }}
+                    onKeyUp={() => {
+                      if (!pointerDragging.current && draftBallSizeRef.current !== null) {
+                        void commitBallSize(draftBallSizeRef.current);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!pointerDragging.current && draftBallSizeRef.current !== null) {
+                        void commitBallSize(draftBallSizeRef.current);
+                      }
+                    }}
+                    className="tile-slider interactive w-32 hover:opacity-82 disabled:opacity-50" />
+                  <span className="w-11 text-right text-xs tabular-nums text-ink-secondary">{displayBallSize} px</span>
+                </div>
+              </div>
             </Group>
             <Group title="表情面板">
               <div className="flex items-center justify-between gap-4"><span>呼出快捷键</span><kbd className="rounded-control bg-muted px-3 py-1 font-sans">{platform === "macos" ? "⌃⌥E" : "Ctrl+Alt+E"}</kbd></div>
@@ -182,7 +318,14 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
         </div>
         <div className="flex items-center justify-end gap-4 px-6 pb-6">
           {error && <p role="alert" className="min-w-0 flex-1 text-xs text-accent">{error}</p>}
-          <Button variant="primary" onClick={onClose}>完成</Button>
+          <Button variant="primary" onClick={() => {
+            if (!pointerDragging.current && draftBallSizeRef.current !== null) {
+              const finalSize = draftBallSizeRef.current;
+              draftBallSizeRef.current = null;
+              void commitBallSize(finalSize);
+            }
+            onClose();
+          }}>完成</Button>
         </div>
       </div>
     </div>

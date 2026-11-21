@@ -32,6 +32,8 @@ pub struct Settings {
     pub appearance: crate::appearance::Appearance,
     pub ball_visible: bool,
     pub ball_auto_hide_seconds: Option<u32>,
+    /// 悬浮球逻辑直径（px），范围 40–80，步进 4，默认 56。
+    pub ball_size: u32,
     pub ball_position: BallPosition,
     pub autostart_initialized: bool,
     pub sync: Option<SyncSettings>,
@@ -74,6 +76,7 @@ impl Default for Settings {
             appearance: Default::default(),
             ball_visible: true,
             ball_auto_hide_seconds: Some(3),
+            ball_size: crate::geometry::BALL_SIZE_DEFAULT,
             ball_position: BallPosition {
                 display: String::new(),
                 edge: Edge::Right,
@@ -159,6 +162,7 @@ pub fn update(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<Set
     change(&mut next);
     let ball_changed = current.ball_visible != next.ball_visible
         || current.ball_auto_hide_seconds != next.ball_auto_hide_seconds
+        || current.ball_size != next.ball_size
         || current.ball_position != next.ball_position;
     let visibility_changed = current.ball_visible != next.ball_visible;
     let appearance_changed = current.appearance != next.appearance;
@@ -207,6 +211,18 @@ pub fn set_ball_visible(app: AppHandle, visible: bool) -> Result<Settings, Strin
 #[tauri::command]
 pub fn set_ball_auto_hide(app: AppHandle, seconds: Option<u32>) -> Result<Settings, String> {
     update(&app, |s| s.ball_auto_hide_seconds = seconds)
+}
+/// 不放进 `validate`：读到范围外的值时运行时夹回范围内就够了，不该让整份设置（含同步配置）回到默认值。
+#[tauri::command]
+pub fn set_ball_size(app: AppHandle, size: u32) -> Result<Settings, String> {
+    if !(crate::geometry::BALL_SIZE_MIN..=crate::geometry::BALL_SIZE_MAX).contains(&size) {
+        return Err(format!(
+            "悬浮球大小必须在 {} 到 {} 之间",
+            crate::geometry::BALL_SIZE_MIN,
+            crate::geometry::BALL_SIZE_MAX
+        ));
+    }
+    update(&app, |s| s.ball_size = size)
 }
 /// 不放进 `validate`：读到范围外的值时界面夹回范围内就够了，不该让整份设置（含同步配置）回到默认值。
 #[tauri::command]
@@ -296,6 +312,31 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"ballVisible":false}"#).unwrap();
         assert!(!settings.ball_visible);
         assert_eq!(settings.sticker_tile_size, 104);
+        assert_eq!(settings.ball_size, crate::geometry::BALL_SIZE_DEFAULT);
+    }
+    #[test]
+    fn ball_size_round_trip_and_out_of_range_value_preserves_other_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = Settings {
+            ball_size: 72,
+            ..Settings::default()
+        };
+        settings.save(root.path()).unwrap();
+        assert_eq!(Settings::load(root.path()).ball_size, 72);
+
+        fs::write(
+            root.path().join("local/settings.json"),
+            r#"{"ballVisible":false,"ballSize":200,"sync":{"backend":"folder","folder":"/tmp/shared","libraryId":"id"}}"#,
+        )
+        .unwrap();
+        let loaded = Settings::load(root.path());
+        assert!(!loaded.ball_visible);
+        assert_eq!(loaded.ball_size, 200);
+        assert!(loaded.sync.is_some());
+        assert_eq!(
+            crate::geometry::BallMetrics::new(loaded.ball_size).size,
+            crate::geometry::BALL_SIZE_MAX
+        );
     }
     #[test]
     fn sync_settings_round_trip_and_corrupt_backend_falls_back() {

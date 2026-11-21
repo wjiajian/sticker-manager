@@ -58,14 +58,20 @@ export function Ball() {
   }
   if (!state) return error ? <p role="alert" className="bg-surface p-2 text-xs text-accent">{error}</p> : null;
   const dropping = !!state.dropLabel;
-  const size = dropping ? 72 : 56;
+  const size = dropping ? state.dropSize : state.size;
+  const padding = Math.max(3, Math.round(size * 0.08));
+  const ringSize = size + 12;
+  const ringCenter = ringSize / 2;
+  const ringRadius = ringCenter - 1.5;
+  const baseRadius = state.size / 2;
+  const badgeInset = state.collapsed ? 4 : Math.max(4, Math.round(baseRadius - 24));
   const tip = state.dropLabel ?? state.message ?? (state.hovered && !state.dragging ? (progressLabel(sync ?? undefined) ? `${progressLabel(sync ?? undefined)} · 单击展开` : "单击展开 · 右键更多") : null);
   const eyes = state.collapsed ? "M21 31h8M35 31h8" : state.hovered || dropping ? "M25 29v3M39 29v3" : "M21 31q4 -5 8 0M35 31q4 -5 8 0";
   const mouth = state.collapsed ? "M27 43h10" : dropping ? "M26 40q6 10 12 0Z" : "M24 41q8 8 16 0";
   return <main aria-label="悬浮球" className="relative h-full w-full overflow-hidden">
     <button type="button" tabIndex={-1} aria-label={state.panelVisible ? "收起表情面板" : "展开表情面板"} aria-expanded={state.panelVisible}
-      className="interactive absolute touch-none rounded-full p-2 outline-none"
-      style={{ left: state.center.x - size / 2, top: state.center.y - size / 2, width: size, height: size,
+      className="interactive absolute touch-none rounded-full outline-none"
+      style={{ left: state.center.x - size / 2, top: state.center.y - size / 2, width: size, height: size, padding,
         opacity: state.collapsed ? 0.7 : 1, backgroundImage: "linear-gradient(to bottom, var(--color-surface), color-mix(in srgb, var(--color-surface) 90%, var(--color-line)))", transform: `scale(${state.pressed ? 0.96 : state.hovered && !dropping ? 1.1 : 1})`,
         boxShadow: `var(--shadow-ball)${state.panelVisible ? ", inset 0 0 0 3px var(--color-accent)" : ""}`, cursor: state.dragging ? "grabbing" : "pointer" }}
       onPointerDown={(event) => {
@@ -74,7 +80,7 @@ export function Ball() {
         if (event.button === 0 && !(platform === "macos" && event.ctrlKey)) void run(ipc.ballPointerDown);
       }}
       onContextMenu={(event) => { event.preventDefault(); void run(ipc.showBallMenu); }}>
-      <svg viewBox="0 0 64 64" className="block h-full w-full" aria-hidden>
+      <svg viewBox="5.5 7.5 53 53" className="block h-full w-full" aria-hidden>
         <defs>
           <radialGradient id="ball-body" cx="36%" cy="28%" r="80%">
             <stop offset="0" style={{ stopColor: "color-mix(in srgb, var(--color-brand) 65%, white)" }} />
@@ -86,24 +92,24 @@ export function Ball() {
             <stop offset="1" stopColor="#fff" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <circle cx="32" cy="34" r="24" fill="url(#ball-body)" stroke="var(--color-brand-ink)" strokeWidth="3" />
+        <circle cx="32" cy="34" r="24" fill="url(#ball-body)" stroke="var(--color-brand-ink)" strokeWidth="2.5" />
         <ellipse cx="32" cy="20.5" rx="15" ry="7.5" fill="url(#ball-gloss)" />
-        <path d={eyes} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3.5" strokeLinecap="round" />
-        <path d={mouth} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3.5" strokeLinecap="round" />
+        <path d={eyes} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3" strokeLinecap="round" />
+        <path d={mouth} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3" strokeLinecap="round" />
       </svg>
       {dropping && <span aria-hidden className="pointer-events-none absolute -inset-3 rounded-full border-2 border-dashed border-accent" />}
     </button>
-    {ring && <svg aria-hidden viewBox="0 0 68 68" className="pointer-events-none absolute transition-opacity duration-300" style={{ left: state.center.x - 34, top: state.center.y - 34, width: 68, height: 68, opacity: sync?.progress ? 1 : 0 }}>
-      <circle cx="34" cy="34" r="32.5" fill="none" stroke="var(--color-ball-track)" strokeWidth="3" />
-      <circle cx="34" cy="34" r="32.5" fill="none" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" pathLength="100"
+    {ring && <svg aria-hidden viewBox={`0 0 ${ringSize} ${ringSize}`} className="pointer-events-none absolute transition-opacity duration-300" style={{ left: state.center.x - ringCenter, top: state.center.y - ringCenter, width: ringSize, height: ringSize, opacity: sync?.progress ? 1 : 0 }}>
+      <circle cx={ringCenter} cy={ringCenter} r={ringRadius} fill="none" stroke="var(--color-ball-track)" strokeWidth="3" />
+      <circle cx={ringCenter} cy={ringCenter} r={ringRadius} fill="none" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" pathLength="100"
         strokeDasharray={ring.total ? `${Math.max(0, Math.min(100, ring.completed / ring.total * 100))} 100` : "25 100"}
-        className={ring.total === null ? "sync-download-arc" : undefined} style={{ transformOrigin: "34px 34px", transform: "rotate(-90deg)" }} />
+        className={ring.total === null ? "sync-download-arc" : undefined} style={{ transformOrigin: `${ringCenter}px ${ringCenter}px`, transform: "rotate(-90deg)" }} />
     </svg>}
     {!!sync?.unseen && <span aria-label={`${sync.unseen} 张新表情`} className="pointer-events-none absolute min-w-6 rounded-full bg-accent-fill px-1 py-0.5 text-center text-xs leading-4 font-bold text-on-accent shadow-[0_0_0_2px_var(--color-surface)]"
-      style={{ top: Math.max(2, state.center.y - 32), ...(state.edge === "right" ? { right: Math.max(2, 300 - state.center.x + 4) } : { left: Math.max(2, state.center.x + 4) }) }}>{sync.unseen > 99 ? "99+" : sync.unseen}</span>}
+      style={{ top: Math.max(2, state.center.y - baseRadius - 4), ...(state.edge === "right" ? { right: Math.max(2, state.frameWidth - state.center.x + badgeInset) } : { left: Math.max(2, state.center.x + badgeInset) }) }}>{sync.unseen > 99 ? "99+" : sync.unseen}</span>}
     {tip && !state.collapsed && <div role="status" className="pointer-events-none absolute max-w-72 rounded-control bg-ink px-2 py-1 text-xs text-surface"
       style={{ ...(state.edge === "right" ? { right: 8 } : { left: 8 }),
-        ...(state.tipAbove ? { bottom: `calc(100% - ${state.center.y - 56}px)` } : { top: state.center.y + 56 }) }}>
+        ...(state.tipAbove ? { bottom: `calc(100% - ${state.center.y - state.tipOffset}px)` } : { top: state.center.y + state.tipOffset }) }}>
       <span className="line-clamp-3 break-all">{tip}</span>
     </div>}
   </main>;
