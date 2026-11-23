@@ -165,6 +165,7 @@ export const ipc = {
   renameCategory: (id: string, name: string) => invoke<void>("rename_category", { id, name }),
   setCategoryColor: (id: string, color: string) => invoke<void>("set_category_color", { id, color }),
   deleteCategory: (id: string) => invoke<void>("delete_category", { id }),
+  moveCategory: (id: string, before: string | null) => invoke<void>("move_category", { id, before }),
   setStickerCategory: (stickerId: string, categoryId: string | null) => invoke<void>("set_sticker_category", { stickerId, categoryId }),
   setStickerName: (id: string, name: string) => invoke<void>("set_sticker_name", { id, name }),
   setStickerCaption: (id: string, caption: string) => invoke<void>("set_sticker_caption", { id, caption }),
