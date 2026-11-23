@@ -1,4 +1,4 @@
-//! 表情面板的窗口、全局快捷键和运行期间的固定状态。
+//! 表情面板的窗口和运行期间的固定状态。
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -6,7 +6,6 @@ use serde::Serialize;
 #[cfg(any(not(target_os = "macos"), test))]
 use tauri::PhysicalPosition;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WindowEvent};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const WIDTH: f64 = 360.0;
 const HEIGHT: f64 = 524.0;
@@ -15,7 +14,6 @@ const HEIGHT: f64 = 524.0;
 pub struct PanelState {
     pinned: AtomicBool,
     dragging: AtomicBool,
-    shortcut_error: Mutex<Option<String>>,
     origin: Mutex<crate::geometry::PanelOrigin>,
 }
 
@@ -23,35 +21,6 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
     app.manage(PanelState::default());
     native::create(app)?;
     Ok(())
-}
-
-pub fn register_shortcut(app: &AppHandle) {
-    let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyE);
-    let result = app
-        .global_shortcut()
-        .on_shortcut(shortcut, |app, _, event| {
-            if event.state != ShortcutState::Pressed {
-                return;
-            }
-            // NSPanel 操作只能在 AppKit 主线程上执行。
-            let handle = app.clone();
-            if let Err(error) = app.run_on_main_thread(move || {
-                if let Err(error) = toggle(&handle) {
-                    eprintln!("无法切换表情面板：{error}");
-                }
-            }) {
-                eprintln!("无法切换表情面板：{error}");
-            }
-        });
-    if let Err(error) = result {
-        let shortcut = if cfg!(target_os = "macos") {
-            "⌃⌥E"
-        } else {
-            "Ctrl+Alt+E"
-        };
-        *app.state::<PanelState>().shortcut_error.lock().unwrap() =
-            Some(format!("全局快捷键 {shortcut} 注册失败：{error}"));
-    }
 }
 
 fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -266,11 +235,6 @@ pub fn show_main_window(app: AppHandle) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-#[tauri::command]
-pub fn global_shortcut_error(state: tauri::State<PanelState>) -> Option<String> {
-    state.shortcut_error.lock().unwrap().clone()
 }
 
 #[cfg(target_os = "macos")]

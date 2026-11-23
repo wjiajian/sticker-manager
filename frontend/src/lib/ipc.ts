@@ -144,7 +144,11 @@ export const ipc = {
   setPanelDragging: (dragging: boolean) => invoke<void>("set_panel_dragging", { dragging }),
   hidePanel: (onlyIfUnpinned = false) => invoke<boolean>("hide_panel", { onlyIfUnpinned }),
   showMainWindow: () => invoke<void>("show_main_window"),
-  globalShortcutError: () => invoke<string | null>("global_shortcut_error"),
+  panelShortcutState: () => invoke<PanelShortcutState>("panel_shortcut_state"),
+  checkPanelShortcut: (input: ShortcutKeyInput) => invoke<ShortcutCandidate>("check_panel_shortcut", { input }),
+  setPanelShortcut: (shortcut: string | null) => invoke<PanelShortcutState>("set_panel_shortcut", { shortcut }),
+  beginPanelShortcutRecording: () => invoke<PanelShortcutState>("begin_panel_shortcut_recording"),
+  endPanelShortcutRecording: (recordingId: number | null) => invoke<PanelShortcutState>("end_panel_shortcut_recording", { recordingId }),
   libraryOverview: () => invoke<LibraryOverview>("library_overview"),
   listStickers: (view: LibraryView) => invoke<Sticker[]>("list_stickers", { view }),
   listStickersPage: (filter: StickerPageFilter, after: StickerCursor | null, limit: number) => invoke<StickerPage>("list_stickers_page", { filter, after, limit }),
@@ -185,6 +189,7 @@ export interface Settings {
   autoCheckUpdates: boolean;
   ignoredUpdate: string | null;
   stickerTileSize: number;
+  panelShortcut: string | null;
 }
 export interface UpdateStatus {
   currentVersion: string;
@@ -243,3 +248,12 @@ export interface BallSnapshot {
   message: string | null;
   tipAbove: boolean;
 }
+
+export type PanelShortcutStatus = "active" | "disabled" | "failed";
+export interface PanelShortcutState {
+  shortcut: string | null; label: string | null; accessibleLabel: string | null;
+  defaultShortcut: string; defaultLabel: string; status: PanelShortcutStatus;
+  error: string | null; recordingId: number | null; revision: number;
+}
+export interface ShortcutKeyInput { code: string; keyCode: number; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }
+export interface ShortcutCandidate { shortcut: string | null; label: string; accessibleLabel: string; error: string | null }

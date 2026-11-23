@@ -24,6 +24,7 @@ mod panel;
 mod portable;
 mod preview;
 mod settings;
+mod shortcut;
 mod startup;
 mod sync;
 mod tray;
@@ -103,7 +104,7 @@ pub fn run() {
             sync::start(app.handle().clone());
             panel::create(app)?;
             preview::create(app)?;
-            panel::register_shortcut(app.handle());
+            shortcut::init(app.handle());
             create_main_window(app)?;
             tray::create(app)?;
             ball::create(app)?;
@@ -115,6 +116,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            shortcut::on_window_event(window, event);
             panel::on_window_event(window, event);
             appearance::on_window_event(window, event);
         })
@@ -154,7 +156,11 @@ pub fn run() {
             panel::set_panel_dragging,
             panel::hide_panel,
             panel::show_main_window,
-            panel::global_shortcut_error,
+            shortcut::panel_shortcut_state,
+            shortcut::check_panel_shortcut,
+            shortcut::set_panel_shortcut,
+            shortcut::begin_panel_shortcut_recording,
+            shortcut::end_panel_shortcut_recording,
             preview::show_preview,
             preview::hide_preview,
             preview::preview_session,
@@ -323,6 +329,9 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
         .visible(false)
         .focused(show)
         .on_page_load(move |window, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                shortcut::cancel_recording(window.app_handle());
+            }
             if show && payload.event() == tauri::webview::PageLoadEvent::Finished {
                 first_load.call_once(|| {
                     let _ = window.show();
