@@ -103,8 +103,19 @@ pub struct LibraryOverview {
 impl Library {
     /// 打开 `root` 下的仓库，不存在就新建。
     pub fn open(root: &Path) -> Result<Self> {
-        fs::create_dir_all(root)?;
-        let conn = db::open(&root.join("library.db"))?;
+        Self::open_at(root, true)
+    }
+
+    /// Open a relocated library without recreating it if its disk disappears during startup.
+    pub fn open_existing(root: &Path) -> Result<Self> {
+        Self::open_at(root, false)
+    }
+
+    fn open_at(root: &Path, create: bool) -> Result<Self> {
+        if create {
+            fs::create_dir_all(root)?;
+        }
+        let conn = db::open(&root.join("library.db"), create)?;
         fs::create_dir_all(root.join("objects"))?;
         fs::create_dir_all(root.join("thumbs"))?;
         let device = Device::load_or_create(root)?;

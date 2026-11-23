@@ -66,6 +66,8 @@ pub fn ball_progress(app: &AppHandle) -> Option<String> {
 }
 
 pub async fn run(app: AppHandle, paths: Vec<PathBuf>, ball: bool) -> Result<ImportReport, String> {
+    let jobs = app.state::<crate::jobs::LibraryJobs>();
+    let _job = jobs.begin(crate::jobs::Job::Import)?;
     let first = app.state::<ImportState>().begin(ball)?;
     let _ = app.emit("import-status-changed", first);
     let handle = app.clone();

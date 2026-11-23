@@ -1,4 +1,8 @@
-import { ArrowCounterClockwiseIcon, CheckIcon, CopyIcon, FolderOpenIcon, StarIcon, TrashIcon } from "@phosphor-icons/react";
+import { Menu } from "@tauri-apps/api/menu";
+import { LogicalPosition } from "@tauri-apps/api/dpi";
+import { useEffect, useRef } from "react";
+import { exportBusy, exportError, exportMenuItems, useExportStore } from "../../stores/export";
+import { ExportIcon, ArrowCounterClockwiseIcon, CheckIcon, CopyIcon, FolderOpenIcon, StarIcon, TrashIcon } from "@phosphor-icons/react";
 import { useQuery, skipToken } from "@tanstack/react-query";
 import { ipc, type SyncStatus } from "../../lib/ipc";
 import { SyncDevices } from "./SyncDevices";
@@ -19,6 +23,17 @@ import { storageSize } from "./useSyncStatus";
 import { StickersCategory } from "./StickersCategory";
 
 export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?: SyncStatus }) {
+  const menu = useRef<Menu | null>(null);
+  const exporting = useExportStore(exportBusy);
+  useEffect(() => () => { void menu.current?.close(); }, []);
+  async function chooseExport(ids: string[], button: HTMLButtonElement) {
+    try {
+      const { left, bottom } = button.getBoundingClientRect();
+      await menu.current?.close();
+      menu.current = await Menu.new({ items: exportMenuItems({ stickers: ids }) });
+      await menu.current.popup(new LogicalPosition(left, bottom));
+    } catch (reason) { exportError(String(reason)); }
+  }
   const selectedId = useUiStore((s) => s.selectedStickerId);
   const detail = useSticker(selectedId);
   const { data: sticker, error, isPending } = detail;
@@ -47,6 +62,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
           </Button>
           <Button disabled={actions.busy} onClick={() => void actions.purgeStickers(many)} className="disabled:opacity-50">彻底删除</Button>
         </div> : <>
+          <Button aria-haspopup="menu" disabled={actions.busy || exporting} onClick={e => void chooseExport(many.map(s => s.id), e.currentTarget)} className="justify-center disabled:opacity-50"><ExportIcon size={16} aria-hidden />导出 {many.length} 张…</Button>
           <div className="flex gap-2">
             <Button
               aria-pressed={allFavorite}

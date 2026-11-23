@@ -753,7 +753,7 @@ pub fn sync_now(app: AppHandle) {
 #[tauri::command]
 pub async fn inspect_sync_folder(app: AppHandle, path: PathBuf) -> Result<FolderInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        core::inspect_folder(&path, &app.state::<SettingsState>().root).map_err(|e| e.to_string())
+        core::inspect_folder(&path, &app.state::<SettingsState>().root()).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -764,18 +764,22 @@ pub async fn join_sync_folder(
     path: PathBuf,
     expected_id: Option<String>,
 ) -> Result<(), String> {
+    if app.state::<crate::jobs::LibraryJobs>().moving() {
+        return Err("正在移动仓库，请等它完成后再修改同步设置".into());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
-        let info = core::inspect_folder(&path, &app.state::<SettingsState>().root)
-            .map_err(|e| e.to_string())?;
-        if info.manifest.as_ref().map(|m| &m.id) != expected_id.as_ref() {
-            return Err("文件夹里的仓库已变化，请重新选择并确认".into());
-        }
-        let storage = FolderStorage::new(&info.path).map_err(|e| e.to_string())?;
         let state = app.state::<Arc<SyncState>>();
         // 等旧后端的当前数据库阶段结束，再拍新快照，防止漏掉刚到的远端改动。
         state.inner.lock().unwrap().generation += 1;
         let _running = state.run.lock().unwrap();
         let result = (|| {
+            let info = core::inspect_folder(&path, &app.state::<SettingsState>().root())
+                .map_err(|e| e.to_string())?;
+            if info.manifest.as_ref().map(|m| &m.id) != expected_id.as_ref() {
+                return Err("文件夹里的仓库已变化，请重新选择并确认".into());
+            }
+            let storage = FolderStorage::new(&info.path).map_err(|e| e.to_string())?;
             let manifest = match info.target.manifest {
                 Some(expected) => {
                     let actual = Manifest::read(&storage).map_err(|e| e.to_string())?;
@@ -804,6 +808,10 @@ pub async fn join_sync_folder(
 }
 #[tauri::command]
 pub async fn stop_sync(app: AppHandle) -> Result<(), String> {
+    if app.state::<crate::jobs::LibraryJobs>().moving() {
+        return Err("正在移动仓库，请等它完成后再修改同步设置".into());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Arc<SyncState>>();
         {
@@ -913,6 +921,10 @@ pub async fn join_network_target(
     connection_id: String,
     expected_id: Option<String>,
 ) -> Result<(), String> {
+    if app.state::<crate::jobs::LibraryJobs>().moving() {
+        return Err("正在移动仓库，请等它完成后再修改同步设置".into());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Arc<SyncState>>();
         let (connection, generation) = {
@@ -992,6 +1004,10 @@ pub async fn update_sync_credentials(
     connection_id: String,
     credentials: Credentials,
 ) -> Result<(), String> {
+    if app.state::<crate::jobs::LibraryJobs>().moving() {
+        return Err("正在移动仓库，请等它完成后再修改同步设置".into());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
         let config = app
             .state::<SettingsState>()
@@ -1069,6 +1085,50 @@ pub async fn set_device_name(app: AppHandle, name: String) -> Result<(), String>
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+impl SyncState {
+    pub(crate) fn pause_rounds(&self, app: &AppHandle) -> std::sync::MutexGuard<'_, ()> {
+        let paused = {
+            let mut r = self.inner.lock().unwrap();
+            r.generation += 1;
+            r.status.progress = None;
+            if r.status.phase == Phase::Syncing {
+                r.status.phase = Phase::Paused;
+                Some(r.status.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(status) = paused {
+            let _ = app.emit("sync-status-changed", status);
+        }
+        self.wake.notify_one();
+        self.run.lock().unwrap()
+    }
+}
+pub(crate) fn resume_after_relocation(app: &AppHandle) {
+    let state = app.state::<Arc<SyncState>>();
+    state.credentials.lock().unwrap().clear();
+    let configured = app.state::<SettingsState>().get().sync.is_some();
+    let mut r = state.inner.lock().unwrap();
+    r.generation += 1;
+    r.schedule.requested = true;
+    let generation = r.generation;
+    drop(r);
+    publish(
+        app,
+        &state,
+        generation,
+        if configured {
+            Phase::Synced
+        } else {
+            Phase::Unconfigured
+        },
+        None,
+        None,
+    );
+    state.wake.notify_one()
 }
 
 #[cfg(test)]

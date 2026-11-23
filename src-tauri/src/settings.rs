@@ -177,13 +177,34 @@ impl Settings {
 }
 
 pub struct SettingsState {
-    pub root: PathBuf,
+    root: Mutex<PathBuf>,
     value: Mutex<Settings>,
 }
 impl SettingsState {
     pub fn new(root: PathBuf) -> Self {
         let value = Mutex::new(Settings::load(&root));
-        Self { root, value }
+        Self {
+            root: Mutex::new(root),
+            value,
+        }
+    }
+    pub fn lock_root(&self) -> std::sync::MutexGuard<'_, PathBuf> {
+        self.root.lock().unwrap()
+    }
+    pub fn root(&self) -> PathBuf {
+        self.lock_root().clone()
+    }
+    fn save_change(
+        &self,
+        change: impl FnOnce(&mut Settings),
+    ) -> Result<(Settings, Settings), String> {
+        let root = self.lock_root();
+        let mut current = self.value.lock().unwrap();
+        let mut next = current.clone();
+        change(&mut next);
+        next.save(&root)?;
+        let previous = std::mem::replace(&mut *current, next.clone());
+        Ok((previous, next))
     }
     pub fn get(&self) -> Settings {
         self.value.lock().unwrap().clone()
@@ -208,18 +229,13 @@ fn update_inner(
     emit_event: bool,
 ) -> Result<Settings, String> {
     let state = app.state::<SettingsState>();
-    let mut current = state.value.lock().unwrap();
-    let mut next = current.clone();
-    change(&mut next);
+    let (current, next) = state.save_change(change)?;
     let ball_changed = current.ball_visible != next.ball_visible
         || current.ball_auto_hide_seconds != next.ball_auto_hide_seconds
         || current.ball_size != next.ball_size
         || current.ball_position != next.ball_position;
     let visibility_changed = current.ball_visible != next.ball_visible;
     let appearance_changed = current.appearance != next.appearance;
-    next.save(&state.root)?;
-    *current = next.clone();
-    drop(current);
     // 三处入口共用这个路径。即使某个系统操作失败，其余订阅者仍收到已保存的实际值。
     // 同步设置由后台保存，不应触碰只能在主线程操作的 NSPanel。
     let latest = state.get();
@@ -317,14 +333,10 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> AutostartResult {
     }
 }
 #[tauri::command]
-pub fn library_directory(state: tauri::State<SettingsState>) -> String {
-    state.root.to_string_lossy().into_owned()
-}
-#[tauri::command]
 pub fn open_library_directory(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(
-            app.state::<SettingsState>().root.to_string_lossy(),
+            app.state::<SettingsState>().root().to_string_lossy(),
             None::<&str>,
         )
         .map_err(|e| e.to_string())
@@ -356,6 +368,21 @@ pub fn initialize_autostart(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn switched_root_receives_settings_updates() {
+        let old = tempfile::tempdir().unwrap();
+        let moved = tempfile::tempdir().unwrap();
+        let state = SettingsState::new(old.path().into());
+        state.save_change(|s| s.ball_visible = true).unwrap();
+        let before = fs::read(old.path().join("local/settings.json")).unwrap();
+        *state.lock_root() = moved.path().into();
+        state.save_change(|s| s.ball_visible = false).unwrap();
+        assert!(!Settings::load(moved.path()).ball_visible);
+        assert_eq!(
+            fs::read(old.path().join("local/settings.json")).unwrap(),
+            before
+        );
+    }
     #[test]
     fn panel_shortcut_missing_null_normalized_and_invalid() {
         assert_eq!(

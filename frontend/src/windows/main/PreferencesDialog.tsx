@@ -8,7 +8,12 @@ import { ShortcutRecorder } from "./ShortcutRecorder";
 import { navigation, selectedNavigation } from "./libraryViews";
 import { SyncPreferences } from "./SyncPreferences";
 import { downloadLabel, focusOpener } from "./useUpdate";
-import { syncTime } from "./useSyncStatus";
+import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { type LibraryLocation, type MoveStatus } from "../../lib/ipc";
+import { useStatusEvent } from "../../lib/useStatusEvent";
+import { useLibraryOverview } from "../../lib/queries";
+import { startExport, exportBusy, useExportStore } from "../../stores/export";
+import { storageSize, syncTime } from "./useSyncStatus";
 
 type SectionId = "general" | "quick" | "sync" | "library" | "update";
 type BallSizeAction = { kind: "preview"; size: number | null } | { kind: "commit"; size: number };
@@ -32,7 +37,13 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [autoError, setAutoError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [path, setPath] = useState("");
+  const [location, setLocation] = useState<LibraryLocation | null>(null);
+  const [move, setMove] = useState<MoveStatus | null>(null);
+  useStatusEvent("library-location-changed", ipc.libraryLocation, setLocation, setError);
+  useStatusEvent("library-move-status-changed", ipc.libraryMoveStatus, setMove, setError);
+  const path = location?.path ?? "";
+  const exporting = useExportStore(exportBusy);
+  const overview = useLibraryOverview();
   const shortcutRecording = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
   const working = useRef(false);
@@ -63,8 +74,6 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
       .catch((e: unknown) => { if (!disposed) setError(String(e)); });
     void ipc.getAutostart().then((enabled) => { if (!disposed) setAutostart(enabled); })
       .catch((e: unknown) => { if (!disposed) setAutoError(String(e)); });
-    void ipc.libraryDirectory().then((value) => { if (!disposed) setPath(value); })
-      .catch((e: unknown) => { if (!disposed) setError(String(e)); });
     return () => {
       disposed = true;
       mounted.current = false;
@@ -80,6 +89,19 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
     };
   }, []);
 
+  function moveLibrary(restore: boolean) {
+    return change("move", async () => {
+      const path = restore ? location?.defaultPath : await open({ title: "选择新的仓库位置", directory: true, multiple: false, canCreateDirectories: true });
+      if (!path) return;
+      const target = await ipc.inspectLibraryTarget(path);
+      if (await confirm(`仓库（${storageSize(target.bytes)}，${target.files} 个文件）会复制到：
+${target.path}
+
+检查无误后会切换并删除原位置的仓库文件。期间同步会暂停，导入和导出不可用。请不要断开这个磁盘。`, {
+        title: restore ? "恢复默认位置" : "移动仓库", kind: "warning", okLabel: "移动", cancelLabel: "取消",
+      })) await ipc.moveLibrary(path);
+    });
+  }
   function select(id: SectionId) {
     setSection(id);
     if (content.current) content.current.scrollTop = 0;
@@ -207,7 +229,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const split = Math.max(0, path.length - 28);
   // 分组只是隐藏不卸载：同步表单填到一半切走再切回来，内容和进行中的连接都要还在。
   const page = (id: SectionId) => ({ prefix: title, id, active: section === id });
-  return <dialog ref={dialog} aria-labelledby={title} onCancel={(event) => { event.preventDefault(); if (shortcutRecording.current) return; cancelBallSizePreview(); onClose(); }}
+  return <dialog ref={dialog} aria-labelledby={title} onCancel={(event) => { event.preventDefault(); if (move?.running || busy === "move" || shortcutRecording.current) return; cancelBallSizePreview(); onClose(); }}
     className="m-auto h-140 max-h-[calc(100%-48px)] w-180 max-w-[calc(100%-48px)] overflow-hidden rounded-card border border-line bg-surface text-ink backdrop:bg-overlay">
     <div className="flex h-full">
       <div className="flex w-44 shrink-0 flex-col gap-4 bg-chrome px-3 pt-6">
@@ -309,7 +331,33 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
                 onCopy={(event) => { event.clipboardData.setData("text/plain", path); event.preventDefault(); }}>
                 <span className="min-w-0 truncate">{path.slice(0, split)}</span><span className="shrink-0">{path.slice(split)}</span>
               </p>
-              <div><Button disabled={!!busy || !path} onClick={() => void change("directory", ipc.openLibraryDirectory)}>打开所在位置</Button></div>
+              {location?.isCustom && <p className="select-text break-all text-xs text-ink-secondary">默认位置：{location.defaultPath}</p>}
+              <div className="flex flex-wrap gap-2">
+                <Button disabled={!!busy || move?.running || !path} onClick={() => void change("directory", ipc.openLibraryDirectory)}>打开所在位置</Button>
+                <Button disabled={!!busy || move?.running || !location?.canMove || exporting} onClick={() => void moveLibrary(false)}>移动位置…</Button>
+                {location?.isCustom && <Button disabled={!!busy || move?.running || !location.canMove || exporting} onClick={() => void moveLibrary(true)}>恢复默认位置</Button>}
+              </div>
+              <p className="text-xs text-ink-secondary">{location?.cannotMoveReason ?? "请选择本机磁盘上的空文件夹，避免网盘同步文件夹和网络驱动器。移动时会复制全部表情和本机设置，检查无误后才切换，再删除原位置的仓库文件。"}</p>
+              {move?.running && <div role="status" className="flex flex-wrap items-center gap-3 text-xs">
+                {move.stage === "preparing" && <span>正在等同步停下…</span>}
+                {move.stage === "switching" && <span>正在切换到新位置…</span>}
+                {move.stage === "cleaning" && <span>正在清理原位置…</span>}
+                {move.stage === "copying" && <>
+                  <span className="shrink-0">正在复制 {move.progress.copied}/{move.progress.total} · {storageSize(move.progress.bytes)} / {storageSize(move.progress.totalBytes)}</span>
+                  <progress aria-label="移动进度" value={move.progress.total ? move.progress.copied : undefined} max={Math.max(1, move.progress.total)} className="h-1 min-w-16 max-w-80 flex-1 accent-accent" />
+                  <button type="button" className="shrink-0 underline underline-offset-4" onClick={() => void ipc.cancelLibraryMove().catch(e => setError(String(e)))}>取消</button>
+                </>}
+              </div>}
+              {move?.report && <p role="status" className="select-text text-xs">仓库已移到 {move.report.path}
+                {!!move.report.leftovers.length && <><br/>原位置还有 {move.report.leftovers.length} 项没能删除，可以手动删除：{move.report.previous}</>}</p>}
+              {move?.error && move.error !== error && <p role="alert" className="text-xs text-accent">{move.error}</p>}
+            </Group>
+            <Group title="导出仓库">
+              <p className="text-xs text-ink-secondary">把全部表情按分类导出成图片文件。最近删除里的表情，以及配文、收藏和使用次数不会导出。</p>
+              <div className="flex flex-wrap gap-2">{(["folder", "zip"] as const).map(format =>
+                <Button key={format} disabled={!!busy || !overview.data?.all || exporting || move?.running} onClick={() => void startExport("library", format)}>
+                  {format === "folder" ? "导出到文件夹…" : "导出为 .zip…"}
+                </Button>)}</div>
             </Group>
           </Page>
           <Page {...page("update")}>
@@ -333,7 +381,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
         </div>
         <div className="flex items-center justify-end gap-4 px-6 pb-6">
           {error && <p role="alert" className="min-w-0 flex-1 text-xs text-accent">{error}</p>}
-          <Button variant="primary" onClick={() => {
+          <Button variant="primary" disabled={move?.running || busy === "move"} onClick={() => {
             if (!pointerDragging.current && draftBallSizeRef.current !== null) {
               const finalSize = draftBallSizeRef.current;
               draftBallSizeRef.current = null;

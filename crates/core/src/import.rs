@@ -14,7 +14,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::{Error, Library, Result, time::unix_millis};
-mod archive;
+pub(crate) mod archive;
 
 const THUMBNAIL_SIZE: u32 = 256;
 

@@ -353,6 +353,9 @@ pub async fn check_update(app: AppHandle) -> UpdateStatus {
 /// 成功时应用会重启，不会返回。
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    if app.state::<crate::jobs::LibraryJobs>().moving() {
+        return Err("正在移动仓库，完成后再安装更新".into());
+    }
     if crate::portable::enabled(&app) {
         return Err("便携版请退出后手动替换程序，保留 data 文件夹".into());
     }

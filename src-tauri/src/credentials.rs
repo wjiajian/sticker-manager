@@ -40,7 +40,7 @@ impl FileCredentials {
         }
     }
     pub fn of(app: &AppHandle) -> Self {
-        Self::new(&app.state::<SettingsState>().root)
+        Self::new(&app.state::<SettingsState>().root())
     }
     fn load(&self) -> Result<BTreeMap<String, String>, String> {
         match fs::read(&self.path) {
