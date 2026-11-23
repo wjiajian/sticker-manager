@@ -112,6 +112,45 @@ mod tests {
     }
 
     #[test]
+    fn adds_favorites_index_on_upgrade_from_v6_without_changing_library_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..6] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 6).unwrap();
+        conn.execute_batch(
+            "INSERT INTO stickers (id, hash, ext, name, favorite, width, height, byte_size, added_at, deleted_at) VALUES
+                ('fav', 'h1', 'png', '收藏', 1, 1, 1, 1, 10, NULL),
+                ('plain', 'h2', 'png', '普通', 0, 1, 1, 1, 20, NULL),
+                ('deleted', 'h3', 'png', '已删收藏', 1, 1, 1, 1, 30, 40);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'stickers_favorites_added_at')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(index_exists);
+        let fav_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM stickers WHERE deleted_at IS NULL AND favorite = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fav_count, 1);
+    }
+
+    #[test]
     fn refuses_database_from_newer_app() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("library.db");

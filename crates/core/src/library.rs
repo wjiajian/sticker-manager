@@ -170,25 +170,25 @@ impl Library {
         limit: u32,
     ) -> Result<StickerPage> {
         let limit = limit.max(1) as usize;
-        let (condition, category_id) = match filter {
-            StickerPageFilter::All => ("", None),
-            StickerPageFilter::Favorites => ("AND favorite = 1", None),
-            StickerPageFilter::Uncategorized => ("AND category_id IS NULL", None),
-            StickerPageFilter::Category(id) => ("AND category_id = ?4", Some(id)),
-        };
-        let added_at = after.map(|cursor| cursor.added_at);
-        let id = after.map(|cursor| cursor.id.as_str());
         let fetch = limit as i64 + 1;
-        let mut parameters: Vec<&dyn ToSql> = vec![&added_at, &id, &fetch];
+        let (condition, category_id) = match (filter, after.is_some()) {
+            (StickerPageFilter::All, _) => ("", None),
+            (StickerPageFilter::Favorites, _) => ("AND favorite = 1", None),
+            (StickerPageFilter::Uncategorized, _) => ("AND category_id IS NULL", None),
+            (StickerPageFilter::Category(id), true) => ("AND category_id = ?4", Some(id)),
+            (StickerPageFilter::Category(id), false) => ("AND category_id = ?2", Some(id)),
+        };
+        let mut parameters: Vec<&dyn ToSql> = match after {
+            Some(cursor) => vec![&cursor.added_at, &cursor.id, &fetch],
+            None => vec![&fetch],
+        };
         if let Some(category_id) = category_id {
             parameters.push(category_id);
         }
+        let subquery = Self::page_subquery(condition, after.is_some());
         // 多读一张来判断还有没有下一页；先在子查询里分页，使用次数等列只为这一页计算。
         let mut statement = self.conn.prepare(&format!(
-            "SELECT {STICKER_COLUMNS} FROM stickers s WHERE s.id IN (
-                 SELECT id FROM stickers WHERE deleted_at IS NULL {condition}
-                     AND (?1 IS NULL OR added_at < ?1 OR (added_at = ?1 AND id < ?2))
-                 ORDER BY added_at DESC, id DESC LIMIT ?3)
+            "SELECT {STICKER_COLUMNS} FROM stickers s WHERE s.id IN ({subquery})
              ORDER BY s.added_at DESC, s.id DESC"
         ))?;
         let mut stickers = statement
@@ -209,6 +209,21 @@ impl Library {
             id: last.id.clone(),
         });
         Ok(StickerPage { stickers, next })
+    }
+
+    fn page_subquery(condition: &str, has_cursor: bool) -> String {
+        if has_cursor {
+            format!(
+                "SELECT id FROM stickers WHERE deleted_at IS NULL {condition}
+                     AND (added_at, id) < (?1, ?2)
+                 ORDER BY added_at DESC, id DESC LIMIT ?3"
+            )
+        } else {
+            format!(
+                "SELECT id FROM stickers WHERE deleted_at IS NULL {condition}
+                 ORDER BY added_at DESC, id DESC LIMIT ?1"
+            )
+        }
     }
 
     pub(crate) fn query_stickers(
@@ -536,14 +551,36 @@ mod tests {
             library.overview().unwrap().favorites as usize
         );
 
-        let plan: Vec<String> = library
+        let first_page_plan: Vec<String> = library
             .conn
-            .prepare(
-                "EXPLAIN QUERY PLAN
-                 SELECT id FROM stickers WHERE deleted_at IS NULL AND favorite = 1
-                     AND (?1 IS NULL OR added_at < ?1 OR (added_at = ?1 AND id < ?2))
-                 ORDER BY added_at DESC, id DESC LIMIT ?3",
-            )
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {}",
+                Library::page_subquery("AND favorite = 1", false)
+            ))
+            .unwrap()
+            .query_map([3_i64], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            first_page_plan
+                .iter()
+                .any(|detail| detail.contains("stickers_favorites_added_at")),
+            "expected first-page query plan to use stickers_favorites_added_at, got: {first_page_plan:?}"
+        );
+        assert!(
+            first_page_plan
+                .iter()
+                .all(|detail| !detail.contains("TEMP B-TREE")),
+            "expected no temp B-tree sort on first page, got: {first_page_plan:?}"
+        );
+
+        let next_page_plan: Vec<String> = library
+            .conn
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {}",
+                Library::page_subquery("AND favorite = 1", true)
+            ))
             .unwrap()
             .query_map(rusqlite::params![30_i64, "d", 3_i64], |row| {
                 row.get::<_, String>(3)
@@ -552,13 +589,17 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert!(
-            plan.iter()
-                .any(|detail| detail.contains("stickers_favorites_added_at")),
-            "expected query plan to use stickers_favorites_added_at, got: {plan:?}"
+            next_page_plan
+                .iter()
+                .any(|detail| detail
+                    .contains("SEARCH stickers USING INDEX stickers_favorites_added_at")),
+            "expected next-page query plan to seek via stickers_favorites_added_at, got: {next_page_plan:?}"
         );
         assert!(
-            plan.iter().all(|detail| !detail.contains("TEMP B-TREE")),
-            "expected no temp B-tree sort, got: {plan:?}"
+            next_page_plan
+                .iter()
+                .all(|detail| !detail.contains("TEMP B-TREE")),
+            "expected no temp B-tree sort on next page, got: {next_page_plan:?}"
         );
     }
 

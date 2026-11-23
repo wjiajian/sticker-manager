@@ -469,7 +469,7 @@ fn migration_keeps_clocks_tombstones_aliases_and_removes_old_category_operations
     let conn = rusqlite::Connection::open(root.join("library.db")).unwrap();
     store::save(&conn, revision, &model).unwrap();
     // 还原 0004 的触发器和表结构，再让正常打开路径执行新迁移。
-    conn.execute_batch("DROP TRIGGER sync_stickers_file; DROP TRIGGER sync_categories_file; DROP TRIGGER sync_stickers_create; DROP TABLE sync_path_cache; DROP TABLE sync_file_moves; DROP TABLE sync_file_dirty; DROP TABLE sync_file_revision; DROP TABLE sync_directory_cache;").unwrap();
+    conn.execute_batch("DROP INDEX IF EXISTS stickers_favorites_added_at; DROP TRIGGER sync_stickers_file; DROP TRIGGER sync_categories_file; DROP TRIGGER sync_stickers_create; DROP TABLE sync_path_cache; DROP TABLE sync_file_moves; DROP TABLE sync_file_dirty; DROP TABLE sync_file_revision; DROP TABLE sync_directory_cache;").unwrap();
     conn.execute_batch(
         "CREATE TABLE sync_deleted_objects (
             library_id TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY(library_id, key)
