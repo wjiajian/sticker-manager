@@ -25,6 +25,8 @@ export function ShortcutRecorder({ active, onRecordingChange }: { active: boolea
   const generation = useRef(0);
   const pending = useRef<Promise<ShortcutCandidate> | null>(null);
   const checkSeq = useRef(0);
+  // 跟踪主键是否仍处于按下态；macOS 按住 ⌘ 时不会派发主键的 keyup，因此标记 withMeta 免于永久等待。
+  const heldMainKey = useRef<{ code: string; withMeta: boolean } | null>(null);
   const [candidate, setCandidate] = useState<ShortcutCandidate | null>(null);
   const [held, setHeld] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export function ShortcutRecorder({ active, onRecordingChange }: { active: boolea
   }
   function reset(message = "已退出录制", focusButton = false) {
     generation.current += 1;
-    session.current = null; pending.current = null; checkSeq.current += 1; cancelRequested.current = false;
+    session.current = null; pending.current = null; heldMainKey.current = null; checkSeq.current += 1; cancelRequested.current = false;
     transition("idle");
     if (mounted.current) {
       setHeld(""); setCandidate(null); setError(null);
@@ -139,11 +141,12 @@ export function ShortcutRecorder({ active, onRecordingChange }: { active: boolea
     if (event.key === "Escape") { cancel(true); return; }
     if (phaseRef.current !== "recording" && phaseRef.current !== "starting") return;
     if (event.nativeEvent.isComposing || event.keyCode === 229) {
-      pending.current = null; setCandidate(null); setError("请先切换到英文输入状态再录制"); return;
+      pending.current = null; heldMainKey.current = null; setCandidate(null); setError("请先切换到英文输入状态再录制"); return;
     }
     if (event.repeat) return;
     setHeld(heldLabel(event));
-    if (MODIFIER_KEYS.has(event.key) || MODIFIER_CODES.has(event.code)) { checkSeq.current += 1; pending.current = null; setCandidate(null); setError(null); return; }
+    if (MODIFIER_KEYS.has(event.key) || MODIFIER_CODES.has(event.code)) { checkSeq.current += 1; pending.current = null; heldMainKey.current = null; setCandidate(null); setError(null); return; }
+    heldMainKey.current = { code: event.code, withMeta: platform === "macos" && event.metaKey };
     const input = { code: event.code, keyCode: event.keyCode, ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey };
     const seq = ++checkSeq.current;
     const task = enqueue(() => ipc.checkPanelShortcut(input)); pending.current = task;
@@ -157,10 +160,12 @@ export function ShortcutRecorder({ active, onRecordingChange }: { active: boolea
     });
   }
   function keyUp(event: KeyboardEvent<HTMLButtonElement>) {
+    if (heldMainKey.current?.code === event.code) heldMainKey.current = null;
     if (phaseRef.current !== "recording" && phaseRef.current !== "starting") return;
     if (event.key !== "Tab") { event.preventDefault(); event.stopPropagation(); }
     setHeld(heldLabel(event));
-    if (!event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && pending.current) {
+    const mainKeyReleased = !heldMainKey.current || heldMainKey.current.withMeta;
+    if (!event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && mainKeyReleased && pending.current) {
       const checked = pending.current;
       pending.current = null;
       save(null, undefined, checked);

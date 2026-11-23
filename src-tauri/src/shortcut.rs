@@ -2,9 +2,10 @@
 use crate::settings::{self, SettingsState};
 use serde::{Deserialize, Serialize};
 use std::sync::{
-    Mutex,
-    atomic::{AtomicBool, Ordering},
+    Arc, Condvar, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -1189,18 +1190,24 @@ impl ShortcutMachine {
         self.recording = None;
         Ok(())
     }
-    fn begin_recording(&mut self, r: &impl Registrar) -> u64 {
+    fn begin_recording(&mut self, r: &impl Registrar) -> Result<u64, String> {
+        if let Some(s) = self.registered {
+            r.unregister(s)
+                .map_err(|e| format!("无法暂停当前快捷键 {}：{e}", s.label()))?;
+            self.registered = None;
+        }
         self.next_recording += 1;
         let id = self.next_recording;
         self.recording = Some(id);
         self.revision += 1;
-        if let Some(s) = self.registered {
-            match r.unregister(s) {
-                Ok(()) => self.registered = None,
-                Err(e) => eprintln!("无法暂停快捷键：{e}"),
-            }
+        Ok(id)
+    }
+    fn active_hotkey_id(&self, configured: Option<PanelShortcut>) -> Option<u32> {
+        if self.recording.is_none() && self.registered == configured {
+            configured.map(|s| s.hotkey().id())
+        } else {
+            None
         }
-        id
     }
     fn end_recording(
         &mut self,
@@ -1283,10 +1290,94 @@ pub struct ShortcutCandidate {
     accessible_label: String,
     error: Option<String>,
 }
+const NO_ACTIVE_HOTKEY: u64 = u64::MAX;
+const RECORDING_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[derive(Default)]
+struct WatchdogState {
+    started: bool,
+    deadline: Option<(u64, Instant)>,
+}
+struct Watchdog {
+    state: Arc<(Mutex<WatchdogState>, Condvar)>,
+}
+impl Default for Watchdog {
+    fn default() -> Self {
+        Self {
+            state: Arc::new((Mutex::new(WatchdogState::default()), Condvar::new())),
+        }
+    }
+}
+impl Watchdog {
+    fn arm(&self, app: AppHandle, id: u64, timeout: Duration) {
+        let (lock, cvar) = &*self.state;
+        let mut state = lock.lock().unwrap();
+        state.deadline = Some((id, Instant::now() + timeout));
+        let should_spawn = !state.started;
+        if should_spawn {
+            state.started = true;
+        }
+        cvar.notify_one();
+        drop(state);
+        if should_spawn {
+            let shared = Arc::clone(&self.state);
+            std::thread::spawn(move || {
+                let (lock, cvar) = &*shared;
+                let mut state = lock.lock().unwrap();
+                loop {
+                    let Some((id, deadline)) = state.deadline else {
+                        state = cvar.wait(state).unwrap();
+                        continue;
+                    };
+                    if let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+                        let (guard, _) = cvar.wait_timeout(state, remaining).unwrap();
+                        state = guard;
+                        continue;
+                    }
+                    state.deadline = None;
+                    drop(state);
+                    let handle = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        end_panel_shortcut_recording(handle, Some(id));
+                    });
+                    state = lock.lock().unwrap();
+                }
+            });
+        }
+    }
+    fn disarm(&self) {
+        let (lock, cvar) = &*self.state;
+        let mut state = lock.lock().unwrap();
+        if state.deadline.take().is_some() {
+            cvar.notify_one();
+        }
+    }
+}
 struct ShortcutRuntime {
     machine: Mutex<ShortcutMachine>,
     recording: AtomicBool,
+    active_hotkey: AtomicU64,
+    watchdog: Watchdog,
+}
+impl Default for ShortcutRuntime {
+    fn default() -> Self {
+        Self {
+            machine: Mutex::new(ShortcutMachine::default()),
+            recording: AtomicBool::new(false),
+            active_hotkey: AtomicU64::new(NO_ACTIVE_HOTKEY),
+            watchdog: Watchdog::default(),
+        }
+    }
+}
+impl ShortcutRuntime {
+    fn sync_flags(&self, machine: &ShortcutMachine, configured: Option<PanelShortcut>) {
+        self.recording
+            .store(machine.recording.is_some(), Ordering::SeqCst);
+        let active = machine
+            .active_hotkey_id(configured)
+            .map_or(NO_ACTIVE_HOTKEY, u64::from);
+        self.active_hotkey.store(active, Ordering::SeqCst);
+    }
 }
 struct AppRegistrar<'a>(&'a AppHandle);
 fn describe_os_error(error: impl std::fmt::Display) -> String {
@@ -1299,26 +1390,30 @@ fn describe_os_error(error: impl std::fmt::Display) -> String {
 }
 impl Registrar for AppRegistrar<'_> {
     fn register(&self, s: PanelShortcut) -> Result<(), String> {
-        if self.0.global_shortcut().is_registered(s.hotkey()) {
+        let hotkey = s.hotkey();
+        if self.0.global_shortcut().is_registered(hotkey) {
             return Ok(());
         }
+        let expected_id = u64::from(hotkey.id());
         self.0
             .global_shortcut()
-            .on_shortcut(s.hotkey(), |app, _, event| {
+            .on_shortcut(hotkey, move |app, _, event| {
                 if event.state != ShortcutState::Pressed
                     || app
                         .state::<ShortcutRuntime>()
-                        .recording
+                        .active_hotkey
                         .load(Ordering::SeqCst)
+                        != expected_id
                 {
                     return;
                 }
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || {
-                    if !handle
+                    if handle
                         .state::<ShortcutRuntime>()
-                        .recording
+                        .active_hotkey
                         .load(Ordering::SeqCst)
+                        == expected_id
                         && let Err(e) = crate::panel::toggle(&handle)
                     {
                         eprintln!("无法切换表情面板：{e}");
@@ -1353,7 +1448,9 @@ pub fn init(app: &AppHandle) {
     app.manage(ShortcutRuntime::default());
     let runtime = app.state::<ShortcutRuntime>();
     let mut m = runtime.machine.lock().unwrap();
-    m.startup(&AppRegistrar(app), configured(app));
+    let current = configured(app);
+    m.startup(&AppRegistrar(app), current);
+    runtime.sync_flags(&m, current);
 }
 #[tauri::command]
 pub fn panel_shortcut_state(app: AppHandle) -> PanelShortcutState {
@@ -1387,23 +1484,23 @@ pub fn set_panel_shortcut(
     let runtime = app.state::<ShortcutRuntime>();
     let mut m = runtime.machine.lock().unwrap();
     let before = m.revision;
-    // settings-changed 同样在 runtime 锁外广播，避免订阅者重入。
-    let mut saved = None;
+    // settings-changed 同样在 runtime 锁外广播，并读取最新快照避免覆盖并发修改。
+    let mut saved = false;
     let result = m.apply(&AppRegistrar(&app), configured(&app), requested, |value| {
-        saved = Some(settings::update_without_event(&app, |s| {
-            s.panel_shortcut = value
-        })?);
+        settings::update_without_event(&app, |s| s.panel_shortcut = value)?;
+        saved = true;
         Ok(())
     });
-    runtime
-        .recording
-        .store(m.recording.is_some(), Ordering::SeqCst);
-    let state = m.snapshot(configured(&app));
+    let current = configured(&app);
+    runtime.sync_flags(&m, current);
+    let recording = m.recording.is_some();
+    let state = m.snapshot(current);
     let changed = before != m.revision;
     drop(m);
-    if let Some(settings) = saved
-        && let Err(e) = app.emit("settings-changed", settings)
-    {
+    if !recording {
+        runtime.watchdog.disarm();
+    }
+    if saved && let Err(e) = app.emit("settings-changed", app.state::<SettingsState>().get()) {
         eprintln!("快捷键设置已保存，但广播失败：{e}");
     }
     if changed {
@@ -1412,22 +1509,17 @@ pub fn set_panel_shortcut(
     result.map(|()| state)
 }
 #[tauri::command]
-pub fn begin_panel_shortcut_recording(app: AppHandle) -> PanelShortcutState {
+pub fn begin_panel_shortcut_recording(app: AppHandle) -> Result<PanelShortcutState, String> {
     let runtime = app.state::<ShortcutRuntime>();
     let mut m = runtime.machine.lock().unwrap();
-    runtime.recording.store(true, Ordering::SeqCst);
-    let id = m.begin_recording(&AppRegistrar(&app));
-    let state = m.snapshot(configured(&app));
+    let id = m.begin_recording(&AppRegistrar(&app))?;
+    let current = configured(&app);
+    runtime.sync_flags(&m, current);
+    let state = m.snapshot(current);
     drop(m);
+    runtime.watchdog.arm(app.clone(), id, RECORDING_TIMEOUT);
     emit(&app, &state);
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(60));
-        let handle = app.clone();
-        let _ = app.run_on_main_thread(move || {
-            end_panel_shortcut_recording(handle, Some(id));
-        });
-    });
-    state
+    Ok(state)
 }
 #[tauri::command]
 pub fn end_panel_shortcut_recording(
@@ -1436,12 +1528,15 @@ pub fn end_panel_shortcut_recording(
 ) -> PanelShortcutState {
     let runtime = app.state::<ShortcutRuntime>();
     let mut m = runtime.machine.lock().unwrap();
-    let changed = m.end_recording(&AppRegistrar(&app), recording_id, configured(&app));
-    runtime
-        .recording
-        .store(m.recording.is_some(), Ordering::SeqCst);
-    let state = m.snapshot(configured(&app));
+    let current = configured(&app);
+    let changed = m.end_recording(&AppRegistrar(&app), recording_id, current);
+    runtime.sync_flags(&m, current);
+    let recording = m.recording.is_some();
+    let state = m.snapshot(current);
     drop(m);
+    if !recording {
+        runtime.watchdog.disarm();
+    }
     if changed {
         emit(&app, &state);
     }
@@ -1714,7 +1809,7 @@ mod tests {
         r.respond(&[Err("occupied")]);
         m.startup(&r, old());
         assert_eq!(m.registered, None);
-        assert!(m.error.unwrap().contains("occupied"));
+        assert!(m.error.as_ref().unwrap().contains("occupied"));
     }
     #[test]
     fn disabled_startup_does_not_register() {
@@ -1813,20 +1908,25 @@ mod tests {
     #[test]
     fn recording_unregisters_and_cancel_restores_with_session_guard() {
         let (mut m, r) = started();
-        let first = m.begin_recording(&r);
+        let first = m.begin_recording(&r).unwrap();
         assert_eq!(m.registered, None);
-        let second = m.begin_recording(&r);
+        assert_eq!(m.active_hotkey_id(old()), None);
+        let second = m.begin_recording(&r).unwrap();
         let revision = m.revision;
         assert!(!m.end_recording(&r, Some(first), old()));
         assert_eq!(m.revision, revision);
         assert!(m.end_recording(&r, Some(second), old()));
         assert_eq!(m.registered, old());
+        assert_eq!(
+            m.active_hotkey_id(old()),
+            Some(old().unwrap().hotkey().id())
+        );
         assert!(!m.end_recording(&r, None, old()));
     }
     #[test]
     fn recording_failure_stays_paused_and_success_ends_session() {
         let (mut m, r) = started();
-        m.begin_recording(&r);
+        m.begin_recording(&r).unwrap();
         r.respond(&[Err("occupied")]);
         assert!(m.apply(&r, old(), new(), |_| panic!()).is_err());
         assert!(m.recording.is_some());
@@ -1838,26 +1938,31 @@ mod tests {
     #[test]
     fn recording_persist_failure_keeps_pause() {
         let (mut m, r) = started();
-        m.begin_recording(&r);
+        m.begin_recording(&r).unwrap();
         assert!(m.apply(&r, old(), new(), |_| Err("disk".into())).is_err());
         assert_eq!(m.registered, None);
         assert!(m.recording.is_some());
     }
     #[test]
-    fn recording_unregister_and_cancel_register_errors_are_visible() {
+    fn recording_unregister_aborts_and_cancel_register_errors_are_visible() {
         let (mut m, r) = started();
         r.respond(&[Err("busy")]);
-        let id = m.begin_recording(&r);
+        assert!(m.begin_recording(&r).unwrap_err().contains("busy"));
         assert_eq!(m.registered, old());
-        assert!(m.end_recording(&r, Some(id), old()));
-        let id = m.begin_recording(&r);
+        assert_eq!(m.recording, None);
+        assert_eq!(
+            m.active_hotkey_id(old()),
+            Some(old().unwrap().hotkey().id())
+        );
+        let id = m.begin_recording(&r).unwrap();
         r.respond(&[Err("occupied")]);
         m.end_recording(&r, Some(id), old());
-        assert!(m.error.unwrap().contains("occupied"));
+        assert!(m.error.as_ref().unwrap().contains("occupied"));
         assert_eq!(m.recording, None);
+        assert_eq!(m.active_hotkey_id(old()), None);
     }
     #[test]
-    fn rollback_unregister_failure_is_not_hidden() {
+    fn rollback_unregister_failure_disables_leaked_hotkey_and_is_not_hidden() {
         let (mut m, r) = started();
         r.respond(&[Ok(()), Ok(()), Err("busy")]);
         assert!(
@@ -1866,6 +1971,7 @@ mod tests {
                 .contains("busy")
         );
         assert_eq!(m.registered, new());
+        assert_eq!(m.active_hotkey_id(old()), None);
         assert!(m.error.is_some());
     }
 }
