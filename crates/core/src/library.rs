@@ -535,6 +535,31 @@ mod tests {
             all.stickers.len(),
             library.overview().unwrap().favorites as usize
         );
+
+        let plan: Vec<String> = library
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM stickers WHERE deleted_at IS NULL AND favorite = 1
+                     AND (?1 IS NULL OR added_at < ?1 OR (added_at = ?1 AND id < ?2))
+                 ORDER BY added_at DESC, id DESC LIMIT ?3",
+            )
+            .unwrap()
+            .query_map(rusqlite::params![30_i64, "d", 3_i64], |row| {
+                row.get::<_, String>(3)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("stickers_favorites_added_at")),
+            "expected query plan to use stickers_favorites_added_at, got: {plan:?}"
+        );
+        assert!(
+            plan.iter().all(|detail| !detail.contains("TEMP B-TREE")),
+            "expected no temp B-tree sort, got: {plan:?}"
+        );
     }
 
     #[test]

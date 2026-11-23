@@ -13,6 +13,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0004_categories.sql"),
     include_str!("migrations/0005_sync_tree.sql"),
     include_str!("migrations/0006_drop_sync_deleted_objects.sql"),
+    include_str!("migrations/0007_favorites_index.sql"),
 ];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 
