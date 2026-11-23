@@ -23,13 +23,13 @@ const TYPE_FILTERS: { value: StickerTypeFilter; label: string }[] = [
   { value: "animated", label: "动图" },
 ];
 
-export function StickerGrid({ actions, listing, stickers, sortable, usage, sync, busy, onChoose, onSyncSettings, shortcutAvailable }: {
+export function StickerGrid({ actions, listing, stickers, sortable, usage, sync, busy, onChoose, onSyncSettings, shortcutLabel }: {
   actions: StickerActions;
   listing: ReturnType<typeof useStickers>;
   stickers: Sticker[];
   sortable: boolean;
   usage: (sticker: Sticker) => Usage;
-  sync?: SyncStatus; busy: boolean; onChoose: (directory: boolean) => void; onSyncSettings: () => void; shortcutAvailable: boolean;
+  sync?: SyncStatus; busy: boolean; onChoose: (directory: boolean) => void; onSyncSettings: () => void; shortcutLabel: string | null;
 }) {
   const view = useUiStore((s) => s.view);
   const searchQuery = useUiStore((s) => s.searchQuery);
@@ -185,7 +185,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
         skeleton ? <GridSkeleton /> : <div className="flex-1" />
       ) : stickers.length === 0 ? (
         !searchQuery && typeFilter === "all" ? <EmptyLibrary view={view} label={label} all={overview.data?.all} sync={sync} busy={busy}
-          onChoose={onChoose} onSyncSettings={onSyncSettings} shortcutAvailable={shortcutAvailable} />
+          onChoose={onChoose} onSyncSettings={onSyncSettings} shortcutLabel={shortcutLabel} />
         : <div className="flex flex-1 flex-col items-center justify-center gap-1 pb-16 text-center">
           {filteredEmpty ? <>
             <p className="text-base font-semibold">{typeFilter === "animated" ? "没有动图" : "没有静态表情"}</p>

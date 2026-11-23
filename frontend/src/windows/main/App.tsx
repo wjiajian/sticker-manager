@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import { SyncDetails } from "./SyncDetails";
 import { ImportBar } from "./ImportBar";
-import { useQuery } from "@tanstack/react-query";
+import { usePanelShortcut, usePanelShortcutEvents } from "../../lib/panelShortcut";
 import { ipc, type Sticker } from "../../lib/ipc";
 import { useLibraryChangedEvents, useStickerSearch, useStickers } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
@@ -75,8 +75,9 @@ export function App() {
   const importing = useImport(actions.claimDragDrop);
   const { choose, busy, dragging, message } = importing;
   const eventError = useLibraryChangedEvents();
-  const shortcut = useQuery({ queryKey: ["global-shortcut-error"], queryFn: ipc.globalShortcutError });
-  const status = [message, eventError, preferences.error, sync.error && String(sync.error), shortcut.data, shortcut.error && String(shortcut.error)].filter(Boolean).join("\n");
+  const shortcut = usePanelShortcut();
+  const shortcutEventError = usePanelShortcutEvents();
+  const status = [message, eventError, preferences.error, sync.error && String(sync.error), shortcut.data?.status === "failed" && shortcut.data.error, shortcutEventError, shortcut.error && String(shortcut.error)].filter(Boolean).join("\n");
 
   return (
     <div className={`flex h-full flex-col ${dragging ? "outline-2 -outline-offset-2 outline-accent" : ""}`}>
@@ -94,7 +95,7 @@ export function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar onPreferences={() => preferences.show()} sync={sync.data} onSync={(button) => openSync(button, true)} />
         <StickerGrid actions={actions} listing={visible} stickers={stickers} sortable={sortable} usage={usage}
-          sync={sync.data} busy={busy} onChoose={choose} onSyncSettings={() => preferences.show(true)} shortcutAvailable={shortcut.isSuccess && shortcut.data === null} />
+          sync={sync.data} busy={busy} onChoose={choose} onSyncSettings={() => preferences.show(true)} shortcutLabel={shortcut.data?.status === "active" ? shortcut.data.label : null} />
         <DetailPanel actions={actions} sync={sync.data} />
       </div>
     </div>

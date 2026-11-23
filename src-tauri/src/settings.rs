@@ -43,6 +43,9 @@ pub struct Settings {
     pub ignored_update: Option<String>,
     /// 主窗口表情格的最小边长（px），窗口宽度决定实际列数。
     pub sticker_tile_size: u32,
+    /// None = 已停用；字段缺失 = 默认值。反序列化容错，不加入 validate。
+    #[serde(deserialize_with = "deserialize_panel_shortcut")]
+    pub panel_shortcut: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -69,6 +72,25 @@ where
         .as_u64()
         .map(|n| crate::geometry::normalize_ball_size(u32::try_from(n).unwrap_or(u32::MAX)))
         .unwrap_or(crate::geometry::BALL_SIZE_DEFAULT))
+}
+fn deserialize_panel_shortcut<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    match value
+        .as_str()
+        .ok_or_else(|| "快捷键必须是字符串或 null".to_string())
+        .and_then(crate::shortcut::normalize_stored)
+    {
+        Ok(value) => Ok(Some(value)),
+        Err(error) => {
+            eprintln!("无法读取呼出快捷键，使用默认值：{error}");
+            Ok(Some(crate::shortcut::DEFAULT.into()))
+        }
+    }
 }
 impl SyncSettings {
     pub fn new(target: StorageConfig, library_id: String) -> Self {
@@ -99,6 +121,7 @@ impl Default for Settings {
             auto_check_updates: true,
             ignored_update: None,
             sticker_tile_size: 104,
+            panel_shortcut: Some(crate::shortcut::DEFAULT.into()),
         }
     }
 }
@@ -168,6 +191,22 @@ impl SettingsState {
 }
 
 pub fn update(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
+    update_inner(app, change, true)
+}
+
+/// 快捷键状态机持锁期间只保存，调用者解锁后广播 settings-changed。
+pub(crate) fn update_without_event(
+    app: &AppHandle,
+    change: impl FnOnce(&mut Settings),
+) -> Result<Settings, String> {
+    update_inner(app, change, false)
+}
+
+fn update_inner(
+    app: &AppHandle,
+    change: impl FnOnce(&mut Settings),
+    emit_event: bool,
+) -> Result<Settings, String> {
     let state = app.state::<SettingsState>();
     let mut current = state.value.lock().unwrap();
     let mut next = current.clone();
@@ -194,9 +233,12 @@ pub fn update(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<Set
     } else {
         Ok(())
     };
-    let event = app
-        .emit("settings-changed", &latest)
-        .map_err(|e| e.to_string());
+    let event = if emit_event {
+        app.emit("settings-changed", &latest)
+            .map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    };
     let appearance = if appearance_changed {
         crate::appearance::apply(app, latest.appearance).map_err(|e| e.to_string())
     } else {
@@ -314,6 +356,40 @@ pub fn initialize_autostart(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn panel_shortcut_missing_null_normalized_and_invalid() {
+        assert_eq!(
+            serde_json::from_str::<Settings>("{}")
+                .unwrap()
+                .panel_shortcut
+                .as_deref(),
+            Some(crate::shortcut::DEFAULT)
+        );
+        let root = tempfile::tempdir().unwrap();
+        let shared = serde_json::to_string(&root.path().join("shared")).unwrap();
+        fs::create_dir_all(root.path().join("local")).unwrap();
+        for (raw, expected) in [
+            ("null", None),
+            (r#""alt+ctrl+k""#, Some("Ctrl+Alt+KeyK")),
+            (r#""invalid""#, Some(crate::shortcut::DEFAULT)),
+            ("42", Some(crate::shortcut::DEFAULT)),
+            ("{}", Some(crate::shortcut::DEFAULT)),
+            ("false", Some(crate::shortcut::DEFAULT)),
+            (r#""KeyE""#, Some(crate::shortcut::DEFAULT)),
+        ] {
+            fs::write(root.path().join("local/settings.json"),format!(r#"{{"panelShortcut":{raw},"ballVisible":false,"sync":{{"backend":"folder","folder":{shared},"libraryId":"id"}}}}"#)).unwrap();
+            let settings = Settings::load(root.path());
+            assert_eq!(settings.panel_shortcut.as_deref(), expected, "{raw}");
+            assert!(!settings.ball_visible);
+            assert!(settings.sync.is_some());
+            settings.save(root.path()).unwrap();
+            assert_eq!(Settings::load(root.path()), settings);
+            assert_eq!(
+                serde_json::to_value(&settings).unwrap()["panelShortcut"],
+                serde_json::to_value(expected).unwrap()
+            );
+        }
+    }
     #[test]
     fn settings_saved_before_tile_size_existed_keep_their_values() {
         let settings: Settings = serde_json::from_str(r#"{"ballVisible":false}"#).unwrap();

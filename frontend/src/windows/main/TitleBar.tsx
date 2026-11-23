@@ -28,6 +28,7 @@ export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onCh
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (document.querySelector("dialog[open]")) return;
       const modifier = platform === "macos" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
       if (!modifier || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
       event.preventDefault();

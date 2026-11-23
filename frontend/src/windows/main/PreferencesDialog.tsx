@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Button } from "../../components/Button";
 import { Switch } from "../../components/Switch";
 import { ipc, type Settings, type SyncStatus, type UpdateStatus } from "../../lib/ipc";
-import { platform } from "../../lib/platform";
+import { ShortcutRecorder } from "./ShortcutRecorder";
 import { navigation, selectedNavigation } from "./libraryViews";
 import { SyncPreferences } from "./SyncPreferences";
 import { downloadLabel, focusOpener } from "./useUpdate";
@@ -33,7 +33,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const [autoError, setAutoError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [path, setPath] = useState("");
-  const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const shortcutRecording = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
   const working = useRef(false);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -65,8 +65,6 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
       .catch((e: unknown) => { if (!disposed) setAutoError(String(e)); });
     void ipc.libraryDirectory().then((value) => { if (!disposed) setPath(value); })
       .catch((e: unknown) => { if (!disposed) setError(String(e)); });
-    void ipc.globalShortcutError().then((value) => { if (!disposed) setShortcutError(value); })
-      .catch((e: unknown) => { if (!disposed) setShortcutError(String(e)); });
     return () => {
       disposed = true;
       mounted.current = false;
@@ -209,7 +207,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   const split = Math.max(0, path.length - 28);
   // 分组只是隐藏不卸载：同步表单填到一半切走再切回来，内容和进行中的连接都要还在。
   const page = (id: SectionId) => ({ prefix: title, id, active: section === id });
-  return <dialog ref={dialog} aria-labelledby={title} onCancel={(event) => { event.preventDefault(); cancelBallSizePreview(); onClose(); }}
+  return <dialog ref={dialog} aria-labelledby={title} onCancel={(event) => { event.preventDefault(); if (shortcutRecording.current) return; cancelBallSizePreview(); onClose(); }}
     className="m-auto h-140 max-h-[calc(100%-48px)] w-180 max-w-[calc(100%-48px)] overflow-hidden rounded-card border border-line bg-surface text-ink backdrop:bg-overlay">
     <div className="flex h-full">
       <div className="flex w-44 shrink-0 flex-col gap-4 bg-chrome px-3 pt-6">
@@ -300,9 +298,7 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
               </div>
             </Group>
             <Group title="表情面板">
-              <div className="flex items-center justify-between gap-4"><span>呼出快捷键</span><kbd className="rounded-control bg-muted px-3 py-1 font-sans">{platform === "macos" ? "⌃⌥E" : "Ctrl+Alt+E"}</kbd></div>
-              <p className="text-xs text-ink-secondary">暂不支持修改</p>
-              {shortcutError && <p role="alert" className="text-xs text-accent">{shortcutError}</p>}
+              <ShortcutRecorder active={section === "quick"} onRecordingChange={(v) => { shortcutRecording.current = v; }} />
             </Group>
           </Page>
           <Page {...page("sync")}><SyncPreferences status={sync} /></Page>

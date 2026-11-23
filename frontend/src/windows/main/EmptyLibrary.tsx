@@ -1,12 +1,11 @@
 import { ImagesIcon } from "@phosphor-icons/react";
 import { Button } from "../../components/Button";
 import type { LibraryView, SyncStatus } from "../../lib/ipc";
-import { platform } from "../../lib/platform";
 import { progressLabel, restoringLibrary, syncLabel } from "./useSyncStatus";
 
-export function EmptyLibrary({ view, label, all, sync, busy, onChoose, onSyncSettings, shortcutAvailable }: {
+export function EmptyLibrary({ view, label, all, sync, busy, onChoose, onSyncSettings, shortcutLabel }: {
   view: LibraryView; label?: string; all?: number; sync?: SyncStatus; busy: boolean;
-  onChoose: (directory: boolean) => void; onSyncSettings: () => void; shortcutAvailable: boolean;
+  onChoose: (directory: boolean) => void; onSyncSettings: () => void; shortcutLabel: string | null;
 }) {
   if (view === "all" && all === 0 && restoringLibrary(sync)) return <div role="status" className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
     <h2 className="text-lg font-semibold">正在从同步取回表情</h2>
@@ -24,7 +23,7 @@ export function EmptyLibrary({ view, label, all, sync, busy, onChoose, onSyncSet
       <Button disabled={busy} onClick={() => onChoose(true)} className="disabled:opacity-50">导入文件夹…</Button>
     </div>
     {sync && !sync.target && <button type="button" onClick={onSyncSettings} className="rounded-sm text-sm text-ink-secondary underline underline-offset-4 hover:opacity-82">已经在其他电脑上用过？设置同步…</button>}
-    {shortcutAvailable && <p className="text-xs text-ink-secondary">导入后按 {platform === "macos" ? "⌃⌥E" : "Ctrl+Alt+E"} 打开表情面板取用</p>}
+    {shortcutLabel && <p className="text-xs text-ink-secondary">导入后按 {shortcutLabel} 打开表情面板取用</p>}
   </div>;
 
   const [title, note] = typeof view === "object" ? [`“${label ?? "分类"}”下还没有表情`, "选中表情后，在详情栏设置为这个分类"]
