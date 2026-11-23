@@ -186,7 +186,7 @@ export function Panel() {
           <MagnifyingGlassIcon size={16} aria-hidden />
           <input ref={input} role="combobox" aria-label="搜索表情" aria-autocomplete="list" aria-haspopup="listbox"
             aria-expanded={!empty} aria-controls={empty ? undefined : "panel-choices"} aria-activedescendant={activeId}
-            placeholder="直接输入即可搜索" value={text} autoComplete="off" spellCheck={false}
+            placeholder="输入文字或拼音搜索" value={text} autoComplete="off" spellCheck={false}
             onChange={(event) => { setText(event.target.value); setSelectedId(null); }}
             onCompositionStart={() => { composingRef.current = true; setComposing(true); }}
             onCompositionEnd={(event) => {

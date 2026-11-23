@@ -193,7 +193,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
           </> : <>
             <p className="text-base font-semibold">{searchQuery ? "没有找到相关表情" : recentlyDeleted ? "最近删除里没有表情" : "这里还没有表情"}</p>
             {recentlyDeleted && <p className="text-ink-secondary">删除的表情会在这里保留 30 天</p>}
-            {searchQuery ? <p className="text-ink-secondary">可以搜表情名、分类和配文</p> : (view === "all" || view === "uncategorized") && (
+            {searchQuery ? <p className="text-ink-secondary">可以搜表情名、分类和配文，支持拼音和首字母</p> : (view === "all" || view === "uncategorized") && (
               <p className="text-ink-secondary">点击“导入表情”，或把图片和文件夹拖入窗口</p>
             )}
           </>}

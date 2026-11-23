@@ -276,6 +276,10 @@ fn search_ten_thousand_stickers() {
         "%_",
         "不存在",
         "常用",
+        "bq",
+        "biaoqing",
+        "kx",
+        "a",
     ] {
         let mut elapsed = Vec::new();
         let mut count = 0;
@@ -292,4 +296,127 @@ fn search_ten_thousand_stickers() {
             elapsed.iter().copied().fold(0.0, f64::max),
         );
     }
+}
+
+#[test]
+fn consumes_contiguous_units_and_ranks_incremental_input() {
+    for (field, cases) in [
+        (
+            "下班",
+            &[
+                ("xb", 2),
+                ("xiaban", 1),
+                ("xiab", 2),
+                ("xban", 2),
+                ("xiaba", 1),
+                ("x", 5),
+                ("XB", 2),
+                ("ｘｂ", 2),
+                ("下b", 2),
+                ("xiabn", 255),
+                ("bx", 255),
+            ][..],
+        ),
+        ("张", &[("zh", 2), ("z", 2), ("zha", 1)][..]),
+        ("手机", &[("sj", 2), ("shj", 2)][..]),
+        ("张三", &[("zs", 2), ("zhs", 2)][..]),
+        ("吃饭", &[("cf", 2), ("chf", 2)][..]),
+        ("长寿", &[("cs", 2), ("chsh", 2), ("chshou", 2)][..]),
+        ("银行", &[("yinhang", 1), ("yinxing", 1)][..]),
+        ("长草", &[("changcao", 1)][..]),
+        ("绿", &[("lu", 1), ("lv", 1), ("lü", 1)][..]),
+        ("女", &[("nv", 1), ("nu", 1), ("nü", 1)][..]),
+        ("略", &[("lve", 1), ("lue", 1), ("lüe", 1)][..]),
+        ("今天下班", &[("x", 255)][..]),
+        ("text", &[("x", 6)][..]),
+        ("一", &[("1", 255)][..]),
+        ("第1", &[("1", 6)][..]),
+        ("gif下班", &[("gifxb", 2), ("ifxb", 255)][..]),
+        ("下-班", &[("xb", 255), ("x-b", 255)][..]),
+    ] {
+        for &(word, expected) in cases {
+            let rank = Query::new(word).unwrap().rank([field, "", ""]);
+            assert_eq!(rank.unwrap_or(255), expected, "{word} in {field}");
+        }
+    }
+}
+
+#[test]
+fn ranks_all_nine_tiers_before_recency() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = Library::open(dir.path()).unwrap();
+    let names = [
+        "ban",
+        "班",
+        "北安",
+        "banana",
+        "班次",
+        "北安站",
+        "urban",
+        "下班",
+        "去北安",
+    ];
+    for (i, name) in names.iter().enumerate() {
+        assert_eq!(
+            Query::new("ban").unwrap().rank([name, "", ""]),
+            Some(i as u8)
+        );
+        insert(&library, name, name, None, i as i64);
+    }
+    assert_eq!(ids(&library, "ban"), names);
+    assert_eq!(
+        Query::new("xb").unwrap().rank(["xbox", "下班", ""]),
+        Some(2)
+    );
+}
+
+#[test]
+fn combines_words_across_fields_and_tracks_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut library = Library::open(dir.path()).unwrap();
+    insert(&library, "one", "下班", Some("GIF"), 0);
+    let (category, _) = library
+        .create_category_and_set_stickers(&["one".into()], "Work")
+        .unwrap();
+    for word in ["work xb", "下班 gif", "xia ban", "gif work xb"] {
+        assert_eq!(ids(&library, word), ["one"]);
+    }
+    library.rename_category(&category.id, "银行").unwrap();
+    assert!(ids(&library, "work xb").is_empty());
+    assert_eq!(ids(&library, "yinhang xb"), ["one"]);
+    library.set_sticker_name("one", "回家").unwrap();
+    assert!(ids(&library, "xb").is_empty());
+    assert_eq!(ids(&library, "hj"), ["one"]);
+    library
+        .conn
+        .execute("UPDATE stickers SET deleted_at = 1", [])
+        .unwrap();
+    assert!(ids(&library, "hj").is_empty());
+    for (word, rank) in [("work gif", 6), ("gif xiaban", 7), ("gif xb", 8)] {
+        assert_eq!(
+            Query::new(word).unwrap().rank(["work", "gif", "下班"]),
+            Some(rank)
+        );
+    }
+}
+
+#[test]
+fn bounds_long_and_ambiguous_inputs() {
+    let field = "行".repeat(500);
+    let long = "x".repeat(60);
+    assert_eq!(Query::new(&long).unwrap().rank([&field, "", ""]), None);
+    assert_eq!(Query::new(&long).unwrap().rank([&long, "", ""]), Some(0));
+    let almost = format!("{}q", "h".repeat(31));
+    assert_eq!(Query::new(&almost).unwrap().rank(["", &field, ""]), None);
+}
+
+#[test]
+fn pinyin_ties_use_latest_usage_then_add_time_then_rowid() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = Library::open(dir.path()).unwrap();
+    for (id, added) in [("used", 1), ("first", 3), ("second", 3), ("older", 2)] {
+        insert(&library, id, "下班", None, added);
+    }
+    library.record_usage("used").unwrap();
+    assert_eq!(ids(&library, "xb"), ["used", "second", "first", "older"]);
 }
