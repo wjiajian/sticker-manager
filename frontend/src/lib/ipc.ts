@@ -13,7 +13,7 @@ export interface LibraryOverview {
 export type FixedLibraryView = "all" | "recent" | "favorites" | "uncategorized" | "recentlyDeleted";
 export type LibraryView = FixedLibraryView | { category: string };
 /** 分页读取能用的筛选。 */
-export type StickerPageFilter = "all" | "uncategorized" | { category: string };
+export type StickerPageFilter = "all" | "favorites" | "uncategorized" | { category: string };
 
 export interface Category {
   id: string;

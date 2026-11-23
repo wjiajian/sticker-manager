@@ -39,12 +39,13 @@ export function Panel() {
   const recentQuery = useStickers("recent");
   const categories = useCategories();
   const [chosenFilter, setChosenFilter] = useState<StickerPageFilter>("all");
-  function libraryOption(filter: "all" | "uncategorized"): CategoryFilterOption {
+  function libraryOption(filter: "all" | "favorites" | "uncategorized"): CategoryFilterOption {
     const { label, icon } = LIBRARY_VIEWS.find(({ view }) => view === filter)!;
     return { filter, name: label, icon, count: overview.data?.[filter] };
   }
   const filterOptions: CategoryFilterOption[] = [
     libraryOption("all"),
+    libraryOption("favorites"),
     libraryOption("uncategorized"),
     ...(categories.data ?? []).map((category) => ({ filter: { category: category.id }, name: category.name, count: category.stickerCount, color: category.color })),
   ];
@@ -227,7 +228,7 @@ export function Panel() {
               <div ref={allScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {pages.isPending ? allSkeleton ? <GridSkeleton panel /> : null
                   : all.length ? <div className="grid grid-cols-4 gap-2">{all.map((sticker) => tile(sticker, "all"))}</div>
-                  : <div className="flex h-full items-center justify-center text-ink-secondary"><p>这里还没有表情</p></div>}
+                  : <div className="flex h-full items-center justify-center text-ink-secondary"><p>{filterOption.filter === "favorites" ? "还没有收藏的表情" : "这里还没有表情"}</p></div>}
                 {hasNextPage && <div ref={sentinel} className="h-px" aria-hidden />}
               </div>
             </section>
