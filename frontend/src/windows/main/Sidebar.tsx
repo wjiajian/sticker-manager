@@ -7,6 +7,8 @@ import { useUiStore } from "../../stores/ui";
 import { LIBRARY_VIEWS, navigation, selectedNavigation } from "./libraryViews";
 import { CategoryCreateDialog } from "./CategoryCreateDialog";
 import { useCategoryMenu, type RenameTarget } from "./useCategoryMenu";
+import { useCategoryReorder } from "./useCategoryReorder";
+import { useStickerDragStore } from "../../stores/stickerDrag";
 import { SyncCard } from "./SyncCard";
 import { CategorySkeleton, useDelayedLoading } from "../../components/Skeleton";
 
@@ -22,16 +24,33 @@ export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => 
   const [rename, setRename] = useState<RenameTarget | null>(null);
   const menus = useCategoryMenu(setRename);
 
+  const reorder = useCategoryReorder(list, !!rename || menus.busy || isPending || !!error);
+  const { target, count } = useStickerDragStore();
+  const highlight = "bg-hover ring-2 ring-inset ring-accent";
+
+  function badge(hovered: boolean, value?: number) {
+    return hovered && count > 1
+      ? <span className="shrink-0 text-xs font-semibold text-accent">移入 {count} 张</span>
+      : <span className="shrink-0 text-xs font-normal text-ink-secondary">{value}</span>;
+  }
+
   function finishRename(restoreFocus: boolean) {
     const target = rename;
     setRename(null);
     if (restoreFocus && target) requestAnimationFrame(() => document.getElementById(`sidebar-category-${target.id}`)?.focus());
   }
 
-  function categoryRow(category: CategorySummary) {
+  function categoryRow(category: CategorySummary, index: number) {
     const selected = !searching && typeof view !== "string" && view.category === category.id;
+    const hovered = target?.kind === "category" && target.id === category.id;
+    const row = reorder.rowProps(category.id);
+    const menu = menuEvents((x, y) => menus.categoryMenu(category, x, y, {
+      canMoveUp: !reorder.pending && index > 0,
+      canMoveDown: !reorder.pending && index + 1 < (list?.length ?? 0),
+      moveBy: (delta) => reorder.moveBy(category.id, delta),
+    }));
     return rename?.id === category.id ? (
-      <div key={category.id} className="px-2 py-1">
+      <div key={category.id} data-category-row={category.id} className="px-2 py-1">
         <InlineName key={category.id} target={rename} onFinish={finishRename} />
       </div>
     ) : (
@@ -43,12 +62,16 @@ export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => 
         aria-haspopup="menu"
         title={category.name}
         onClick={() => setView({ category: category.id })}
-        {...menuEvents((x, y) => menus.categoryMenu(category, x, y))}
-        className={`${navigation} ${selected ? selectedNavigation : ""}`}
+        data-sticker-drop={`category:${category.id}`}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        {...row}
+        {...menu}
+        onKeyDown={(event) => { row.onKeyDown(event); if (!event.defaultPrevented) menu.onKeyDown(event); }}
+        className={`${navigation} touch-none ${hovered ? highlight : selected ? selectedNavigation : ""} ${reorder.draggingId === category.id ? "opacity-50" : ""}`}
       >
         <CategoryDot color={category.color} />
         <span className="min-w-0 flex-1 truncate">{category.name}</span>
-        <span className="shrink-0 text-xs font-normal text-ink-secondary">{category.stickerCount}</span>
+        {badge(hovered, category.stickerCount)}
       </button>
     );
   }
@@ -59,23 +82,25 @@ export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => 
       <Section title="仓库">
         {LIBRARY_VIEWS.map(({ view: id, label, icon: Icon }) => {
           const selected = !searching && id === view;
+          const hovered = id === "uncategorized" && target?.kind === "uncategorized";
           return (
             <button
               key={id}
+              data-sticker-drop={id === "uncategorized" ? id : undefined}
               type="button"
               aria-current={selected ? "page" : undefined}
               onClick={() => setView(id)}
-              className={`${navigation} ${selected ? selectedNavigation : "font-medium"}`}
+              className={`${navigation} ${hovered ? highlight : selected ? selectedNavigation : "font-medium"}`}
             >
               <Icon size={16} aria-hidden />
               <span className="flex-1">{label}</span>
-              <span className="text-xs font-normal text-ink-secondary">{overview?.[id]}</span>
+              {badge(hovered, overview?.[id])}
             </button>
           );
         })}
       </Section>
 
-      <section aria-label="分类" className="flex min-w-0 flex-col gap-0.5" aria-busy={isPending || menus.busy}>
+      <section aria-label="分类" className="relative flex min-w-0 flex-col gap-0.5" aria-busy={isPending || menus.busy || reorder.pending}>
         <div className="flex items-center justify-between px-2 py-1">
           <h2 className="text-xs font-semibold text-ink-secondary">分类</h2>
           <button
@@ -93,6 +118,9 @@ export function Sidebar({ onPreferences, onSync, sync }: { onPreferences: () => 
             {list.length === 0 && <p className="px-2 py-1 text-xs text-ink-secondary">还没有分类</p>}
             {list.map(categoryRow)}
           </>}
+        {reorder.indicatorTop !== null && <div aria-hidden className="pointer-events-none absolute left-2 right-2 h-0.5 -translate-y-1/2 rounded-full bg-accent" style={{ top: reorder.indicatorTop }} />}
+        <p role="status" className="sr-only">{reorder.announcement}</p>
+        {reorder.error && <p role="alert" className="px-2 py-1 text-xs text-ink-secondary">{reorder.error}</p>}
         {menus.error && <p role="alert" className="px-2 py-1 text-xs text-ink-secondary">{menus.error}</p>}
       </section>
       </div>

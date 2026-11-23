@@ -54,7 +54,7 @@ export function useCategoryMenu(onRename: (target: RenameTarget) => void) {
     }
   }
 
-  function categoryMenu(category: CategorySummary, x: number, y: number) {
+  function categoryMenu(category: CategorySummary, x: number, y: number, order: { canMoveUp: boolean; canMoveDown: boolean; moveBy(delta: -1 | 1): Promise<void> }) {
     return popup(async () => {
       const colors: IconMenuItem[] = [];
       for (const color of CATEGORY_COLORS) {
@@ -84,6 +84,9 @@ export function useCategoryMenu(onRename: (target: RenameTarget) => void) {
       return [
         { id: "rename-category", text: "改名", action: () => onRename({ id: category.id, name: category.name }) },
         { text: "改颜色", items: colors },
+        { item: "Separator" },
+        { id: "move-up", text: "上移", enabled: order.canMoveUp, action: () => { void order.moveBy(-1); } },
+        { id: "move-down", text: "下移", enabled: order.canMoveDown, action: () => { void order.moveBy(1); } },
         { item: "Separator" },
         { id: "delete-category", text: "删除分类", action: () => { void change(async () => {
           const deletedCount = category.totalStickerCount - category.stickerCount;

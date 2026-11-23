@@ -622,6 +622,9 @@ fn every_public_mutation_is_captured_and_transaction_rollback_has_no_log() {
     }
     changed!(l.create_category("分类", None));
     let category = l.categories().unwrap()[0].category.id.clone();
+    changed!(l.create_category("第二分类", None));
+    let second = l.categories().unwrap()[1].category.id.clone();
+    changed!(l.move_category(&second, Some(&category)));
     changed!(l.rename_category(&category, "改分类名"));
     changed!(l.set_category_color(&category, "#E5484D"));
     changed!(l.set_sticker_category(&id, Some(&category)));
@@ -785,10 +788,10 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
         for _ in 0..120 {
             let index = (next() % 3) as usize;
             let site = &sites[index];
-            let action = next() % 18;
+            let action = next() % 19;
             if action == 0 {
                 site.import((10 + next() % 3) as u8);
-            } else if action >= 14 {
+            } else if (14..=17).contains(&action) {
                 let files = remote_images(&s);
                 if action == 17 {
                     let path = format!("手建/{}.png", next() % 3);
@@ -875,6 +878,11 @@ fn three_libraries_converge_under_seeded_random_edits_and_delayed_delivery() {
                         if let Some(c) = l.categories().unwrap().first() {
                             let _ =
                                 l.rename_category(&c.category.id, &format!("分类 {}", next() % 3));
+                        }
+                    }
+                    (18, _) => {
+                        if let Some(c) = l.categories().unwrap().first() {
+                            l.move_category(&c.category.id, None).unwrap();
                         }
                     }
                     (13, _) => {
@@ -1514,3 +1522,83 @@ fn switching_targets_does_not_pin_outbox_and_rejoining_uses_a_fresh_snapshot() {
 }
 
 mod tree;
+
+#[test]
+fn category_order_syncs_and_survives_join_snapshot() {
+    let (s, m) = backend();
+    let a = Site::new();
+    let b = Site::new();
+    let first = a
+        .lib
+        .lock()
+        .unwrap()
+        .create_category("First", None)
+        .unwrap();
+    a.lib
+        .lock()
+        .unwrap()
+        .create_category("Second", None)
+        .unwrap();
+    settle(&[&a, &b], &s, &m);
+    a.lib
+        .lock()
+        .unwrap()
+        .move_category(&first.id, None)
+        .unwrap();
+    settle(&[&a, &b], &s, &m);
+    assert_eq!(a.state(), b.state());
+    assert_eq!(
+        b.lib.lock().unwrap().categories().unwrap()[1].category.id,
+        first.id
+    );
+    let (fresh, manifest) = backend();
+    let c = Site::new();
+    settle(&[&b, &c], &fresh, &manifest);
+    assert_eq!(a.state(), c.state());
+}
+
+#[test]
+fn concurrent_category_moves_converge_deterministically() {
+    let (s, m) = backend();
+    let a = Site::new();
+    let b = Site::new();
+    let ids: Vec<_> = ["A", "B", "C"]
+        .into_iter()
+        .map(|name| {
+            a.lib
+                .lock()
+                .unwrap()
+                .create_category(name, None)
+                .unwrap()
+                .id
+        })
+        .collect();
+    settle(&[&a, &b], &s, &m);
+    a.lib
+        .lock()
+        .unwrap()
+        .move_category(&ids[2], Some(&ids[0]))
+        .unwrap();
+    b.lib.lock().unwrap().move_category(&ids[0], None).unwrap();
+    settle(&[&b, &a], &s, &m);
+    assert_eq!(a.state(), b.state());
+    assert_eq!(a.lib.lock().unwrap().categories().unwrap().len(), 3);
+}
+
+#[test]
+fn move_category_ops_are_known_to_existing_clients() {
+    let a = Site::new();
+    let mut l = a.lib.lock().unwrap();
+    let first = l.create_category("A", None).unwrap();
+    l.create_category("B", None).unwrap();
+    let revision = l.local_revision().unwrap();
+    l.move_category(&first.id, None).unwrap();
+    let ops = store::local_changes(&l.conn, revision).unwrap();
+    assert_eq!(ops.len(), 2);
+    for (_, change) in ops {
+        assert!(change.known());
+        assert!(
+            matches!(change.action,Action::Set { entity: Kind::Category, field, .. } if field=="position")
+        );
+    }
+}

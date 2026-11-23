@@ -149,6 +149,43 @@ impl Library {
         Ok(())
     }
 
+    /// 把分类移到 before 前面，None 表示移到末尾。仅更新位置变化的行。
+    pub fn move_category(&mut self, id: &str, before: Option<&str>) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut order: Vec<String> = tx
+            .prepare("SELECT id FROM categories ORDER BY position, id")?
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let from = order
+            .iter()
+            .position(|c| c == id)
+            .ok_or(Error::CategoryUnavailable)?;
+        if before == Some(id) {
+            return Ok(());
+        }
+        let moved = order.remove(from);
+        let to = match before {
+            Some(b) => order
+                .iter()
+                .position(|c| c == b)
+                .ok_or(Error::CategoryUnavailable)?,
+            None => order.len(),
+        };
+        order.insert(to, moved);
+        {
+            let mut update = tx.prepare(
+                "UPDATE categories SET position = ?2 WHERE id = ?1 AND position IS NOT ?2",
+            )?;
+            for (i, cid) in order.iter().enumerate() {
+                update.execute(params![cid, i as i64])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_sticker_name(&self, id: &str, name: &str) -> Result<()> {
         let name = name.trim();
         if name.is_empty() {

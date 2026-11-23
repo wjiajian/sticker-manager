@@ -137,6 +137,7 @@ pub fn run() {
             commands::rename_category,
             commands::set_category_color,
             commands::delete_category,
+            commands::move_category,
             commands::set_sticker_category,
             commands::set_sticker_name,
             commands::set_sticker_caption,

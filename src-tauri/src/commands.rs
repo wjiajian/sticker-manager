@@ -165,6 +165,18 @@ pub async fn set_category_color(app: AppHandle, id: String, color: String) -> Co
 }
 
 #[tauri::command]
+pub async fn move_category(
+    app: AppHandle,
+    id: String,
+    before: Option<String>,
+) -> CommandResult<()> {
+    with_library(app, move |library| {
+        Ok(library.move_category(&id, before.as_deref())?)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn delete_category(app: AppHandle, id: String) -> CommandResult<()> {
     with_library(app, move |library| Ok(library.delete_category(&id)?)).await
 }

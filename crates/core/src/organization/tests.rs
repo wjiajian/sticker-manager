@@ -426,3 +426,74 @@ fn batch_set_is_atomic_idempotent_skips_deleted_and_records_operations() {
     assert_eq!(library.categories().unwrap().len(), 1);
     assert_eq!(library.local_revision().unwrap(), revision);
 }
+
+fn ordered_categories(l: &Library) -> Vec<(String, i64)> {
+    l.categories()
+        .unwrap()
+        .into_iter()
+        .map(|c| (c.category.name, c.category.position))
+        .collect()
+}
+
+#[test]
+fn moves_categories_before_another_or_to_the_end_and_normalizes_positions() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut l = library(dir.path());
+    let a = l.create_category("A", None).unwrap();
+    let b = l.create_category("B", None).unwrap();
+    l.conn
+        .execute("UPDATE categories SET position = position + 10", [])
+        .unwrap();
+    l.move_category(&b.id, Some(&a.id)).unwrap();
+    assert_eq!(ordered_categories(&l), [("B".into(), 0), ("A".into(), 1)]);
+    l.move_category(&b.id, None).unwrap();
+    assert_eq!(ordered_categories(&l), [("A".into(), 0), ("B".into(), 1)]);
+}
+
+#[test]
+fn move_category_rejects_unknown_ids_without_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut l = library(dir.path());
+    let a = l.create_category("A", None).unwrap();
+    let rev = l.local_revision().unwrap();
+    for (id, before) in [("missing", None), (a.id.as_str(), Some("missing"))] {
+        assert!(matches!(
+            l.move_category(id, before),
+            Err(Error::CategoryUnavailable)
+        ));
+    }
+    assert_eq!(rev, l.local_revision().unwrap());
+    assert_eq!(ordered_categories(&l), [("A".into(), 0)]);
+}
+
+#[test]
+fn moving_records_only_changed_positions() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut l = library(dir.path());
+    let a = l.create_category("A", None).unwrap();
+    let b = l.create_category("B", None).unwrap();
+    let c = l.create_category("C", None).unwrap();
+    let rev = l.local_revision().unwrap();
+    l.move_category(&a.id, Some(&a.id)).unwrap();
+    l.move_category(&a.id, Some(&b.id)).unwrap();
+    l.move_category(&c.id, None).unwrap();
+    assert_eq!(rev, l.local_revision().unwrap());
+    l.move_category(&b.id, Some(&a.id)).unwrap();
+    assert_eq!(rev + 2, l.local_revision().unwrap());
+}
+
+#[test]
+fn create_after_move_appends_at_end_and_delete_leaves_order_intact() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut l = library(dir.path());
+    let a = l.create_category("A", None).unwrap();
+    l.create_category("B", None).unwrap();
+    l.move_category(&a.id, None).unwrap();
+    l.create_category("C", None).unwrap();
+    assert_eq!(
+        ordered_categories(&l),
+        [("B".into(), 0), ("A".into(), 1), ("C".into(), 2)]
+    );
+    l.delete_category(&a.id).unwrap();
+    assert_eq!(ordered_categories(&l), [("B".into(), 0), ("C".into(), 2)]);
+}

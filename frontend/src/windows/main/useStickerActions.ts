@@ -3,23 +3,42 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ipc, type Sticker } from "../../lib/ipc";
+import { ipc, type CategorySummary, type Sticker } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
 import { sameExport } from "../../lib/exportPath";
 import { useSticker } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
+import { useStickerDragStore, type StickerDropTarget } from "../../stores/stickerDrag";
+import { scrollStickerSidebar, stickerDropTargetAt } from "./stickerDrop";
+
+type Feedback =
+  | { kind: "delete"; ids: string[]; label: string }
+  | { kind: "category"; groups: { categoryId: string | null; ids: string[] }[]; label: string }
+  | { kind: "notice"; label: string };
+
+function groupByPreviousCategory(stickers: Sticker[]) {
+  const groups = new Map<string | null, string[]>();
+  for (const sticker of stickers) {
+    const category = sticker.category?.id ?? null;
+    const group = groups.get(category);
+    if (group) group.push(sticker.id);
+    else groups.set(category, [sticker.id]);
+  }
+  return Array.from(groups, ([categoryId, ids]) => ({ categoryId, ids }));
+}
 
 export type StickerActions = ReturnType<typeof useStickerActions>;
 
 /** 正在拖出、或者松手后还在等放下事件的表情副本。 */
 interface Outgoing {
   path: string;
+  targets: Sticker[];
   ended: boolean;
   droppedHere: boolean;
   settle?: () => void;
 }
 
-/** 删除后可以撤销的时长。 */
+/** 操作结果与撤销入口的显示时长。 */
 const UNDO_MS = 10_000;
 
 export function useStickerActions(stickers: Sticker[]) {
@@ -43,7 +62,7 @@ export function useStickerActions(stickers: Sticker[]) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [undo, setUndo] = useState<{ ids: string[]; label: string } | null>(null);
+  const [undo, setUndo] = useState<Feedback | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => { clearTimeout(feedbackTimer.current); clearTimeout(undoTimer.current); }, []);
@@ -52,18 +71,66 @@ export function useStickerActions(stickers: Sticker[]) {
     if (detail === null) selectSticker(null);
   }, [detail, selectSticker]);
 
+  const showFeedback = useCallback((item: Feedback) => {
+    clearTimeout(undoTimer.current);
+    setUndo(item);
+    undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS);
+  }, []);
+
+  const categorizeDropped = useCallback(async (targets: Sticker[], target: StickerDropTarget) => {
+    setError(null);
+    const categoryId = target.kind === "category" ? target.id : null;
+    const categories = client.getQueryData<CategorySummary[]>(["library", "categories"]);
+    const name = categoryId === null ? "未分类" : categories?.find((c) => c.id === categoryId)?.name ?? "分类";
+    const moving = targets.filter((s) => (s.category?.id ?? null) !== categoryId);
+    if (!moving.length) {
+      showFeedback({ kind: "notice", label: `${targets.length === 1 ? "这张表情" : "这些表情"}已在“${name}”里` });
+      return;
+    }
+    const before = useUiStore.getState();
+    try {
+      const count = await ipc.setStickersCategory(moving.map((s) => s.id), categoryId);
+      if (!count) return;
+      showFeedback({
+        kind: "category",
+        groups: groupByPreviousCategory(moving),
+        label: count === 1 && moving.length === 1 ? `已将“${moving[0].name}”移到“${name}”` : `已将 ${count} 张表情移到“${name}”`,
+      });
+      const now = useUiStore.getState();
+      const view = before.view;
+      const leaving = view === "uncategorized" ? categoryId !== null : typeof view !== "string" && view.category !== categoryId;
+      if (leaving && !before.searchQuery && now.searchQuery === before.searchQuery && now.view === view &&
+          now.selectedStickerIds === before.selectedStickerIds && now.selectedStickerId === before.selectedStickerId) selectSticker(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      await client.invalidateQueries({ queryKey: ["library"] });
+    }
+  }, [client, selectSticker, showFeedback]);
+
   /** 拖放事件属于拖出的表情时返回 true，调用方不应再把它当成导入。 */
   const claimDragDrop = useCallback((event: DragDropEvent) => {
     const current = outgoing.current;
     if (!current) return false;
     // 拖拽进行中只可能是它自己；松手后用户可能已经在拖入别的文件，只认带着这份副本路径的事件。
     if (current.ended && !("paths" in event && event.paths.some((path) => sameExport(path, current.path)))) return false;
-    if (event.type === "drop") {
+    const dragStore = useStickerDragStore.getState();
+    if (event.type === "leave") dragStore.clear();
+    else if (event.type === "drop") {
+      const firstDrop = !current.droppedHere;
       current.droppedHere = true;
       current.settle?.();
+      dragStore.clear();
+      if (firstDrop) {
+        const target = stickerDropTargetAt(event.position);
+        if (target) void categorizeDropped(current.targets, target);
+      }
+    } else if (!current.droppedHere) {
+      scrollStickerSidebar(event.position);
+      dragStore.set(stickerDropTargetAt(event.position), current.targets.length);
     }
     return true;
-  }, []);
+  }, [categorizeDropped]);
 
   const perform = useCallback(async (operation: () => Promise<void>, changesLibrary = true) => {
     if (working.current) return;
@@ -116,9 +183,7 @@ export function useStickerActions(stickers: Sticker[]) {
       const changed = await ipc[operation === "delete" ? "deleteStickers" : "restoreStickers"](ids);
       if (!changed.length) throw new Error(operation === "delete" ? "这张表情已不在仓库里，或已被删除" : "这张表情已被恢复或彻底删除");
       if (operation === "delete") {
-        clearTimeout(undoTimer.current);
-        setUndo({ ids: changed, label: changed.length === 1 ? `已删除“${targets.find((sticker) => sticker.id === changed[0])?.name ?? ""}”` : `已删除 ${changed.length} 张表情` });
-        undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS);
+        showFeedback({ kind: "delete", ids: changed, label: changed.length === 1 ? `已删除“${targets.find((sticker) => sticker.id === changed[0])?.name ?? ""}”` : `已删除 ${changed.length} 张表情` });
       }
     }
     const current = useUiStore.getState();
@@ -126,7 +191,7 @@ export function useStickerActions(stickers: Sticker[]) {
     if (current.selectedStickerIds.length !== ids.length || current.selectedStickerIds.some((id) => !picked.has(id)) || current.view !== view || current.searchQuery !== searchQuery) return;
     selectSticker(nextId);
     if (focused && nextId) requestAnimationFrame(() => document.getElementById(`sticker-${nextId}`)?.focus());
-  }), [stickers, perform, selectSticker]);
+  }), [stickers, perform, selectSticker, showFeedback]);
 
   const deleteStickers = useCallback((targets: Sticker[]) => removeStickers(targets, "delete"), [removeStickers]);
   const deleteSticker = useCallback((sticker: Sticker) => removeStickers([sticker], "delete"), [removeStickers]);
@@ -135,11 +200,19 @@ export function useStickerActions(stickers: Sticker[]) {
   const restoreSticker = (sticker: Sticker) => restoreStickers([sticker]);
   const purgeSticker = (sticker: Sticker) => purgeStickers([sticker]);
 
-  /** 撤销最近一次删除：把当时实际删掉的表情恢复，并重新选中。 */
-  const undoDelete = () => perform(async () => {
-    if (!undo) return;
+  const undoLast = () => perform(async () => {
+    if (!undo || undo.kind === "notice") return;
     clearTimeout(undoTimer.current);
     setUndo(null);
+    if (undo.kind === "category") {
+      const errors: string[] = [];
+      for (const group of undo.groups) {
+        try { await ipc.setStickersCategory(group.ids, group.categoryId); }
+        catch (reason) { errors.push(String(reason)); }
+      }
+      if (errors.length) throw new Error(errors.join("\n"));
+      return;
+    }
     const restored = await ipc.restoreStickers(undo.ids);
     if (!restored.length) throw new Error("这些表情已被恢复或彻底删除");
     // 在最近删除里撤销时，恢复的表情不在当前列表里，不选中。
@@ -197,7 +270,7 @@ export function useStickerActions(stickers: Sticker[]) {
       const file = await ipc.prepareStickerDrag(sticker.id);
       // 准备大文件时用户可能已经松开鼠标，此时不再发起系统拖拽。
       if (!isPressed()) return;
-      const current: Outgoing = { path: file.path, ended: false, droppedHere: false };
+      const current: Outgoing = { path: file.path, targets: targetsFor(sticker), ended: false, droppedHere: false };
       outgoing.current = current;
       let dropped = false;
       try {
@@ -207,6 +280,7 @@ export function useStickerActions(stickers: Sticker[]) {
           }).catch(reject);
         });
       } finally {
+        useStickerDragStore.getState().clear();
         current.ended = true;
         if (!dropped || current.droppedHere) release(current);
       }
@@ -251,5 +325,5 @@ export function useStickerActions(stickers: Sticker[]) {
     return perform(() => ipc.revealSticker(sticker.id), false);
   }
 
-  return { copy, drag, toggleFavorite, setFavorites, reveal, deleteSticker, deleteStickers, restoreSticker, restoreStickers, purgeSticker, purgeStickers, purgeDeletedStickers, selectedStickers, targetsFor, undo, undoDelete, dismissUndo, busy, claimDragDrop, copiedId, error };
+  return { copy, drag, toggleFavorite, setFavorites, reveal, deleteSticker, deleteStickers, restoreSticker, restoreStickers, purgeSticker, purgeStickers, purgeDeletedStickers, selectedStickers, targetsFor, undo, undoLast, dismissUndo, busy, claimDragDrop, copiedId, error };
 }
