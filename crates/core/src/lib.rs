@@ -24,3 +24,10 @@ pub use library::{
     read_image,
 };
 pub use organization::{CATEGORY_COLORS, Category, CategorySummary, UNCATEGORIZED};
+
+pub mod export;
+pub mod relocate;
+pub use export::{
+    ExportFailure, ExportFormat, ExportProgress, ExportReport, ExportRequest, ExportScope,
+    export_with_progress,
+};

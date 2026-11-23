@@ -125,7 +125,16 @@ export const ipc = {
   setStickerTileSize: (size: number) => invoke<Settings>("set_sticker_tile_size", { size }),
   getAutostart: () => invoke<boolean>("get_autostart"),
   setAutostart: (enabled: boolean) => invoke<{ enabled: boolean | null; error: string | null }>("set_autostart", { enabled }),
-  libraryDirectory: () => invoke<string>("library_directory"),
+  libraryLocation: () => invoke<LibraryLocation>("library_location"),
+  inspectLibraryTarget: (path: string) => invoke<{ path: string; isDefault: boolean; files: number; bytes: number }>("inspect_library_target", { path }),
+  moveLibrary: (path: string) => invoke<MoveReport>("move_library", { path }),
+  libraryMoveStatus: () => invoke<MoveStatus>("library_move_status"),
+  cancelLibraryMove: () => invoke<void>("cancel_library_move"),
+  exportStickers: (scope: ExportScope, format: ExportFormat, destination: string, name: string) =>
+    invoke<ExportReport>("export_stickers", { scope, format, destination, name, utcOffsetMinutes: -new Date().getTimezoneOffset() }),
+  exportStatus: () => invoke<ExportStatus>("export_status"),
+  cancelExport: () => invoke<void>("cancel_export"),
+  revealExport: () => invoke<void>("reveal_export"),
   openLibraryDirectory: () => invoke<void>("open_library_directory"),
   takePreferencesRequest: () => invoke<boolean>("take_preferences_request"),
   updateStatus: () => invoke<UpdateStatus>("update_status"),
@@ -258,3 +267,21 @@ export interface PanelShortcutState {
 }
 export interface ShortcutKeyInput { code: string; keyCode: number; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }
 export interface ShortcutCandidate { shortcut: string | null; label: string; accessibleLabel: string; error: string | null }
+
+export type ExportScope = { stickers: string[] } | { category: string } | "library";
+export type ExportFormat = "folder" | "zip";
+export interface ExportReport {
+  exported: number; skipped: number; bytes: number; output: string | null; cancelled: boolean;
+  failures: { stickerId: string; name: string; message: string }[]; exceedsImportLimits: boolean;
+}
+export interface ExportStatus {
+  batch: number; running: boolean; progress: { processed: number; total: number }; report: ExportReport | null; error: string | null;
+}
+export interface LibraryLocation {
+  path: string; defaultPath: string; isCustom: boolean; canMove: boolean; cannotMoveReason: string | null;
+}
+export interface MoveReport { path: string; previous: string; leftovers: string[] }
+export interface MoveStatus {
+  running: boolean; stage: "preparing" | "copying" | "switching" | "cleaning" | null;
+  progress: { copied: number; total: number; bytes: number; totalBytes: number }; report: MoveReport | null; error: string | null;
+}

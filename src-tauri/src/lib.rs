@@ -14,9 +14,12 @@ mod commands;
 mod credentials;
 mod desktop;
 mod export;
+mod exports;
 mod geometry;
 mod identifier;
 mod imports;
+mod jobs;
+mod location;
 #[cfg(target_os = "macos")]
 mod menu;
 mod metered;
@@ -64,7 +67,7 @@ pub fn run() {
                 }
             };
             app.manage(portable);
-            let (mut library, root) = match open_library(app) {
+            let (mut library, root, location) = match open_library(app) {
                 Ok(library) => library,
                 Err((path, reason)) => {
                     app.set_theme(settings::Settings::load(&path).appearance.theme());
@@ -72,6 +75,10 @@ pub fn run() {
                     return Ok(());
                 }
             };
+            app.manage(location);
+            app.manage(location::MoveState::default());
+            app.manage(jobs::LibraryJobs::default());
+            app.manage(exports::ExportState::default());
             app.manage(settings::SettingsState::new(root));
             app.set_theme(appearance::preference(app.handle()));
             if let Err(error) = library.purge_expired() {
@@ -174,7 +181,15 @@ pub fn run() {
             settings::set_sticker_tile_size,
             settings::get_autostart,
             settings::set_autostart,
-            settings::library_directory,
+            exports::export_stickers,
+            exports::export_status,
+            exports::cancel_export,
+            exports::reveal_export,
+            location::library_location,
+            location::inspect_library_target,
+            location::move_library,
+            location::library_move_status,
+            location::cancel_library_move,
             settings::open_library_directory,
             tray::take_preferences_request,
             tray::show_ball_menu,
@@ -252,68 +267,77 @@ fn start_expiry_cleanup(app: tauri::AppHandle) {
     });
 }
 
-/// 开发构建里设置了这个环境变量，就改用它指向的目录做仓库，调试和验证时不碰真实仓库。
-#[cfg(debug_assertions)]
-const LIBRARY_DIR_OVERRIDE: &str = "STICKER_LIBRARY_DIR";
-
-fn open_library(app: &tauri::App) -> Result<(Library, PathBuf), (PathBuf, String)> {
-    #[cfg(debug_assertions)]
-    if let Some(root) = std::env::var_os(LIBRARY_DIR_OVERRIDE).filter(|root| !root.is_empty()) {
-        let root = PathBuf::from(root);
-        // 相对路径会落在 src-tauri/ 下，写入的文件又会触发 tauri dev 重新编译
-        if !root.is_absolute() {
-            let reason = format!("{LIBRARY_DIR_OVERRIDE} 必须是绝对路径：{}", root.display());
-            return Err((root, reason));
-        }
-        let library =
-            Library::open(&root).map_err(|error| (root.clone(), startup::reason(error)))?;
-        // tauri.conf.json 里的 asset 协议范围只覆盖默认仓库，换了位置要把新目录也放进去
-        let scope = app.asset_protocol_scope();
-        scope
-            .allow_directory(root.join("objects"), false)
-            .map_err(|error| (root.clone(), error.to_string()))?;
-        scope
-            .allow_directory(root.join("thumbs"), false)
-            .map_err(|error| (root.clone(), error.to_string()))?;
-        eprintln!("仓库：{}（来自 {LIBRARY_DIR_OVERRIDE}）", root.display());
-        return Ok((library, root));
-    }
-
-    // Windows 使用面向用户的目录名，应用标识符仍用于系统集成。
-    let root = app
+fn open_library(
+    app: &tauri::App,
+) -> Result<(Library, PathBuf, location::LocationState), (PathBuf, String)> {
+    use location::LocationMode;
+    let data = app
         .path()
         .app_data_dir()
-        .map_err(|error| (PathBuf::from("（无法确定仓库路径）"), error.to_string()))?;
-    #[cfg(target_os = "windows")]
-    let root = portable::root(app.handle())
-        .map(|directory| directory.join("data"))
-        .unwrap_or_else(|| root.with_file_name("sticker-manager"));
-    #[cfg(target_os = "windows")]
-    let migration = if portable::enabled(app.handle()) {
-        Ok(false)
-    } else {
-        identifier::migrate_windows_library(&root)
-    };
-    #[cfg(not(target_os = "windows"))]
-    let migration = identifier::migrate_previous_library(&root);
-    // 搬不过来就停在启动失败页：直接打开空的新仓库会像是表情全丢了，写入后也没法再自动搬。
-    match migration {
-        Ok(true) => eprintln!("已把旧仓库搬到 {}", root.display()),
-        Ok(false) => {}
-        Err(error) => {
-            let reason = format!("无法把旧仓库搬到新位置：{error}");
-            return Err((root, reason));
+        .map_err(|e| (PathBuf::from("（无法确定仓库路径）"), e.to_string()))?;
+    #[cfg(windows)]
+    let default = data.with_file_name("sticker-manager");
+    #[cfg(not(windows))]
+    let default = data.clone();
+    let (base, mode, guarded) = if cfg!(debug_assertions)
+        && let Some(path) = std::env::var_os("STICKER_LIBRARY_DIR").filter(|s| !s.is_empty())
+    {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err((path, "STICKER_LIBRARY_DIR 必须是绝对路径".into()));
         }
+        #[cfg(windows)]
+        let guarded = vec![data, default];
+        #[cfg(not(windows))]
+        let guarded = vec![data];
+        (path, LocationMode::Override, guarded)
+    } else if let Some(portable) = portable::root(app.handle()) {
+        (portable.join("data"), LocationMode::Portable, vec![])
+    } else {
+        (default, LocationMode::Default, vec![])
+    };
+    let (root, custom) = location::resolve_root(&base, mode)?;
+    if guarded
+        .iter()
+        .filter_map(|p| p.canonicalize().ok())
+        .any(|p| root.canonicalize().is_ok_and(|r| r.starts_with(p)))
+    {
+        return Err((root, "调试时不能访问真实仓库".into()));
     }
-    #[cfg(target_os = "windows")]
-    for directory in ["objects", "thumbs"] {
+    if !custom && mode == LocationMode::Default {
+        #[cfg(windows)]
+        let result = identifier::migrate_windows_library(&root);
+        #[cfg(not(windows))]
+        let result = identifier::migrate_previous_library(&root);
+        result.map_err(|e| (root.clone(), format!("无法把旧仓库搬到新位置：{e}")))?;
+    }
+    let library = if custom { Library::open_existing(&root) } else { Library::open(&root) }.map_err(|error| {
+        let denied = matches!(&error, sticker_core::Error::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied);
+        let mut reason = startup::reason(error);
+        if custom && denied {
+            let hint = if cfg!(target_os = "macos") {
+                "。请在系统设置 › 隐私与安全性 › 文件与文件夹中允许访问仓库。"
+            } else {
+                "。请检查文件夹的访问权限。"
+            };
+            reason.push_str(hint);
+        }
+        (root.clone(), reason)
+    })?;
+    for d in ["objects", "thumbs"] {
         app.asset_protocol_scope()
-            .allow_directory(root.join(directory), false)
-            .map_err(|error| (root.clone(), error.to_string()))?;
+            .allow_directory(root.join(d), false)
+            .map_err(|e| (root.clone(), e.to_string()))?
     }
+    let path = sticker_core::relocate::display_path(library.root());
     Ok((
-        Library::open(&root).map_err(|error| (root.clone(), startup::reason(error)))?,
-        root,
+        library,
+        path,
+        location::LocationState {
+            base,
+            mode,
+            guarded,
+        },
     ))
 }
 

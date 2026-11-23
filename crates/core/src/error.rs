@@ -1,5 +1,11 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    Export(String),
+    #[error("{0}")]
+    LibraryLocation(String),
+    #[error("仓库暂时无法访问，请重新启动应用")]
+    LibraryUnavailable,
     #[error("同步失败：{0}")]
     Sync(String),
 

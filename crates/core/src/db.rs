@@ -17,8 +17,8 @@ const MIGRATIONS: &[&str] = &[
 ];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 
-pub fn open(path: &Path) -> Result<Connection> {
-    if path.exists() {
+pub fn open(path: &Path, create: bool) -> Result<Connection> {
+    if !create || path.try_exists()? {
         // 先只读检查，再切换 WAL 或迁移，避免改动无法打开的仓库。
         let existing = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         check_version(&existing)?;
@@ -31,7 +31,12 @@ pub fn open(path: &Path) -> Result<Connection> {
             .into());
         }
     }
-    let mut conn = Connection::open(path)?;
+    let flags = if create {
+        OpenFlags::default()
+    } else {
+        OpenFlags::default() & !OpenFlags::SQLITE_OPEN_CREATE
+    };
+    let mut conn = Connection::open_with_flags(path, flags)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
     migrate(&mut conn)?;
@@ -72,8 +77,8 @@ mod tests {
     fn reopening_does_not_rerun_migrations() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("library.db");
-        open(&path).unwrap();
-        let conn = open(&path).unwrap();
+        open(&path, true).unwrap();
+        let conn = open(&path, true).unwrap();
         assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
         assert!(!conn.table_exists(None, "sync_deleted_objects").unwrap());
     }
@@ -97,7 +102,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let conn = open(&path).unwrap();
+        let conn = open(&path, true).unwrap();
         assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
         assert!(!conn.table_exists(None, "sync_deleted_objects").unwrap());
         let preserved: (String, i64) = conn
@@ -130,7 +135,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let conn = open(&path).unwrap();
+        let conn = open(&path, true).unwrap();
         assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
         let index_exists: bool = conn
             .query_row(
@@ -159,7 +164,7 @@ mod tests {
             .pragma_update(None, "user_version", LATEST_VERSION + 1)
             .unwrap();
         let before = std::fs::read(&path).unwrap();
-        assert!(matches!(open(&path), Err(Error::SchemaTooNew { .. })));
+        assert!(matches!(open(&path, true), Err(Error::SchemaTooNew { .. })));
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert!(!dir.path().join("library.db-wal").exists());
     }
@@ -170,7 +175,7 @@ mod tests {
         let path = dir.path().join("library.db");
         let bytes = b"not a sqlite database";
         std::fs::write(&path, bytes).unwrap();
-        assert!(open(&path).is_err());
+        assert!(open(&path, true).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
 
@@ -198,7 +203,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let conn = open(&path).unwrap();
+        let conn = open(&path, true).unwrap();
         let category = |id: &str| -> Option<String> {
             conn.query_row(
                 "SELECT category_id FROM stickers WHERE id = ?1",

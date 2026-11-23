@@ -1,9 +1,9 @@
 use super::*;
 use zip::{CompressionMethod, ZipArchive, read::ZipFileEntry};
 
-const ENTRY_LIMIT: u64 = 100 * 1024 * 1024;
-const ARCHIVE_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
-const ENTRY_COUNT_LIMIT: usize = 10_000;
+pub(crate) const ENTRY_LIMIT: u64 = 100 * 1024 * 1024;
+pub(crate) const ARCHIVE_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
+pub(crate) const ENTRY_COUNT_LIMIT: usize = 10_000;
 
 pub(super) fn is_zip(path: &Path) -> bool {
     path.extension()
@@ -76,7 +76,7 @@ const LIMITS: ArchiveLimits = ArchiveLimits {
 enum Entry {
     Ignored,
     Skipped,
-    Image(NamedTempFile, String),
+    Image(NamedTempFile, String, Option<String>),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -182,7 +182,14 @@ fn import_with_limits(
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned();
-            Ok(Entry::Image(file, stem))
+            Ok(Entry::Image(
+                file,
+                stem,
+                name.rsplit('/')
+                    .nth(1)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned),
+            ))
         })();
         match result {
             // 解压总量越线：这一项和之后的条目都不再导入。
@@ -200,9 +207,15 @@ fn import_with_limits(
             Err(message) => report.failures.push(ImportFailure::new(display, message)),
             Ok(Entry::Ignored) => {}
             Ok(Entry::Skipped) => report.skipped += 1,
-            Ok(Entry::Image(file, stem)) => {
-                process(root, file.path(), &stem, None, &display, report, store)
-            }
+            Ok(Entry::Image(file, stem, folder)) => process(
+                root,
+                file.path(),
+                &stem,
+                folder.as_deref(),
+                &display,
+                report,
+                store,
+            ),
         }
         state.processed += 1;
         progress(*state);

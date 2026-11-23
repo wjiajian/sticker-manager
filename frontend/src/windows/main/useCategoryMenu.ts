@@ -1,4 +1,5 @@
 import type { Resource } from "@tauri-apps/api/core";
+import { exportMenuItems, exportBusy, useExportStore } from "../../stores/export";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { Image } from "@tauri-apps/api/image";
 import { IconMenuItem, Menu, type MenuOptions } from "@tauri-apps/api/menu";
@@ -87,6 +88,8 @@ export function useCategoryMenu(onRename: (target: RenameTarget) => void) {
         { item: "Separator" },
         { id: "move-up", text: "上移", enabled: order.canMoveUp, action: () => { void order.moveBy(-1); } },
         { id: "move-down", text: "下移", enabled: order.canMoveDown, action: () => { void order.moveBy(1); } },
+        { item: "Separator" },
+        { text: "导出分类", enabled: category.stickerCount > 0 && !exportBusy(useExportStore.getState()), items: exportMenuItems({ category: category.id }, category.name) },
         { item: "Separator" },
         { id: "delete-category", text: "删除分类", action: () => { void change(async () => {
           const deletedCount = category.totalStickerCount - category.stickerCount;

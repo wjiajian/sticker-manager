@@ -113,3 +113,5 @@ $env:STICKER_LIBRARY_DIR = Join-Path $env:TEMP ("sticker-test-" + [guid]::NewGui
 Windows 图标复用 `src-tauri/icons/app-icon.svg`，生成时把根 `viewBox` 改为 `72 72 880 880` 以减少任务栏图标的留白，用 `pnpm --dir frontend tauri icon` 生成后，只保留 ICO 和 128 像素 PNG 到 `src-tauri/icons/windows/`。`tauri.windows.conf.json` 使用这一组资源。
 
 Windows 的仓库位置和旧目录迁移见 [ADR 0002](adr/0002-managed-library.md)，同步文件夹的文件名限制见 [tech-stack.md](tech-stack.md#同步)。
+
+便携版的仓库位置固定在程序旁的 `data/`，更换位置请移动整个程序目录。

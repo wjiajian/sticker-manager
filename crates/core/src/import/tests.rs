@@ -596,3 +596,42 @@ fn folder_import_puts_new_stickers_in_category_named_after_their_folder() {
             .any(|c| c.category.id == existing_category.id)
     );
 }
+
+#[test]
+fn zip_entries_get_category_from_their_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut images = Vec::new();
+    for i in 0..4 {
+        let p = tmp.path().join("image.png");
+        png_file(&p, [i, 2, 3, 255]);
+        images.push(fs::read(p).unwrap());
+    }
+    let zip = tmp.path().join("pack.zip");
+    make_zip(
+        &zip,
+        &[
+            ("猫猫/a.png", &images[0]),
+            ("b.png", &images[1]),
+            ("未分类/c.png", &images[2]),
+            ("x/y/d.png", &images[3]),
+            ("其他/e.png", &images[0]),
+        ],
+    );
+    let mut lib = Library::open(&tmp.path().join("library")).unwrap();
+    let report = lib.import_paths(&[zip]);
+    assert_eq!((report.added, report.existing), (4, 1));
+    for (id, expected) in report
+        .sticker_ids
+        .iter()
+        .zip([Some("猫猫"), None, None, Some("y")])
+    {
+        assert_eq!(
+            lib.sticker(id)
+                .unwrap()
+                .category
+                .as_ref()
+                .map(|c| c.name.as_str()),
+            expected
+        )
+    }
+}

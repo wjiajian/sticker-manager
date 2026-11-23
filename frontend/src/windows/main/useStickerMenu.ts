@@ -1,3 +1,4 @@
+import { exportMenuItems, exportBusy, useExportStore } from "../../stores/export";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { Menu, type MenuOptions } from "@tauri-apps/api/menu";
 import { useEffect, useRef, useState } from "react";
@@ -24,8 +25,11 @@ export function useStickerMenu(actions: StickerActions) {
     try {
       await dispose();
       const targets = actions.targetsFor(sticker);
+      const exportItem = { text: targets.length > 1 ? `导出 ${targets.length} 张` : "导出",
+        enabled: !exportBusy(useExportStore.getState()), items: exportMenuItems({ stickers: targets.map(t => t.id) }) };
       const items: MenuOptions["items"] = targets.length > 1 ? (sticker.deletedAt === null ? [
         { id: "favorite-stickers", text: targets.every((item) => item.favorite) ? `取消收藏 ${targets.length} 张` : `收藏 ${targets.length} 张`, action: () => { void actions.setFavorites(targets, !targets.every((item) => item.favorite)); } },
+        exportItem,
         { item: "Separator" },
         { id: "delete-stickers", text: `删除 ${targets.length} 张`, action: () => { void actions.deleteStickers(targets); } },
       ] : [
@@ -36,6 +40,7 @@ export function useStickerMenu(actions: StickerActions) {
         { id: "copy-sticker", text: "复制", action: () => { void actions.copy(sticker); } },
         ...(platform === "windows" ? [{ id: "copy-sticker-file", text: "复制为文件", action: () => { void actions.copy(sticker, true); } }] : []),
         { id: "reveal-sticker", text: platform === "windows" ? "在资源管理器中显示" : "在访达中显示", action: () => { void actions.reveal(sticker); } },
+        exportItem,
         { item: "Separator" },
         { id: "delete-sticker", text: "删除", action: () => { void actions.deleteSticker(sticker); } },
       ] : [

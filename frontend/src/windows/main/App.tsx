@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import { SyncDetails } from "./SyncDetails";
+import { ExportBar } from "./ExportBar";
+import { useExportStore, useExportEvents } from "../../stores/export";
 import { ImportBar } from "./ImportBar";
 import { usePanelShortcut, usePanelShortcutEvents } from "../../lib/panelShortcut";
 import { ipc, type Sticker } from "../../lib/ipc";
@@ -26,6 +28,8 @@ import { useUpdate } from "./useUpdate";
 const NO_STICKERS: Sticker[] = [];
 
 export function App() {
+  useExportEvents();
+  const exportBatch = useExportStore(s => s.status?.batch ?? 0);
   const preferences = usePreferences();
   const sync = useSyncStatus();
   const update = useUpdate();
@@ -89,6 +93,7 @@ export function App() {
         <p className="px-6 py-2">{status}</p>
       </div>}
       <ImportBar key={importing.status?.batch ?? 0} status={importing.status} error={importing.error} clearError={importing.clearError} />
+      <ExportBar key={exportBatch} />
       <UndoBar actions={actions} />
       <UpdateBar status={update.status} onShow={update.showDialog} />
       {anchor && sync.data?.target && !preferences.open && <SyncDetails status={sync.data} anchor={anchor.button} above={anchor.above} onClose={closeSync} onSettings={() => { closeSync(); preferences.show(true); }} />}

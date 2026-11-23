@@ -21,6 +21,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "net"] }
 http = "1"
 httpdate = "1"
+time = "0.3"
 url = "2"
 futures-util = "0.3"
 percent-encoding = "2"
