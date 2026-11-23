@@ -76,6 +76,7 @@ pub struct StickerCursor {
 #[serde(rename_all = "camelCase")]
 pub enum StickerPageFilter {
     All,
+    Favorites,
     Uncategorized,
     Category(String),
 }
@@ -169,8 +170,9 @@ impl Library {
         limit: u32,
     ) -> Result<StickerPage> {
         let limit = limit.max(1) as usize;
-        let (category_filter, category_id) = match filter {
+        let (condition, category_id) = match filter {
             StickerPageFilter::All => ("", None),
+            StickerPageFilter::Favorites => ("AND favorite = 1", None),
             StickerPageFilter::Uncategorized => ("AND category_id IS NULL", None),
             StickerPageFilter::Category(id) => ("AND category_id = ?4", Some(id)),
         };
@@ -184,7 +186,7 @@ impl Library {
         // 多读一张来判断还有没有下一页；先在子查询里分页，使用次数等列只为这一页计算。
         let mut statement = self.conn.prepare(&format!(
             "SELECT {STICKER_COLUMNS} FROM stickers s WHERE s.id IN (
-                 SELECT id FROM stickers WHERE deleted_at IS NULL {category_filter}
+                 SELECT id FROM stickers WHERE deleted_at IS NULL {condition}
                      AND (?1 IS NULL OR added_at < ?1 OR (added_at = ?1 AND id < ?2))
                  ORDER BY added_at DESC, id DESC LIMIT ?3)
              ORDER BY s.added_at DESC, s.id DESC"
@@ -484,6 +486,55 @@ mod tests {
         let empty = StickerPageFilter::Category("missing".into());
         let page = library.list_stickers_page(&empty, None, 10).unwrap();
         assert!(page.stickers.is_empty());
+
+        let favorites = library
+            .list_stickers_page(&StickerPageFilter::Favorites, None, 10)
+            .unwrap();
+        assert!(favorites.stickers.is_empty());
+        assert!(favorites.next.is_none());
+    }
+
+    #[test]
+    fn favorite_pages_skip_deleted_and_keep_cursor_after_unfavorite() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        library.conn.execute_batch(
+            "INSERT INTO categories (id, name, color, position) VALUES ('work', '打工', '#3E7BFA', 0);
+             INSERT INTO stickers (id, hash, ext, name, width, height, byte_size, added_at, favorite, deleted_at, category_id) VALUES
+                ('a', 'h1', 'png', 'a', 1, 1, 1, 50, 1, NULL, 'work'),
+                ('b', 'h2', 'png', 'b', 1, 1, 1, 40, 0, NULL, NULL),
+                ('c', 'h3', 'png', 'c', 1, 1, 1, 30, 1, NULL, NULL),
+                ('d', 'h4', 'png', 'd', 1, 1, 1, 30, 1, NULL, NULL),
+                ('gone', 'h5', 'png', 'gone', 1, 1, 1, 25, 1, 60, NULL),
+                ('e', 'h6', 'png', 'e', 1, 1, 1, 10, 1, NULL, NULL);",
+        ).unwrap();
+        let filter = StickerPageFilter::Favorites;
+        let first = library.list_stickers_page(&filter, None, 2).unwrap();
+        let ids = |page: &StickerPage| {
+            page.stickers
+                .iter()
+                .map(|s| s.id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&first), ["a", "d"]);
+        assert_eq!(first.stickers[0].category.as_ref().unwrap().name, "打工");
+        let cursor = first.next.unwrap();
+
+        library
+            .conn
+            .execute("UPDATE stickers SET favorite = 0 WHERE id = 'd'", [])
+            .unwrap();
+        let second = library
+            .list_stickers_page(&filter, Some(&cursor), 2)
+            .unwrap();
+        assert_eq!(ids(&second), ["c", "e"]);
+        assert!(second.next.is_none());
+
+        let all = library.list_stickers_page(&filter, None, 10).unwrap();
+        assert_eq!(
+            all.stickers.len(),
+            library.overview().unwrap().favorites as usize
+        );
     }
 
     #[test]
