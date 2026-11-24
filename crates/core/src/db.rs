@@ -14,6 +14,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0005_sync_tree.sql"),
     include_str!("migrations/0006_drop_sync_deleted_objects.sql"),
     include_str!("migrations/0007_favorites_index.sql"),
+    include_str!("migrations/0008_page_indexes.sql"),
 ];
 const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
 
@@ -153,6 +154,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fav_count, 1);
+    }
+
+    #[test]
+    fn adds_page_indexes_on_upgrade_from_v7_without_changing_library_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..7] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 7).unwrap();
+        conn.execute_batch(
+            "INSERT INTO categories (id, name, color, position) VALUES ('cat', '猫', 'red', 0);
+             INSERT INTO stickers (id, hash, ext, name, category_id, width, height, byte_size, added_at, deleted_at) VALUES
+                ('a', 'h1', 'png', '分类', 'cat', 1, 1, 1, 10, NULL),
+                ('b', 'h2', 'png', '未分类', NULL, 1, 1, 1, 20, NULL),
+                ('c', 'h3', 'png', '已删', 'cat', 1, 1, 1, 30, 40);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open(&path, true).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
+        for name in [
+            "stickers_active_added_at",
+            "stickers_category_added_at",
+            "stickers_category",
+            "stickers_favorites_added_at",
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
+                    [name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(exists, "{name}");
+        }
+        let ids: Vec<String> = conn
+            .prepare(
+                "SELECT id FROM stickers WHERE deleted_at IS NULL ORDER BY added_at DESC, id DESC",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(ids, ["b", "a"]);
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM stickers", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, 3);
     }
 
     #[test]

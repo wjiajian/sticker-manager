@@ -219,12 +219,26 @@ pub struct MoveReport {
     leftovers: Vec<PathBuf>,
 }
 #[derive(Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct MoveStatus {
     running: bool,
     stage: Option<MoveStage>,
     progress: RelocateProgress,
     report: Option<MoveReport>,
     error: Option<String>,
+    /// 本次移动中被拦下的退出次数；前端据此提示并切到「仓库」分组。
+    quit_requests: u32,
+}
+impl MoveStatus {
+    /// 清掉上一轮已读的结果和错误；移动进行中不动。返回是否有改动。
+    fn clear_notice(&mut self) -> bool {
+        if self.running || (self.report.is_none() && self.error.is_none()) {
+            return false;
+        }
+        self.report = None;
+        self.error = None;
+        true
+    }
 }
 #[derive(Default)]
 pub struct MoveState {
@@ -244,6 +258,23 @@ impl MoveState {
 #[tauri::command]
 pub fn library_move_status(app: AppHandle) -> MoveStatus {
     app.state::<MoveState>().status.lock().unwrap().clone()
+}
+#[tauri::command]
+pub fn clear_library_move_notice(app: AppHandle) {
+    let state = app.state::<MoveState>();
+    let snapshot = {
+        let mut s = state.status.lock().unwrap();
+        if !s.clear_notice() {
+            return;
+        }
+        s.clone()
+    };
+    let _ = app.emit("library-move-status-changed", snapshot);
+}
+/// 移动中有人要退出：不退出，记一次并通知前端，由调用方打开偏好设置。
+pub fn quit_blocked(app: &AppHandle) {
+    app.state::<MoveState>()
+        .update(app, |s| s.quit_requests = s.quit_requests.saturating_add(1));
 }
 #[tauri::command]
 pub fn cancel_library_move(app: AppHandle) {
@@ -357,6 +388,7 @@ pub async fn move_library(app: AppHandle, path: PathBuf) -> Result<MoveReport, S
             ..Default::default()
         }
     });
+    crate::tray::set_quit_enabled(&app, false);
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || move_blocking(&handle, &path))
         .await
@@ -370,6 +402,7 @@ pub async fn move_library(app: AppHandle, path: PathBuf) -> Result<MoveReport, S
             Err(e) => s.error = Some(e.clone()),
         }
     });
+    crate::tray::set_quit_enabled(&app, true);
     result
 }
 
@@ -414,6 +447,32 @@ mod tests {
         }
         clear_pointer(&base).unwrap();
         assert_eq!(read_pointer(&base).unwrap(), None)
+    }
+    #[test]
+    fn clear_notice_only_when_idle() {
+        let report = MoveReport {
+            path: "new".into(),
+            previous: "old".into(),
+            leftovers: vec![],
+        };
+        let mut idle = MoveStatus {
+            report: Some(report.clone()),
+            error: Some("失败".into()),
+            ..Default::default()
+        };
+        assert!(idle.clear_notice());
+        assert!(idle.report.is_none() && idle.error.is_none());
+        assert!(!idle.clear_notice());
+        let mut running = MoveStatus {
+            running: true,
+            stage: Some(MoveStage::Copying),
+            report: Some(report),
+            error: Some("失败".into()),
+            ..Default::default()
+        };
+        assert!(!running.clear_notice());
+        assert!(running.report.is_some() && running.error.is_some());
+        assert!(running.stage == Some(MoveStage::Copying));
     }
     #[cfg(windows)]
     #[test]

@@ -14,6 +14,7 @@ import { useStatusEvent } from "../../lib/useStatusEvent";
 import { useLibraryOverview } from "../../lib/queries";
 import { startExport, exportBusy, useExportStore } from "../../stores/export";
 import { storageSize, syncTime } from "./useSyncStatus";
+import { ExportStatusContent } from "./ExportBar";
 
 type SectionId = "general" | "quick" | "sync" | "library" | "update";
 type BallSizeAction = { kind: "preview"; size: number | null } | { kind: "commit"; size: number };
@@ -43,6 +44,9 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
   useStatusEvent("library-move-status-changed", ipc.libraryMoveStatus, setMove, setError);
   const path = location?.path ?? "";
   const exporting = useExportStore(exportBusy);
+  const exportBatch = useExportStore(s => s.status?.batch ?? 0);
+  // 移动中从托盘、悬浮球菜单或 ⌘Q 退出会被拦下，这里切到「仓库」让用户看到进度和取消按钮。
+  const quitRequests = move?.running ? move.quitRequests : 0;
   const overview = useLibraryOverview();
   const shortcutRecording = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -86,20 +90,28 @@ export function PreferencesDialog({ onClose, sync, focusSync = false, update, on
       }
       element.close();
       void listening.then((cleanup) => cleanup(), () => {});
+      // 关闭即算已读：清掉上次移动的结果和错误，下次打开不再冒出来。移动中后端不会清。
+      void ipc.clearLibraryMoveNotice().catch(() => {});
     };
   }, []);
+  useEffect(() => { if (quitRequests > 0) select("library"); }, [quitRequests]);
 
   function moveLibrary(restore: boolean) {
     return change("move", async () => {
       const path = restore ? location?.defaultPath : await open({ title: "选择新的仓库位置", directory: true, multiple: false, canCreateDirectories: true });
       if (!path) return;
+      if (move?.report || move?.error) await ipc.clearLibraryMoveNotice();
       const target = await ipc.inspectLibraryTarget(path);
       if (await confirm(`仓库（${storageSize(target.bytes)}，${target.files} 个文件）会复制到：
 ${target.path}
 
-检查无误后会切换并删除原位置的仓库文件。期间同步会暂停，导入和导出不可用。请不要断开这个磁盘。`, {
+检查无误后会切换并删除原位置的仓库文件。期间同步会暂停，导入、导出和退出应用不可用。请不要断开这个磁盘。`, {
         title: restore ? "恢复默认位置" : "移动仓库", kind: "warning", okLabel: "移动", cancelLabel: "取消",
-      })) await ipc.moveLibrary(path);
+      })) await ipc.moveLibrary(path).catch(async (reason: unknown) => {
+        // 移动过程中的失败已记进移动状态，在「仓库」分组里显示；没开始就被拒（比如正在导入）才放到底部。
+        const current = await ipc.libraryMoveStatus().catch(() => null);
+        if (current?.error !== String(reason)) throw reason;
+      });
     });
   }
   function select(id: SectionId) {
@@ -338,6 +350,7 @@ ${target.path}
                 {location?.isCustom && <Button disabled={!!busy || move?.running || !location.canMove || exporting} onClick={() => void moveLibrary(true)}>恢复默认位置</Button>}
               </div>
               <p className="text-xs text-ink-secondary">{location?.cannotMoveReason ?? "请选择本机磁盘上的空文件夹，避免网盘同步文件夹和网络驱动器。移动时会复制全部表情和本机设置，检查无误后才切换，再删除原位置的仓库文件。"}</p>
+              {quitRequests > 0 && <p role="alert" className="text-xs text-accent">正在移动仓库，请等移动完成或取消后再退出。</p>}
               {move?.running && <div role="status" className="flex flex-wrap items-center gap-3 text-xs">
                 {move.stage === "preparing" && <span>正在等同步停下…</span>}
                 {move.stage === "switching" && <span>正在切换到新位置…</span>}
@@ -350,7 +363,7 @@ ${target.path}
               </div>}
               {move?.report && <p role="status" className="select-text text-xs">仓库已移到 {move.report.path}
                 {!!move.report.leftovers.length && <><br/>原位置还有 {move.report.leftovers.length} 项没能删除，可以手动删除：{move.report.previous}</>}</p>}
-              {move?.error && move.error !== error && <p role="alert" className="text-xs text-accent">{move.error}</p>}
+              {move?.error && <p role="alert" className="text-xs text-accent">{move.error}</p>}
             </Group>
             <Group title="导出仓库">
               <p className="text-xs text-ink-secondary">把全部表情按分类导出成图片文件。最近删除里的表情，以及配文、收藏和使用次数不会导出。</p>
@@ -358,6 +371,7 @@ ${target.path}
                 <Button key={format} disabled={!!busy || !overview.data?.all || exporting || move?.running} onClick={() => void startExport("library", format)}>
                   {format === "folder" ? "导出到文件夹…" : "导出为 .zip…"}
                 </Button>)}</div>
+              <ExportStatusContent key={exportBatch} inline />
             </Group>
           </Page>
           <Page {...page("update")}>

@@ -13,6 +13,8 @@ const STICKER_COLUMNS: &str = "s.id, s.name, s.width, s.height, s.byte_size, s.a
     COALESCE((SELECT SUM(u.count) FROM usages u WHERE u.sticker_id = s.id), 0),
     (SELECT MAX(u.last_used_at) FROM usages u WHERE u.sticker_id = s.id), s.caption,
     (SELECT COUNT(*) FROM usages u WHERE u.sticker_id = s.id AND u.count > 0)";
+/// 收藏分页的筛选条件；分页子查询据此指定收藏的部分索引。
+const FAVORITE_CONDITION: &str = "AND favorite = 1";
 
 /// 仓库：应用托管的、存放全部表情的唯一位置（ADR 0002）。
 ///
@@ -184,7 +186,7 @@ impl Library {
         let fetch = limit as i64 + 1;
         let (condition, category_id) = match (filter, after.is_some()) {
             (StickerPageFilter::All, _) => ("", None),
-            (StickerPageFilter::Favorites, _) => ("AND favorite = 1", None),
+            (StickerPageFilter::Favorites, _) => (FAVORITE_CONDITION, None),
             (StickerPageFilter::Uncategorized, _) => ("AND category_id IS NULL", None),
             (StickerPageFilter::Category(id), true) => ("AND category_id = ?4", Some(id)),
             (StickerPageFilter::Category(id), false) => ("AND category_id = ?2", Some(id)),
@@ -223,15 +225,21 @@ impl Library {
     }
 
     fn page_subquery(condition: &str, has_cursor: bool) -> String {
+        // 收藏也满足「全部表情」的部分索引；没有统计信息时 SQLite 会挑那个，收藏少时要扫大半个表，所以指定收藏索引。
+        let source = if condition == FAVORITE_CONDITION {
+            "stickers INDEXED BY stickers_favorites_added_at"
+        } else {
+            "stickers"
+        };
         if has_cursor {
             format!(
-                "SELECT id FROM stickers WHERE deleted_at IS NULL {condition}
+                "SELECT id FROM {source} WHERE deleted_at IS NULL {condition}
                      AND (added_at, id) < (?1, ?2)
                  ORDER BY added_at DESC, id DESC LIMIT ?3"
             )
         } else {
             format!(
-                "SELECT id FROM stickers WHERE deleted_at IS NULL {condition}
+                "SELECT id FROM {source} WHERE deleted_at IS NULL {condition}
                  ORDER BY added_at DESC, id DESC LIMIT ?1"
             )
         }
@@ -566,7 +574,7 @@ mod tests {
             .conn
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
-                Library::page_subquery("AND favorite = 1", false)
+                Library::page_subquery(FAVORITE_CONDITION, false)
             ))
             .unwrap()
             .query_map([3_i64], |row| row.get::<_, String>(3))
@@ -590,7 +598,7 @@ mod tests {
             .conn
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
-                Library::page_subquery("AND favorite = 1", true)
+                Library::page_subquery(FAVORITE_CONDITION, true)
             ))
             .unwrap()
             .query_map(rusqlite::params![30_i64, "d", 3_i64], |row| {
@@ -612,6 +620,82 @@ mod tests {
                 .all(|detail| !detail.contains("TEMP B-TREE")),
             "expected no temp B-tree sort on next page, got: {next_page_plan:?}"
         );
+    }
+
+    #[test]
+    fn all_and_category_pages_use_partial_indexes_without_sorting() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let plan = |condition: &str, cursor: bool, parameters: &[&dyn ToSql]| {
+            library
+                .conn
+                .prepare(&format!(
+                    "EXPLAIN QUERY PLAN {}",
+                    Library::page_subquery(condition, cursor)
+                ))
+                .unwrap()
+                .query_map(parameters, |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let fetch = 3_i64;
+        let (added_at, id, category) = (30_i64, "d", "work");
+        for (name, condition, first, next, index) in [
+            (
+                "All",
+                "",
+                vec![&fetch as &dyn ToSql],
+                vec![&added_at as &dyn ToSql, &id, &fetch],
+                "stickers_active_added_at",
+            ),
+            (
+                "Uncategorized",
+                "AND category_id IS NULL",
+                vec![&fetch as &dyn ToSql],
+                vec![&added_at as &dyn ToSql, &id, &fetch],
+                "stickers_category_added_at",
+            ),
+            (
+                "Category",
+                "AND category_id = ?2",
+                vec![&fetch as &dyn ToSql, &category],
+                vec![],
+                "stickers_category_added_at",
+            ),
+            (
+                "Category next",
+                "AND category_id = ?4",
+                vec![],
+                vec![&added_at as &dyn ToSql, &id, &fetch, &category],
+                "stickers_category_added_at",
+            ),
+        ] {
+            for (cursor, parameters) in [(false, first), (true, next)] {
+                if parameters.is_empty() {
+                    continue;
+                }
+                let details = plan(condition, cursor, &parameters);
+                let label = if cursor { "next page" } else { "first page" };
+                assert!(
+                    details
+                        .iter()
+                        .any(|d| d.contains(&format!("USING INDEX {index}"))
+                            && (d.starts_with("SEARCH") || d.starts_with("SCAN"))),
+                    "{name} {label} should use {index}, got: {details:?}"
+                );
+                if cursor {
+                    assert!(
+                        details.iter().any(|d| d.starts_with("SEARCH")),
+                        "{name} {label} should seek by cursor, got: {details:?}"
+                    );
+                }
+                assert!(
+                    details.iter().all(|d| !d.contains("TEMP B-TREE")),
+                    "{name} {label} should not sort, got: {details:?}"
+                );
+            }
+        }
     }
 
     #[test]
