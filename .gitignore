@@ -10,3 +10,11 @@ src-tauri/gen/schemas/
 .codex/
 .copilot/
 .pi/
+
+# Promo video workspace, renders, and caches
+.cache/
+promo-video/
+*.mp4
+*.mov
+*.mkv
+!docs/images/homepage.mp4
