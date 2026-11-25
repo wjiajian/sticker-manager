@@ -105,22 +105,23 @@ async function stop() {
 const invoke = (client, command, args = {}) => client.evaluate(
   `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(args)})`,
 );
+const slider = "dialog[open] [data-section=ball]:not([hidden]) input[type=range]";
 const saved = async () => JSON.parse(await readFile(join(library, "local/settings.json"), "utf8"));
 const state = () => invoke(ball, "ball_state");
 async function sizeIs(size) {
   await until(async () => (await state()).size === size, `native ball size ${size}`);
   await until(async () => (await saved()).ballSize === size, `saved size ${size}`);
   await until(() => ball.evaluate(`document.querySelector('button')?.style.width === '${size}px'`), `rendered size ${size}`);
-  await until(() => main.evaluate(`!document.querySelector('dialog[open]') || document.querySelector('dialog[open] [role=tabpanel]:not([hidden]) input[type=range]')?.value === '${size}'`), "size readout updated");
+  await until(() => main.evaluate(`!document.querySelector('dialog[open]') || document.querySelector('${slider}')?.value === '${size}'`), "size readout updated");
 }
 async function preferences() {
   await main.evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '偏好设置').click()");
   await until(() => main.evaluate("!!document.querySelector('dialog[open]')"), "preferences open");
-  await main.evaluate("[...document.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() === '悬浮球与面板').click()");
-  await until(() => main.evaluate("!!document.querySelector('dialog[open] [role=tabpanel]:not([hidden]) input[type=range]:not(:disabled)')"), "size slider enabled");
+  await until(() => main.evaluate(`!!document.querySelector('${slider}:not(:disabled)')`), "size slider enabled");
+  await main.evaluate(`document.querySelector('${slider}').scrollIntoView({ block: "center", behavior: "instant" })`);
 }
 async function dragToMaximum() {
-  const rect = await main.evaluate("(() => { const r = document.querySelector('dialog[open] [role=tabpanel]:not([hidden]) input[type=range]').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()");
+  const rect = await main.evaluate(`(() => { const r = document.querySelector('${slider}').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
   const x = rect.x + rect.width / 2;
   const y = rect.y + rect.height / 2;
   await main.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
@@ -132,7 +133,7 @@ const release = ({ x, y }) => main.send("Input.dispatchMouseEvent", { type: "mou
 const key = (type, key, code) => main.send("Input.dispatchKeyEvent", { type, key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
 
 async function rapidAdjustments(cancelSecond) {
-  await main.evaluate("[...document.querySelectorAll('dialog[open] button')].find(b => b.textContent.trim() === '完成')?.click()");
+  await main.evaluate("document.querySelector('dialog[open] button[aria-label=关闭偏好设置]')?.click()");
   await until(() => main.evaluate("!document.querySelector('dialog[open]')"), "previous preferences closed");
   await invoke(main, "set_ball_size", { size: 56 });
   await sizeIs(56);
@@ -156,7 +157,7 @@ async function rapidAdjustments(cancelSecond) {
     };
   })()`);
   try {
-    const rect = await main.evaluate("(() => { const r = document.querySelector('dialog[open] [role=tabpanel]:not([hidden]) input[type=range]').getBoundingClientRect(); return { left: r.x + 2, right: r.right - 2, y: r.y + r.height / 2 }; })()");
+    const rect = await main.evaluate(`(() => { const r = document.querySelector('${slider}').getBoundingClientRect(); return { left: r.x + 2, right: r.right - 2, y: r.y + r.height / 2 }; })()`);
     const mouse = (type, x, buttons) => main.send("Input.dispatchMouseEvent", {
       type, x, y: rect.y, button: "left", buttons, clickCount: 1,
     });
@@ -197,13 +198,13 @@ try {
   await release(position); // outside the slider
   await sizeIs(80);
 
-  await main.evaluate("document.querySelector('dialog[open] [role=tabpanel]:not([hidden]) input[type=range]').focus()");
+  await main.evaluate(`document.querySelector('${slider}').focus()`);
   await key("keyDown", "Home", 36);
   await until(async () => (await state()).size === 40, "keyboard preview");
   assert.equal((await saved()).ballSize, 80, "held key must not persist");
   await key("keyUp", "Home", 36);
   await sizeIs(40);
-  await main.evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '恢复默认').click()");
+  await main.evaluate("[...document.querySelectorAll('dialog[open] [data-section=ball] button')].find(b => b.textContent.trim() === '恢复默认').click()");
   await sizeIs(56);
 
   position = await dragToMaximum();
@@ -227,7 +228,26 @@ try {
   await stop();
   await start();
   await sizeIs(80);
-  await writeFile(join(artifacts, "result.json"), JSON.stringify({ passed: true, savedSize: 80, rapidCommit: true, rapidCancel: true, library }, null, 2));
+  await preferences();
+  await main.evaluate("document.querySelector('[data-nav=ball]').click()");
+  await until(() => main.evaluate("document.querySelector('[data-nav=ball]').getAttribute('aria-current') === 'location'"), "ball anchor selected");
+  assert.ok(await main.evaluate(`(() => {
+    const dialog = document.querySelector('dialog[open]');
+    const header = dialog.querySelector('header').getBoundingClientRect();
+    return header.top >= dialog.getBoundingClientRect().top && dialog.scrollTop === 0;
+  })()`), "anchor navigation keeps the toolbar visible");
+  await main.evaluate(`window.originalSlider = document.querySelector('${slider}'); document.querySelector('dialog input[type=search]').focus()`);
+  await main.send("Input.insertText", { text: "zzz" });
+  await until(() => main.evaluate("document.querySelectorAll('dialog[open] [data-section]:not([hidden])').length === 0 && [...document.querySelectorAll('dialog button')].some(b => b.textContent === '清空搜索' && b.offsetWidth)"), "empty search results");
+  await main.evaluate("document.querySelector('dialog button[aria-label=清空搜索]').click()");
+  await until(() => main.evaluate(`document.querySelector('${slider}') === window.originalSlider`), "slider remains mounted");
+  await main.evaluate(`document.querySelector('${slider}').focus()`);
+  await key("keyDown", "Home", 36);
+  await until(async () => (await state()).size === 40, "held keyboard preview before close");
+  await main.evaluate("document.querySelector('dialog button[aria-label=关闭偏好设置]').click()");
+  await key("keyUp", "Home", 36);
+  await sizeIs(40);
+  await writeFile(join(artifacts, "result.json"), JSON.stringify({ passed: true, savedSize: 40, rapidCommit: true, rapidCancel: true, library }, null, 2));
   console.log("Native WebView2 preview, save, keyboard, reset, Escape, rapid gestures, and restart checks passed.");
 } catch (error) {
   await writeFile(join(artifacts, "failure.txt"), String(error.stack ?? error));

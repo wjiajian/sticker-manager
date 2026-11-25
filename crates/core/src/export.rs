@@ -486,7 +486,9 @@ fn write(
     })();
     let keep = result.is_ok() && !report.cancelled && report.exported > 0;
     match output {
-        Output::Folder(folder) if keep => report.output = Some(folder.root),
+        Output::Folder(folder) if keep => {
+            report.output = Some(crate::relocate::display_path(&folder.root))
+        }
         Output::Folder(folder) if result.is_err() => {
             let _ = fs::remove_dir_all(folder.root);
         }

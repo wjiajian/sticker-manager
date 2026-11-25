@@ -65,6 +65,10 @@ fn folder_and_zip_roundtrip_originals_and_categories() {
         let r = lib.export(&request(tmp.path(), fmt)).unwrap();
         assert_eq!(r.exported, 3);
         let output = r.output.unwrap();
+        // Windows 上文件夹和压缩包都返回不带 \\?\ 前缀的路径，界面显示一致。
+        assert_eq!(output, crate::relocate::display_path(&output));
+        #[cfg(windows)]
+        assert!(!output.to_string_lossy().starts_with(r"\\?\"));
         if fmt == ExportFormat::Folder {
             assert!(output.ends_with("仓库 (2)"));
             assert!(output.join("猫__/同名 (2).png").is_file());

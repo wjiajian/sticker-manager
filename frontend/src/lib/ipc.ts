@@ -130,6 +130,7 @@ export const ipc = {
   moveLibrary: (path: string) => invoke<MoveReport>("move_library", { path }),
   libraryMoveStatus: () => invoke<MoveStatus>("library_move_status"),
   cancelLibraryMove: () => invoke<void>("cancel_library_move"),
+  clearLibraryMoveNotice: () => invoke<void>("clear_library_move_notice"),
   exportStickers: (scope: ExportScope, format: ExportFormat, destination: string, name: string) =>
     invoke<ExportReport>("export_stickers", { scope, format, destination, name, utcOffsetMinutes: -new Date().getTimezoneOffset() }),
   exportStatus: () => invoke<ExportStatus>("export_status"),
@@ -284,4 +285,6 @@ export interface MoveReport { path: string; previous: string; leftovers: string[
 export interface MoveStatus {
   running: boolean; stage: "preparing" | "copying" | "switching" | "cleaning" | null;
   progress: { copied: number; total: number; bytes: number; totalBytes: number }; report: MoveReport | null; error: string | null;
+  /** 本次移动中被拦下的退出次数。 */
+  quitRequests: number;
 }

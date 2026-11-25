@@ -1,3 +1,4 @@
+import { BallFace } from "../../components/BallFace";
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -59,7 +60,6 @@ export function Ball() {
   if (!state) return error ? <p role="alert" className="bg-surface p-2 text-xs text-accent">{error}</p> : null;
   const dropping = !!state.dropLabel;
   const size = dropping ? state.dropSize : state.size;
-  const padding = Math.max(3, Math.round(size * 0.08));
   const ringSize = size + 12;
   const ringCenter = ringSize / 2;
   const ringRadius = ringCenter - 1.5;
@@ -71,32 +71,16 @@ export function Ball() {
   return <main aria-label="悬浮球" className="relative h-full w-full overflow-hidden">
     <button type="button" tabIndex={-1} aria-label={state.panelVisible ? "收起表情面板" : "展开表情面板"} aria-expanded={state.panelVisible}
       className="interactive absolute touch-none rounded-full outline-none"
-      style={{ left: state.center.x - size / 2, top: state.center.y - size / 2, width: size, height: size, padding,
-        opacity: state.collapsed ? 0.7 : 1, backgroundImage: "linear-gradient(to bottom, var(--color-surface), color-mix(in srgb, var(--color-surface) 90%, var(--color-line)))", transform: `scale(${state.pressed ? 0.96 : state.hovered && !dropping ? 1.1 : 1})`,
-        boxShadow: `var(--shadow-ball)${state.panelVisible ? ", inset 0 0 0 3px var(--color-accent)" : ""}`, cursor: state.dragging ? "grabbing" : "pointer" }}
+      style={{ left: state.center.x - size / 2, top: state.center.y - size / 2, width: size, height: size,
+        opacity: state.collapsed ? 0.7 : 1, transform: `scale(${state.pressed ? 0.96 : state.hovered && !dropping ? 1.1 : 1})`,
+        cursor: state.dragging ? "grabbing" : "pointer" }}
       onPointerDown={(event) => {
         event.preventDefault();
         // macOS 上 Control+单击是右键菜单，只交给 onContextMenu。
         if (event.button === 0 && !(platform === "macos" && event.ctrlKey)) void run(ipc.ballPointerDown);
       }}
       onContextMenu={(event) => { event.preventDefault(); void run(ipc.showBallMenu); }}>
-      <svg viewBox="5.5 7.5 53 53" className="block h-full w-full" aria-hidden>
-        <defs>
-          <radialGradient id="ball-body" cx="36%" cy="28%" r="80%">
-            <stop offset="0" style={{ stopColor: "color-mix(in srgb, var(--color-brand) 65%, white)" }} />
-            <stop offset="0.5" style={{ stopColor: "var(--color-brand)" }} />
-            <stop offset="1" style={{ stopColor: "color-mix(in srgb, var(--color-brand) 80%, #d97706)" }} />
-          </radialGradient>
-          <linearGradient id="ball-gloss" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#fff" stopOpacity="0.55" />
-            <stop offset="1" stopColor="#fff" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <circle cx="32" cy="34" r="24" fill="url(#ball-body)" stroke="var(--color-brand-ink)" strokeWidth="2.5" />
-        <ellipse cx="32" cy="20.5" rx="15" ry="7.5" fill="url(#ball-gloss)" />
-        <path d={eyes} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3" strokeLinecap="round" />
-        <path d={mouth} fill="none" stroke="var(--color-brand-ink)" strokeWidth="3" strokeLinecap="round" />
-      </svg>
+      <BallFace size={size} eyes={eyes} mouth={mouth} panelVisible={state.panelVisible} />
       {dropping && <span aria-hidden className="pointer-events-none absolute -inset-3 rounded-full border-2 border-dashed border-accent" />}
     </button>
     {ring && <svg aria-hidden viewBox={`0 0 ${ringSize} ${ringSize}`} className="pointer-events-none absolute transition-opacity duration-300" style={{ left: state.center.x - ringCenter, top: state.center.y - ringCenter, width: ringSize, height: ringSize, opacity: sync?.progress ? 1 : 0 }}>

@@ -105,16 +105,15 @@ const invoke = (client, command, args = {}) => client.evaluate(
 const saved = async () => JSON.parse(await readFile(join(library, "local/settings.json"), "utf8"));
 
 const state = () => invoke(main, "panel_shortcut_state");
-const recorder = "[...document.querySelectorAll('dialog[open] button')].find(b => b.querySelector('kbd'))";
+const recorder = "[...document.querySelectorAll('dialog[open] [data-section=panel] button')].find(b => b.querySelector('kbd'))";
 const clickText = (text) => main.evaluate(`(() => {
-  const button = [...document.querySelectorAll('dialog[open] button')].find(b => b.textContent.trim() === ${JSON.stringify(text)});
+  const button = [...document.querySelectorAll('dialog[open] [data-section=panel] button')].find(b => b.textContent.trim() === ${JSON.stringify(text)});
   if (!button) throw new Error('Button not found: ' + ${JSON.stringify(text)});
   button.click();
 })()`);
 async function preferences() {
   await main.evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '偏好设置').click()");
   await until(() => main.evaluate("!!document.querySelector('dialog[open]')"), "preferences open");
-  await main.evaluate("[...document.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() === '悬浮球与面板').click()");
   await until(() => main.evaluate(`!!(${recorder}) && !(${recorder}).disabled`), "recorder enabled");
 }
 async function begin() {
@@ -166,12 +165,14 @@ try {
   // Native success emits before the IPC Promise settles. UI must stay saving.
   await begin();
   await main.evaluate(`(() => {
-    const original = window.__TAURI_INTERNALS__.invoke;
-    window.shortcutTest = { release: null, restore: () => { window.__TAURI_INTERNALS__.invoke = original; } };
-    window.__TAURI_INTERNALS__.invoke = async function(command, args, ...rest) {
-      const result = await original.call(this, command, args, ...rest);
-      if (command === 'set_panel_shortcut') await new Promise(resolve => { window.shortcutTest.release = resolve; });
-      return result;
+    const original = window.fetch;
+    window.shortcutTest = { release: null, restore: () => { window.fetch = original; } };
+    window.fetch = async function(input, options) {
+      const response = await original.call(this, input, options);
+      if (new URL(String(input)).pathname === '/set_panel_shortcut') {
+        await new Promise(resolve => { window.shortcutTest.release = resolve; });
+      }
+      return response;
     };
   })()`);
   await chord("KeyJ", 74);

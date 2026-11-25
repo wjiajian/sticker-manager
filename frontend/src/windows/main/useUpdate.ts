@@ -19,7 +19,7 @@ export function useUpdate() {
     void open.then(() => ipc.takeUpdateRequest()).then((pending) => { if (!disposed && pending) setDialogOpen(true); }).catch(() => {});
     return () => { disposed = true; for (const listener of [changed, open]) void listener.then((unlisten) => unlisten(), () => {}); };
   }, [client]);
-  return { status: status.data, dialogOpen, showDialog: () => setDialogOpen(true), closeDialog: () => setDialogOpen(false) };
+  return { status: status.data, error: status.error, dialogOpen, showDialog: () => setDialogOpen(true), closeDialog: () => setDialogOpen(false) };
 }
 
 /** WebKit 点按钮不会聚焦它；先聚焦，关掉更新对话框后焦点才回到这个按钮，而不是落在外层对话框上。 */

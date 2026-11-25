@@ -190,6 +190,7 @@ pub fn run() {
             location::move_library,
             location::library_move_status,
             location::cancel_library_move,
+            location::clear_library_move_notice,
             settings::open_library_directory,
             tray::take_preferences_request,
             tray::show_ball_menu,

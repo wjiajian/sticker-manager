@@ -70,6 +70,11 @@ export function useCategoryReorder(list: CategorySummary[] | undefined, disabled
     setDraggingId(null);
     setIndicatorTop(null);
   }
+  // 取消的拖动后面不会有要拦的点击，复位，免得吞掉下一次正常点击。
+  function cancelGesture() {
+    suppress.current = false;
+    finish();
+  }
 
   function measure(g: Gesture) {
     const section = g.row.closest("section");
@@ -96,7 +101,7 @@ export function useCategoryReorder(list: CategorySummary[] | undefined, disabled
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      finish();
+      cancelGesture();
     }
     window.addEventListener("keydown", cancel, true);
     let frame = 0;
@@ -125,15 +130,16 @@ export function useCategoryReorder(list: CategorySummary[] | undefined, disabled
     return {
       "data-category-row": id,
       onPointerDown(event: PointerEvent<HTMLElement>) {
-        if (disabled || locked.current || (list?.length ?? 0) < 2 || event.button !== 0 || !event.isPrimary) return;
+        if (event.button !== 0 || !event.isPrimary) return;
         suppress.current = false;
+        if (disabled || locked.current || (list?.length ?? 0) < 2) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         gesture.current = { row: event.currentTarget, pointer: event.pointerId, x: event.clientX, startY: event.clientY, y: event.clientY, active: false, before: id };
       },
       onPointerMove(event: PointerEvent<HTMLElement>) {
         const g = gesture.current;
         if (!g || g.pointer !== event.pointerId) return;
-        if (!(event.buttons & 1)) { finish(); return; }
+        if (!(event.buttons & 1)) { cancelGesture(); return; }
         g.y = event.clientY;
         if (!g.active) {
           if (Math.hypot(event.clientX - g.x, g.y - g.startY) <= 5) return;
@@ -150,11 +156,14 @@ export function useCategoryReorder(list: CategorySummary[] | undefined, disabled
           g.y = event.clientY;
           measure(g);
           if (g.before !== id) void move(id, g.before);
+          // 保留拦截，挡住紧跟的合成点击；在行外松手不会有点击，下个宏任务兜底复位。
+          setTimeout(() => { suppress.current = false; }, 0);
         }
         finish();
       },
-      onPointerCancel(event: PointerEvent<HTMLElement>) { if (gesture.current?.pointer === event.pointerId) finish(); },
-      onLostPointerCapture(event: PointerEvent<HTMLElement>) { if (gesture.current?.pointer === event.pointerId) finish(); },
+      onPointerCancel(event: PointerEvent<HTMLElement>) { if (gesture.current?.pointer === event.pointerId) cancelGesture(); },
+      // 正常松手时 finish 先清掉 gesture 再释放捕获，这里不会误清拦截。
+      onLostPointerCapture(event: PointerEvent<HTMLElement>) { if (gesture.current?.pointer === event.pointerId) cancelGesture(); },
       onClickCapture(event: MouseEvent<HTMLElement>) {
         if (!suppress.current || !event.detail) return;
         event.preventDefault();

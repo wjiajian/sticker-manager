@@ -24,6 +24,8 @@ pub struct TrayState {
     preferences_pending: AtomicBool,
     sync_pending: AtomicBool,
     sync_item: MenuItem<tauri::Wry>,
+    /// 托盘与悬浮球菜单共用的「退出」；移动仓库期间置灰。
+    quit_item: MenuItem<tauri::Wry>,
 }
 
 pub fn create(app: &tauri::App) -> tauri::Result<()> {
@@ -115,6 +117,7 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
         preferences_pending: AtomicBool::new(false),
         sync_pending: AtomicBool::new(false),
         sync_item,
+        quit_item: quit,
     });
     app.on_menu_event(|app, event| dispatch(app, event.id.as_ref()));
     Ok(())
@@ -159,6 +162,11 @@ fn dispatch(app: &AppHandle, id: &str) {
             )
             .map(|_| ()),
             "entry-hide-ball" => settings::set_ball_visible(handle.clone(), false).map(|_| ()),
+            // 菜单项移动期间已置灰；这里再兜底一次，挡住竞态和 macOS 的 ⌘Q。
+            "entry-quit" if handle.state::<crate::jobs::LibraryJobs>().moving() => {
+                crate::location::quit_blocked(&handle);
+                open_preferences(&handle)
+            }
             "entry-quit" => {
                 handle.exit(0);
                 Ok(())
@@ -177,6 +185,20 @@ fn dispatch(app: &AppHandle, id: &str) {
     });
     if let Err(error) = result {
         eprintln!("菜单操作失败：{error}");
+    }
+}
+/// 放到主线程异步执行，调用方不必等菜单更新。
+pub fn set_quit_enabled(app: &AppHandle, enabled: bool) {
+    let handle = app.clone();
+    let result = app.run_on_main_thread(move || {
+        if let Some(tray) = handle.try_state::<TrayState>()
+            && let Err(error) = tray.quit_item.set_enabled(enabled)
+        {
+            eprintln!("更新退出菜单失败：{error}");
+        }
+    });
+    if let Err(error) = result {
+        eprintln!("更新退出菜单失败：{error}");
     }
 }
 pub fn sync_menu_changed(app: &AppHandle) {

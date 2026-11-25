@@ -6,7 +6,7 @@ commands.allow = [
   "sync_status", "sync_now", "inspect_sync_folder", "join_sync_folder", "stop_sync", "set_device_name",
   "inspect_network_target", "join_network_target", "cancel_sync_connection", "update_sync_credentials",
   "get_settings", "set_appearance", "set_ball_visible", "set_ball_auto_hide", "set_ball_size", "preview_ball_size", "set_sticker_tile_size", "get_autostart", "set_autostart",
-  "export_stickers", "export_status", "cancel_export", "reveal_export", "library_location", "inspect_library_target", "move_library", "library_move_status", "cancel_library_move", "open_library_directory", "take_preferences_request",
+  "export_stickers", "export_status", "cancel_export", "reveal_export", "library_location", "inspect_library_target", "move_library", "library_move_status", "cancel_library_move", "clear_library_move_notice", "open_library_directory", "take_preferences_request",
   "library_overview", "list_stickers", "search_stickers", "sticker", "categories",
   "delete_sticker", "restore_sticker", "delete_stickers", "restore_stickers", "purge_sticker", "purge_deleted_stickers", "create_category", "rename_category",
   "set_category_color", "delete_category", "move_category", "set_sticker_category", "set_sticker_name",

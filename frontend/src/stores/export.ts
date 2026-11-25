@@ -3,11 +3,24 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { ipc, type ExportFormat, type ExportScope, type ExportStatus } from "../lib/ipc";
 import { useStatusEvent } from "../lib/useStatusEvent";
 
-export const useExportStore = create<{ status: ExportStatus | null; choosing: boolean; error: string | null }>(() => ({
-  status: null, choosing: false, error: null,
+export const useExportStore = create<{
+  status: ExportStatus | null; choosing: boolean; error: string | null;
+  /** 用户关掉的那一批导出；新批次的编号更大，会重新显示。 */
+  dismissedBatch: number | null;
+}>(() => ({
+  status: null, choosing: false, error: null, dismissedBatch: null,
 }));
 const receive = (status: ExportStatus) => useExportStore.setState({ status });
 export const exportError = (error: string | null) => useExportStore.setState({ error });
+/** 收起当前这批的结果和错误；导出结果条和偏好设置共用，一处关闭两处都不再显示。 */
+export function dismissExport() {
+  const { status } = useExportStore.getState();
+  useExportStore.setState({ dismissedBatch: status?.batch ?? 0, error: null });
+}
+/** 进行中的导出总要显示；前端自己的错误（如选错位置）不受收起影响。 */
+export function exportDismissed(state: ReturnType<typeof useExportStore.getState>) {
+  return !state.status?.running && state.dismissedBatch !== null && state.dismissedBatch === (state.status?.batch ?? 0);
+}
 export function useExportEvents() {
   useStatusEvent("export-status-changed", ipc.exportStatus, receive, exportError);
 }
