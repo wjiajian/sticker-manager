@@ -34,6 +34,8 @@ mod sync;
 mod tray;
 mod updater;
 #[cfg(target_os = "windows")]
+mod windows_drag;
+#[cfg(target_os = "windows")]
 mod windows_drop;
 
 pub fn run() {
@@ -114,7 +116,15 @@ pub fn run() {
             ));
             // WebView2 可在 setup 结束前发出查询，先登记同步状态。
             #[cfg(target_os = "windows")]
-            sync::start(app.handle().clone());
+            {
+                match windows_drag::DragHost::new() {
+                    Ok(host) => {
+                        app.manage(host);
+                    }
+                    Err(error) => eprintln!("初始化 Windows 拖拽宿主失败：{error}"),
+                }
+                sync::start(app.handle().clone());
+            }
             panel::create(app)?;
             preview::create(app)?;
             shortcut::init(app.handle());
@@ -161,6 +171,7 @@ pub fn run() {
             commands::create_category_and_set_stickers,
             commands::copy_sticker,
             commands::prepare_sticker_drag,
+            commands::start_sticker_drag,
             commands::record_sticker_usage,
             commands::toggle_sticker_favorite,
             commands::set_stickers_favorite,
@@ -393,6 +404,17 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
         None => builder,
     };
 
-    builder.build()?;
+    #[cfg(target_os = "windows")]
+    let builder = builder.disable_drag_drop_handler();
+
+    let window = builder.build()?;
+
+    #[cfg(target_os = "windows")]
+    if let Err(error) = windows_drop::install_webview(&window) {
+        eprintln!("主窗口拖放处理器安装失败：{error}");
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+
     Ok(())
 }

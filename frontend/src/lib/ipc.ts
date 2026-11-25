@@ -184,6 +184,7 @@ export const ipc = {
   importStickers: (paths: string[]) => invoke<ImportReport>("import_stickers", { paths }),
   copySticker: (id: string, fileOnly: boolean) => invoke<void>("copy_sticker", { id, fileOnly }),
   prepareStickerDrag: (id: string, scale: number) => invoke<PreparedDrag>("prepare_sticker_drag", { id, scale }),
+  startStickerDrag: (path: string, iconPath: string) => invoke<boolean>("start_sticker_drag", { path, iconPath }),
   recordStickerUsage: (id: string) => invoke<void>("record_sticker_usage", { id }),
   toggleStickerFavorite: (id: string) => invoke<boolean>("toggle_sticker_favorite", { id }),
   setStickersFavorite: (ids: string[], favorite: boolean) => invoke<number>("set_stickers_favorite", { ids, favorite }),
