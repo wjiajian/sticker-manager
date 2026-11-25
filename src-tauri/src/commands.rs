@@ -316,6 +316,26 @@ pub async fn prepare_sticker_drag(
 }
 
 #[tauri::command]
+pub async fn start_sticker_drag(
+    app: AppHandle,
+    path: PathBuf,
+    icon_path: PathBuf,
+) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let host = app
+            .try_state::<crate::windows_drag::DragHost>()
+            .ok_or_else(|| "Windows 拖拽宿主未初始化".to_string())?;
+        host.start_drag(path, icon_path).await
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, path, icon_path);
+        Err("当前平台不支持 Windows 原生拖拽命令".into())
+    }
+}
+
+#[tauri::command]
 pub async fn record_sticker_usage(app: AppHandle, id: String) -> CommandResult<()> {
     with_library(app, move |library| {
         library.record_usage(&id).map_err(CommandError::Usage)

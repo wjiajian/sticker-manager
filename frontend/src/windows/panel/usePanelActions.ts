@@ -1,8 +1,8 @@
-import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { sameExport } from "../../lib/exportPath";
 import { ipc, type Sticker } from "../../lib/ipc";
+import { startFileDrag } from "../../lib/startFileDrag";
 
 export function usePanelActions() {
   const working = useRef(false);
@@ -52,11 +52,7 @@ export function usePanelActions() {
         // 原生拖拽会临时失焦，等系统返回结果再决定是否收起。
         await ipc.setPanelDragging(true);
         if (!isPressed()) return;
-        const dropped = await new Promise<boolean>((resolve, reject) => {
-          void startDrag({ item: [file.path], icon: file.iconPath, mode: "copy" }, (event) => {
-            resolve(event.result === "Dropped");
-          }).catch(reject);
-        });
+        const dropped = await startFileDrag(file.path, file.iconPath);
         if (dropped && !droppedHere) {
           // WebView 的放下事件可能晚于原生回调，与主窗口的拖回判定等待相同。
           await new Promise<void>((resolve) => {

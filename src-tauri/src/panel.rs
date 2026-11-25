@@ -396,7 +396,15 @@ mod native {
             Some(root) => builder.data_directory(root.join("webview")),
             None => builder,
         };
-        builder.build()?;
+        #[cfg(target_os = "windows")]
+        let builder = builder.disable_drag_drop_handler();
+        let window = builder.build()?;
+        #[cfg(target_os = "windows")]
+        if let Err(error) = crate::windows_drop::install_webview(&window) {
+            eprintln!("表情面板拖放处理器安装失败：{error}");
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = window;
         Ok(())
     }
     pub fn center_at_pointer(app: &AppHandle) -> Result<(), String> {

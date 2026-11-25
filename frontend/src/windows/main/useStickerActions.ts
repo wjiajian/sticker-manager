@@ -1,4 +1,3 @@
-import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { useQueryClient } from "@tanstack/react-query";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
@@ -6,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc, type CategorySummary, type Sticker } from "../../lib/ipc";
 import { platform } from "../../lib/platform";
 import { sameExport } from "../../lib/exportPath";
+import { startFileDrag } from "../../lib/startFileDrag";
 import { useSticker } from "../../lib/queries";
 import { useUiStore } from "../../stores/ui";
 import { useStickerDragStore, type StickerDropTarget } from "../../stores/stickerDrag";
@@ -274,11 +274,7 @@ export function useStickerActions(stickers: Sticker[]) {
       outgoing.current = current;
       let dropped = false;
       try {
-        dropped = await new Promise<boolean>((resolve, reject) => {
-          void startDrag({ item: [file.path], icon: file.iconPath, mode: "copy" }, (event) => {
-            resolve(event.result === "Dropped");
-          }).catch(reject);
-        });
+        dropped = await startFileDrag(file.path, file.iconPath);
       } finally {
         useStickerDragStore.getState().clear();
         current.ended = true;

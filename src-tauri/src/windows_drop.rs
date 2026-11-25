@@ -1,14 +1,17 @@
 //! Windows 聊天软件可能交出虚拟文件或图片数据，而不是磁盘路径。
+use serde::Serialize;
 use std::{cell::Cell, ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, EventTarget, Manager};
 use windows::{
     Win32::{
-        Foundation::{E_FAIL, HANDLE, HWND, LPARAM, POINTL, S_OK},
+        Foundation::{E_FAIL, HANDLE, HWND, LPARAM, POINT, POINTL, S_OK},
+        Graphics::Gdi::ScreenToClient,
         System::{
             Com::{
-                COINIT_MULTITHREADED, COWAIT_DISPATCH_CALLS, COWAIT_DISPATCH_WINDOW_MESSAGES,
-                CoInitializeEx, CoUninitialize, CoWaitForMultipleHandles, DVASPECT_CONTENT,
-                FORMATETC, IDataObject, STGMEDIUM, TYMED_HGLOBAL, TYMED_ISTREAM,
+                CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, COWAIT_DISPATCH_CALLS,
+                COWAIT_DISPATCH_WINDOW_MESSAGES, CoCreateInstance, CoInitializeEx, CoUninitialize,
+                CoWaitForMultipleHandles, DVASPECT_CONTENT, FORMATETC, IDataObject, STGMEDIUM,
+                TYMED_HGLOBAL, TYMED_ISTREAM,
             },
             DataExchange::RegisterClipboardFormatW,
             Memory::{GlobalLock, GlobalSize, GlobalUnlock},
@@ -19,7 +22,10 @@ use windows::{
             SystemServices::MODIFIERKEYS_FLAGS,
         },
         UI::{
-            Shell::{DragQueryFileW, FILEDESCRIPTORW, HDROP, IDataObjectAsyncCapability},
+            Shell::{
+                CLSID_DragDropHelper, DragQueryFileW, FILEDESCRIPTORW, HDROP,
+                IDataObjectAsyncCapability, IDropTargetHelper,
+            },
             WindowsAndMessaging::EnumChildWindows,
         },
     },
@@ -380,25 +386,30 @@ fn receive_in_background(
     Ok(())
 }
 
+fn read_hdrop(data: &IDataObject, limit: Option<usize>) -> Result<Vec<PathBuf>, String> {
+    let medium = get(data, &format(15, -1, TYMED_HGLOBAL.0 as u32))?;
+    let drop = unsafe { HDROP(medium.0.u.hGlobal.0) };
+    let count = unsafe { DragQueryFileW(drop, u32::MAX, None) };
+    if count == 0 || limit.is_some_and(|max| count as usize > max) {
+        return Err("拖入文件为空或超过 256 项".into());
+    }
+    let mut paths = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let length = unsafe { DragQueryFileW(drop, index, None) };
+        let mut name = vec![0u16; length as usize + 1];
+        unsafe {
+            DragQueryFileW(drop, index, Some(&mut name));
+        }
+        paths.push(PathBuf::from(OsString::from_wide(&name[..length as usize])));
+    }
+    Ok(paths)
+}
+
 fn receive(data: &IDataObject) -> Result<Received, String> {
     diagnose_formats(data, "receive");
-    if let Ok(medium) = get(data, &format(15, -1, TYMED_HGLOBAL.0 as u32)) {
-        let drop = unsafe { HDROP(medium.0.u.hGlobal.0) };
-        let count = unsafe { DragQueryFileW(drop, u32::MAX, None) };
-        if count == 0 || count as usize > MAX_FILES {
-            return Err("拖入文件为空或超过 256 项".into());
-        }
-        let mut paths = Vec::new();
-        for index in 0..count {
-            let length = unsafe { DragQueryFileW(drop, index, None) };
-            let mut name = vec![0u16; length as usize + 1];
-            unsafe {
-                DragQueryFileW(drop, index, Some(&mut name));
-            }
-            paths.push(PathBuf::from(OsString::from_wide(&name[..length as usize])));
-        }
+    if unsafe { data.QueryGetData(&format(15, -1, TYMED_HGLOBAL.0 as u32)) == S_OK } {
         return Ok(Received {
-            paths,
+            paths: read_hdrop(data, Some(MAX_FILES))?,
             _temporary: None,
         });
     }
@@ -458,9 +469,43 @@ fn receive(data: &IDataObject) -> Result<Received, String> {
     Err(UNSUPPORTED_DROP.into())
 }
 
+fn create_drop_target_helper() -> Option<IDropTargetHelper> {
+    // SAFETY: 在 UI 线程 STA 中创建系统 Shell 拖拽图像辅助对象；失败时退化为不绘制拖拽图。
+    unsafe { CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER).ok() }
+}
+
+fn screen_point(pt: &POINTL) -> POINT {
+    POINT { x: pt.x, y: pt.y }
+}
+
+fn client_position(root: HWND, pt: &POINTL) -> DragDropPosition {
+    let mut point = screen_point(pt);
+    // SAFETY: `root` 为本应用主/面板窗口句柄，返回相对于窗口客户区左上角的物理像素坐标。
+    let _ = unsafe { ScreenToClient(root, &mut point) };
+    DragDropPosition {
+        x: f64::from(point.x),
+        y: f64::from(point.y),
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct DragDropPosition {
+    x: f64,
+    y: f64,
+}
+
+#[derive(Clone, Serialize)]
+struct DragDropPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paths: Option<Vec<PathBuf>>,
+    position: DragDropPosition,
+}
+
 #[implement(IDropTarget)]
 struct Target {
     app: tauri::AppHandle,
+    root: HWND,
+    helper: Option<IDropTargetHelper>,
     accepted: Cell<bool>,
 }
 
@@ -470,7 +515,7 @@ impl IDropTarget_Impl for Target_Impl {
         &self,
         data: Ref<IDataObject>,
         _: MODIFIERKEYS_FLAGS,
-        _: &POINTL,
+        pt: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
         let supported = data.as_ref().is_some_and(supports_drop);
@@ -478,11 +523,16 @@ impl IDropTarget_Impl for Target_Impl {
             diagnose_formats(data, "DragEnter");
         }
         self.accepted.set(supported);
-        let accepted;
+        let chosen;
         unsafe {
-            *effect = copy_effect(supported, *effect);
-            accepted = *effect == DROPEFFECT_COPY;
+            chosen = copy_effect(supported, *effect);
+            *effect = chosen;
         }
+        if let Some(helper) = &self.helper {
+            let point = screen_point(pt);
+            let _ = unsafe { helper.DragEnter(self.root, data.as_ref(), &point, chosen) };
+        }
+        let accepted = chosen == DROPEFFECT_COPY;
         let _ = crate::ball::external_drop(&self.app, accepted);
         if !supported {
             let _ = crate::ball::ball_message(self.app.clone(), UNSUPPORTED_DROP.into());
@@ -492,18 +542,26 @@ impl IDropTarget_Impl for Target_Impl {
     fn DragOver(
         &self,
         _: MODIFIERKEYS_FLAGS,
-        _: &POINTL,
+        pt: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        let accepted = unsafe {
-            *effect = copy_effect(self.accepted.get(), *effect);
-            *effect == DROPEFFECT_COPY
+        let chosen = unsafe {
+            let chosen = copy_effect(self.accepted.get(), *effect);
+            *effect = chosen;
+            chosen
         };
-        let _ = crate::ball::external_drop(&self.app, accepted);
+        if let Some(helper) = &self.helper {
+            let point = screen_point(pt);
+            let _ = unsafe { helper.DragOver(&point, chosen) };
+        }
+        let _ = crate::ball::external_drop(&self.app, chosen == DROPEFFECT_COPY);
         Ok(())
     }
     fn DragLeave(&self) -> windows::core::Result<()> {
         self.accepted.set(false);
+        if let Some(helper) = &self.helper {
+            let _ = unsafe { helper.DragLeave() };
+        }
         let _ = crate::ball::external_drop(&self.app, false);
         Ok(())
     }
@@ -511,18 +569,23 @@ impl IDropTarget_Impl for Target_Impl {
         &self,
         data: Ref<IDataObject>,
         _: MODIFIERKEYS_FLAGS,
-        _: &POINTL,
+        pt: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
         if let Some(data) = data.as_ref() {
             diagnose_formats(data, "Drop");
         }
         let accepted = unsafe { copy_effect(data.as_ref().is_some_and(supports_drop), *effect) };
-        let _ = self.DragLeave();
+        self.accepted.set(false);
+        let _ = crate::ball::external_drop(&self.app, false);
         unsafe {
             *effect = DROPEFFECT_NONE;
         }
         if accepted == DROPEFFECT_NONE {
+            if let Some(helper) = &self.helper {
+                let point = screen_point(pt);
+                let _ = unsafe { helper.Drop(data.as_ref(), &point, DROPEFFECT_NONE) };
+            }
             return Ok(());
         }
         let result = data
@@ -556,19 +619,147 @@ impl IDropTarget_Impl for Target_Impl {
                     });
                 })
             });
-        match result {
-            Ok(()) => unsafe {
-                *effect = DROPEFFECT_COPY;
-            },
+        let final_effect = match result {
+            Ok(()) => DROPEFFECT_COPY,
             Err(error) => {
                 let _ = crate::ball::ball_message(self.app.clone(), error);
+                DROPEFFECT_NONE
             }
+        };
+        unsafe {
+            *effect = final_effect;
+        }
+        if let Some(helper) = &self.helper {
+            let point = screen_point(pt);
+            let _ = unsafe { helper.Drop(data.as_ref(), &point, final_effect) };
         }
         Ok(())
     }
 }
 
-pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
+/// 主窗口与表情面板的原生 `IDropTarget`：转发 `IDropTargetHelper` 以渲染拖拽预览图，
+/// 并直接派发标准的 `tauri://drag-*` 事件。
+#[implement(IDropTarget)]
+struct WebviewDropTarget {
+    app: tauri::AppHandle,
+    label: String,
+    root: HWND,
+    helper: Option<IDropTargetHelper>,
+    accepted: Cell<bool>,
+}
+
+#[allow(non_snake_case)]
+impl IDropTarget_Impl for WebviewDropTarget_Impl {
+    fn DragEnter(
+        &self,
+        data: Ref<IDataObject>,
+        _: MODIFIERKEYS_FLAGS,
+        pt: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        let paths = data
+            .as_ref()
+            .and_then(|data| read_hdrop(data, None).ok())
+            .unwrap_or_default();
+        let chosen = unsafe { copy_effect(!paths.is_empty(), *effect) };
+        unsafe {
+            *effect = chosen;
+        }
+        self.accepted.set(chosen != DROPEFFECT_NONE);
+        if let Some(helper) = &self.helper {
+            let point = screen_point(pt);
+            let _ = unsafe { helper.DragEnter(self.root, data.as_ref(), &point, chosen) };
+        }
+        if chosen != DROPEFFECT_NONE {
+            let payload = DragDropPayload {
+                paths: Some(paths),
+                position: client_position(self.root, pt),
+            };
+            let _ = self.app.emit_to(
+                EventTarget::labeled(&self.label),
+                "tauri://drag-enter",
+                payload,
+            );
+        }
+        Ok(())
+    }
+
+    fn DragOver(
+        &self,
+        _: MODIFIERKEYS_FLAGS,
+        pt: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        let chosen = unsafe { copy_effect(self.accepted.get(), *effect) };
+        unsafe {
+            *effect = chosen;
+        }
+        if let Some(helper) = &self.helper {
+            let point = screen_point(pt);
+            let _ = unsafe { helper.DragOver(&point, chosen) };
+        }
+        if chosen != DROPEFFECT_NONE {
+            let payload = DragDropPayload {
+                paths: None,
+                position: client_position(self.root, pt),
+            };
+            let _ = self.app.emit_to(
+                EventTarget::labeled(&self.label),
+                "tauri://drag-over",
+                payload,
+            );
+        }
+        Ok(())
+    }
+
+    fn DragLeave(&self) -> windows::core::Result<()> {
+        if let Some(helper) = &self.helper {
+            let _ = unsafe { helper.DragLeave() };
+        }
+        if self.accepted.replace(false) {
+            let _ = self
+                .app
+                .emit_to(EventTarget::labeled(&self.label), "tauri://drag-leave", ());
+        }
+        Ok(())
+    }
+
+    fn Drop(
+        &self,
+        data: Ref<IDataObject>,
+        _: MODIFIERKEYS_FLAGS,
+        pt: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        let paths = data
+            .as_ref()
+            .and_then(|data| read_hdrop(data, None).ok())
+            .unwrap_or_default();
+        let chosen = unsafe { copy_effect(!paths.is_empty(), *effect) };
+        unsafe {
+            *effect = chosen;
+        }
+        self.accepted.set(false);
+        if let Some(helper) = &self.helper {
+            let point = screen_point(pt);
+            let _ = unsafe { helper.Drop(data.as_ref(), &point, chosen) };
+        }
+        if chosen != DROPEFFECT_NONE {
+            let payload = DragDropPayload {
+                paths: Some(paths),
+                position: client_position(self.root, pt),
+            };
+            let _ = self.app.emit_to(
+                EventTarget::labeled(&self.label),
+                "tauri://drag-drop",
+                payload,
+            );
+        }
+        Ok(())
+    }
+}
+
+fn register_on_window(window: &tauri::WebviewWindow, target: IDropTarget) -> Result<(), String> {
     let root = window.hwnd().map_err(|e| e.to_string())?;
     let mut handles = vec![root];
     unsafe extern "system" fn collect(window: HWND, parameter: LPARAM) -> BOOL {
@@ -585,11 +776,6 @@ pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
             LPARAM(&mut handles as *mut _ as isize),
         );
     }
-    let target: IDropTarget = Target {
-        app: window.app_handle().clone(),
-        accepted: Cell::new(false),
-    }
-    .into();
     let mut registered = Vec::new();
     for handle in handles {
         unsafe {
@@ -613,6 +799,31 @@ pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
         }
     });
     Ok(())
+}
+
+pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let root = window.hwnd().map_err(|e| e.to_string())?;
+    let target: IDropTarget = Target {
+        app: window.app_handle().clone(),
+        root,
+        helper: create_drop_target_helper(),
+        accepted: Cell::new(false),
+    }
+    .into();
+    register_on_window(window, target)
+}
+
+pub fn install_webview(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let root = window.hwnd().map_err(|e| e.to_string())?;
+    let target: IDropTarget = WebviewDropTarget {
+        app: window.app_handle().clone(),
+        label: window.label().to_string(),
+        root,
+        helper: create_drop_target_helper(),
+        accepted: Cell::new(false),
+    }
+    .into();
+    register_on_window(window, target)
 }
 
 #[cfg(test)]
