@@ -29,7 +29,7 @@ CI=true pnpm --dir frontend tauri build --bundles app,dmg
 两个 workflow 都先安装依赖、做类型检查、核对版本号，再打包。Windows 的可以勾选 `validate`，额外运行 Rust 格式检查、Clippy 和测试。`release`（“发布到 Release”）决定发不发版：
 
 - **不勾选**：只构建，产物在运行详情页的 Artifacts 里下载，保留 14 天。
-- **勾选**：以 `v<版本号>` 为 tag 创建 Release，tag 指向所选分支的最新提交，说明取 CHANGELOG 里该版本的小节。Release 已存在时只覆盖上传附件，不改说明；旧名字的附件要手动删除。发布后会触发「部署官网」，让官网首屏显示新版本。
+- **勾选**：以 `v<版本号>` 为 tag 创建 Release，tag 指向所选分支的最新提交，说明取 CHANGELOG 里该版本的小节。Release 已存在时只覆盖上传附件，不改说明；旧名字的附件要手动删除。两个平台的更新清单都上传齐全后会触发一次「部署官网」，让官网首屏显示新版本。
 
 | | macOS | Windows |
 |---|---|---|

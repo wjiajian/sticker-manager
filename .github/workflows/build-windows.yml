@@ -114,9 +114,15 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # GITHUB_TOKEN 发布 Release 不会触发别的 workflow，只有 workflow_dispatch 例外。这里手动触发官网重新部署，让首屏显示新版本；失败也不影响发布结果。
+      # GITHUB_TOKEN 发布 Release 不会触发别的 workflow，只有 workflow_dispatch 例外。
+      # 等 macOS 和 Windows 的更新清单都已在 Release 上时再触发官网重部署，避免双平台发版重复构建两次官网。
       - if: inputs.release
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run deploy-website.yml --ref main
+          TAG: v${{ steps.version.outputs.value }}
+        run: |
+          $ready = gh release view $env:TAG --json assets --jq '(any(.assets[]; .name == "latest.json")) and (any(.assets[]; .name == "latest-windows.json"))'
+          if ($ready -eq 'true') {
+            gh workflow run deploy-website.yml --ref main
+          }
