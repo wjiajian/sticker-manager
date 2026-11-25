@@ -267,7 +267,7 @@ export function useStickerActions(stickers: Sticker[]) {
     // 拖的是多选里的一张，保留多选；拖出的始终只有这一张。
     if (!useUiStore.getState().selectedStickerIds.includes(sticker.id)) selectSticker(sticker.id);
     return perform(async () => {
-      const file = await ipc.prepareStickerDrag(sticker.id);
+      const file = await ipc.prepareStickerDrag(sticker.id, window.devicePixelRatio);
       // 准备大文件时用户可能已经松开鼠标，此时不再发起系统拖拽。
       if (!isPressed()) return;
       const current: Outgoing = { path: file.path, targets: targetsFor(sticker), ended: false, droppedHere: false };
@@ -275,7 +275,7 @@ export function useStickerActions(stickers: Sticker[]) {
       let dropped = false;
       try {
         dropped = await new Promise<boolean>((resolve, reject) => {
-          void startDrag({ item: [file.path], icon: file.thumbnailPath, mode: "copy" }, (event) => {
+          void startDrag({ item: [file.path], icon: file.iconPath, mode: "copy" }, (event) => {
             resolve(event.result === "Dropped");
           }).catch(reject);
         });

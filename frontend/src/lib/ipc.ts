@@ -27,6 +27,8 @@ export interface CategorySummary extends Category {
   totalStickerCount: number;
 }
 
+export type PreparedDrag = { path: string; iconPath: string };
+
 export interface Sticker {
   id: string;
   name: string;
@@ -181,7 +183,7 @@ export const ipc = {
   setStickerCaption: (id: string, caption: string) => invoke<void>("set_sticker_caption", { id, caption }),
   importStickers: (paths: string[]) => invoke<ImportReport>("import_stickers", { paths }),
   copySticker: (id: string, fileOnly: boolean) => invoke<void>("copy_sticker", { id, fileOnly }),
-  prepareStickerDrag: (id: string) => invoke<{ path: string; thumbnailPath: string }>("prepare_sticker_drag", { id }),
+  prepareStickerDrag: (id: string, scale: number) => invoke<PreparedDrag>("prepare_sticker_drag", { id, scale }),
   recordStickerUsage: (id: string) => invoke<void>("record_sticker_usage", { id }),
   toggleStickerFavorite: (id: string) => invoke<boolean>("toggle_sticker_favorite", { id }),
   setStickersFavorite: (ids: string[], favorite: boolean) => invoke<number>("set_stickers_favorite", { ids, favorite }),

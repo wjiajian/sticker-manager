@@ -13,6 +13,7 @@ mod clipboard;
 mod commands;
 mod credentials;
 mod desktop;
+mod drag_icon;
 mod export;
 mod exports;
 mod geometry;
@@ -105,6 +106,11 @@ pub fn run() {
                 std::env::temp_dir()
                     .join(app.config().identifier.clone())
                     .join("exports"),
+            ));
+            app.manage(drag_icon::DragIconCache::new(
+                std::env::temp_dir()
+                    .join(app.config().identifier.clone())
+                    .join("drag-icons"),
             ));
             // WebView2 可在 setup 结束前发出查询，先登记同步状态。
             #[cfg(target_os = "windows")]

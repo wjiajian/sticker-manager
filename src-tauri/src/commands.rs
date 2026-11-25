@@ -12,7 +12,7 @@ use sticker_core::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{clipboard, export::ExportDirectory};
+use crate::{clipboard, drag_icon::DragIconCache, export::ExportDirectory};
 
 /// 交给界面的错误，序列化成一句可以直接显示的话。
 #[derive(Debug, thiserror::Error)]
@@ -290,20 +290,29 @@ fn usage_after_copy(result: sticker_core::Result<()>) -> CommandResult<()> {
 #[serde(rename_all = "camelCase")]
 pub struct PreparedDrag {
     path: PathBuf,
-    thumbnail_path: PathBuf,
+    icon_path: PathBuf,
 }
 
 #[tauri::command]
-pub async fn prepare_sticker_drag(app: AppHandle, id: String) -> CommandResult<PreparedDrag> {
+pub async fn prepare_sticker_drag(
+    app: AppHandle,
+    id: String,
+    scale: f64,
+) -> CommandResult<PreparedDrag> {
     let handle = app.clone();
-    with_library(app, move |library| {
+    let (path, thumbnail) = with_library(app.clone(), move |library| {
         let sticker = library.sticker_for_use(&id)?;
-        Ok(PreparedDrag {
-            path: handle.state::<ExportDirectory>().prepare(&sticker)?,
-            thumbnail_path: sticker.thumbnail_path,
-        })
+        Ok((
+            handle.state::<ExportDirectory>().prepare(&sticker)?,
+            sticker.thumbnail_path,
+        ))
     })
-    .await
+    .await?;
+    let icon_path = tauri::async_runtime::spawn_blocking(move || {
+        app.state::<DragIconCache>().icon_for(&thumbnail, scale)
+    })
+    .await?;
+    Ok(PreparedDrag { path, icon_path })
 }
 
 #[tauri::command]

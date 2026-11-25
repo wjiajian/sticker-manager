@@ -52,7 +52,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
     const deleted = many.every((item) => item.deletedAt !== null);
     const allFavorite = many.every((item) => item.favorite);
     return (
-      <aside aria-label="表情详情" className="flex w-66 shrink-0 flex-col items-center justify-center gap-4 overflow-y-auto bg-detail p-6 text-center *:shrink-0">
+      <aside aria-label="表情详情" data-arrow-navigation className="flex w-66 shrink-0 flex-col items-center justify-center gap-4 overflow-y-auto bg-detail p-6 text-center *:shrink-0">
         <p role="status" className="text-lg font-semibold">已选 {many.length} 张</p>
         <p className="text-xs text-ink-secondary">按 Esc 取消多选</p>
         {deleted ? <div className="flex gap-2">
@@ -93,6 +93,7 @@ export function DetailPanel({ actions, sync }: { actions: StickerActions; sync?:
   return (
     <aside
       aria-label="表情详情"
+      data-arrow-navigation
       aria-busy={loading}
       // 子项不收缩：内容超高时整栏滚动，而不是把配文框、使用记录压扁
       className={`flex w-66 shrink-0 flex-col gap-6 overflow-y-auto bg-detail p-6 *:shrink-0 ${sticker || loading ? "" : "items-center justify-center text-center text-ink-secondary"}`}

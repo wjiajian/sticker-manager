@@ -24,6 +24,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2.4.1"
 tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
+png = "0.18"
 thiserror.workspace = true
 sha2 = "0.10"
 tauri-plugin-updater = "2"
@@ -33,7 +34,7 @@ plist = "1"
 tauri-nspanel = "=2.1.1"
 objc2 = "0.6"
 block2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem", "NSEvent", "NSScreen", "NSWindow", "NSGraphics", "NSAlert", "NSButton", "NSApplication", "NSMenu", "NSMenuItem"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem", "NSEvent", "NSScreen", "NSWindow", "NSGraphics", "NSAlert", "NSButton", "NSApplication", "NSMenu", "NSMenuItem", "NSImage"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSString", "NSURL"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

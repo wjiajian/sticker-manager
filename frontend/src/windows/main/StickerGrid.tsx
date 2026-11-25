@@ -1,12 +1,13 @@
 import { ArrowsDownUpIcon } from "@phosphor-icons/react";
 import { useIsMutating } from "@tanstack/react-query";
 import { Button } from "../../components/Button";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
 import type { Sticker, SyncStatus } from "../../lib/ipc";
 import { type useStickers, useCategories, useLibraryOverview } from "../../lib/queries";
 import { GridSkeleton, useDelayedLoading } from "../../components/Skeleton";
 import { ReadError } from "../../components/ReadError";
 import { EmptyLibrary } from "./EmptyLibrary";
+import { gridNavigationTarget, isGridArrowKey, revealScrollTop } from "./gridNavigation";
 import { useUiStore, type StickerTypeFilter } from "../../stores/ui";
 import { LIBRARY_VIEWS } from "./libraryViews";
 import { RecentStickers } from "./RecentStickers";
@@ -22,6 +23,14 @@ const TYPE_FILTERS: { value: StickerTypeFilter; label: string }[] = [
   { value: "static", label: "静态" },
   { value: "animated", label: "动图" },
 ];
+
+const ARROW_BLOCKERS = "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='combobox'], [role='listbox'], [role='option'], [role='menu'], [role='menuitem'], [role='radiogroup'], [role='slider'], [role='spinbutton'], [role='tablist']";
+
+function canNavigateFrom(target: EventTarget | null) {
+  if (target === null || target === window || target === document || target === document.body || target === document.documentElement) return true;
+  if (!(target instanceof HTMLElement) || target.isContentEditable || target.closest(ARROW_BLOCKERS)) return false;
+  return target.closest("[data-arrow-navigation]") !== null;
+}
 
 export function StickerGrid({ actions, listing, stickers, sortable, usage, sync, busy, onChoose, onSyncSettings, shortcutLabel }: {
   actions: StickerActions;
@@ -45,6 +54,30 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   const firstTile = useRef<HTMLButtonElement | null>(null);
   const scroller = useRef<HTMLElement>(null);
   const grid = useRef<HTMLElement>(null);
+  const tileGrid = useRef<TileGridHandle>(null);
+  // 目标行可能还没挂载，先记住要聚焦的表情。
+  const pendingFocus = useRef<string | null>(null);
+  const focusTile = useCallback((id: string) => {
+    const button = document.getElementById(`sticker-${id}`);
+    if (button && grid.current?.contains(button)) {
+      pendingFocus.current = null;
+      button.focus({ preventScroll: true });
+    } else {
+      pendingFocus.current = id;
+    }
+  }, []);
+  const flushTileFocus = useCallback(() => {
+    const id = pendingFocus.current;
+    if (!id) return;
+    if (useUiStore.getState().selectedStickerId !== id) {
+      pendingFocus.current = null;
+      return;
+    }
+    const button = document.getElementById(`sticker-${id}`);
+    if (!button || !grid.current?.contains(button)) return;
+    pendingFocus.current = null;
+    if (canNavigateFrom(document.activeElement)) button.focus({ preventScroll: true });
+  }, []);
   // 网格只挂载看得见的几行，第一张可能还没挂载：先滚到网格开头，挂载时再聚焦。
   const focusFirstWhenMounted = useRef(false);
   const firstTileRef = useCallback((button: HTMLButtonElement | null) => {
@@ -79,6 +112,31 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   // 换搜索词后，新结果回来之前网格里还是上一次的结果，这时不能据此取消选中或选中第一张。
   const results = searchQuery && source && !listing.isPlaceholderData ? stickers : undefined;
   const filteredEmpty = Boolean(source?.length) && stickers.length === 0 && typeFilter !== "all";
+
+  const navigable = !error && !isPending && !listing.isPlaceholderData && stickers.length > 0;
+  useEffect(() => {
+    if (!navigable) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (!isGridArrowKey(event.key) || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (document.querySelector("dialog[open], [role='dialog']") || !canNavigateFrom(event.target)) return;
+      const tiles = tileGrid.current;
+      const { selectedStickerId, selectedStickerIds } = useUiStore.getState();
+      if (!tiles || !selectedStickerId) return;
+      const index = stickers.findIndex((sticker) => sticker.id === selectedStickerId);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = gridNavigationTarget(event.key, index, stickers.length, tiles.columns);
+      const id = stickers[next].id;
+      // 取消等待第一张搜索结果挂载的请求，避免它随后抢走焦点。
+      focusFirstWhenMounted.current = false;
+      if (next !== index || selectedStickerIds.length > 1) selectSticker(id);
+      tiles.reveal(next);
+      focusTile(id);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigable, stickers, selectSticker, focusTile]);
 
   useEffect(() => {
     if (!selectedId || typeFilter === "all") return;
@@ -127,7 +185,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
   }, [results, selectedId, selectSticker, resultFocusRequested, requestResultFocus]);
 
   return (
-    <main ref={scroller} className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6" aria-busy={isPending}>
+    <main ref={scroller} data-arrow-navigation className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6" aria-busy={isPending}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 max-w-full flex-col gap-1">
           <div className="flex items-baseline gap-3">
@@ -199,7 +257,7 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
           </>}
         </div>
       ) : (
-        <TileGrid label={label} count={stickers.length} scroller={scroller} grid={grid} renderTile={(index) => {
+        <TileGrid label={label} count={stickers.length} scroller={scroller} grid={grid} handle={tileGrid} onCommit={flushTileFocus} renderTile={(index) => {
           const sticker = stickers[index];
           return <StickerTile
             key={sticker.id}
@@ -222,19 +280,28 @@ export function StickerGrid({ actions, listing, stickers, sortable, usage, sync,
 
 /** 格子间距，与 GridSkeleton 的 gap-3 相同。 */
 const GAP = 12;
+/** 与滚动区的 py-6 留白一致。 */
+const REVEAL_MARGIN = 2 * GAP;
 /** 看得见的行之外，上下各多挂载几行，滚动和 Tab 切换时不露白。 */
 const OVERSCAN_ROWS = 3;
+
+interface TileGridHandle {
+  columns: number;
+  reveal: (index: number) => void;
+}
 
 /**
  * 只挂载看得见的几行，几千张表情也只渲染一屏左右的格子。列数按 auto-fill 的规则由网格宽度和
  * 格子大小算出，排法和 GridSkeleton 一致；格子是正方形，行高等于格宽。大小单独订阅，
  * 拖动滑块时只重排看得见的格子。
  */
-function TileGrid({ label, count, scroller, grid, renderTile }: {
+function TileGrid({ label, count, scroller, grid, handle, onCommit, renderTile }: {
   label?: string;
   count: number;
   scroller: RefObject<HTMLElement | null>;
   grid: RefObject<HTMLElement | null>;
+  handle: Ref<TileGridHandle>;
+  onCommit: () => void;
   renderTile: (index: number) => ReactNode;
 }) {
   const size = useUiStore((s) => s.stickerTileSize);
@@ -273,6 +340,21 @@ function TileGrid({ label, count, scroller, grid, renderTile }: {
   }, [scroller, grid, measure]);
 
   const { columns, pitch, start, end } = layout;
+  const reveal = useCallback((index: number) => {
+    const section = grid.current;
+    const container = scroller.current;
+    if (!section || !container) return;
+    // 用网格顶边换算内容坐标，计入标题和最近使用横条的高度。
+    const sectionTop = section.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    const top = sectionTop + Math.floor(index / columns) * pitch;
+    const next = revealScrollTop(container.scrollTop, container.clientHeight, top, top + pitch - GAP, REVEAL_MARGIN);
+    if (next !== container.scrollTop) container.scrollTop = next;
+    // 立即重算待挂载的行，不必等浏览器派发 scroll 事件。
+    measure();
+  }, [grid, scroller, columns, pitch, measure]);
+  useImperativeHandle(handle, () => ({ columns, reveal }), [columns, reveal]);
+  useLayoutEffect(() => { onCommit(); });
+
   const rows = Math.ceil(count / columns);
   const first = start * columns;
   const last = Math.min(count, end * columns);
