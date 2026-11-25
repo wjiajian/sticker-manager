@@ -8,11 +8,14 @@
 cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+pnpm --dir frontend test
 pnpm --dir frontend typecheck
 pnpm --dir frontend build
 pnpm --dir website build
 git diff --check
 ```
+
+前端单元测试使用 Node 原生的 TypeScript 类型剥离功能，需要 Node 22.18 及以上版本。
 
 ## 网络同步的容器集成测试
 

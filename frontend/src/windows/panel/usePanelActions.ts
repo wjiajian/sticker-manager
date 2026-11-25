@@ -36,7 +36,7 @@ export function usePanelActions() {
 
   function drag(sticker: Sticker, isPressed: () => boolean) {
     return perform(async () => {
-      const file = await ipc.prepareStickerDrag(sticker.id);
+      const file = await ipc.prepareStickerDrag(sticker.id, window.devicePixelRatio);
       if (!isPressed()) return;
       let droppedHere = false;
       let settle: (() => void) | undefined;
@@ -53,7 +53,7 @@ export function usePanelActions() {
         await ipc.setPanelDragging(true);
         if (!isPressed()) return;
         const dropped = await new Promise<boolean>((resolve, reject) => {
-          void startDrag({ item: [file.path], icon: file.thumbnailPath, mode: "copy" }, (event) => {
+          void startDrag({ item: [file.path], icon: file.iconPath, mode: "copy" }, (event) => {
             resolve(event.result === "Dropped");
           }).catch(reject);
         });
