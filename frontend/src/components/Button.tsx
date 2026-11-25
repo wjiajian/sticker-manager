@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes } from "react";
 
 const variants = {
+  danger: "border border-line bg-surface text-accent",
   primary: "bg-ink text-surface",
   accent: "bg-accent-fill text-on-accent",
   secondary: "border border-line bg-surface text-ink",

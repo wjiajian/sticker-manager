@@ -67,7 +67,7 @@ pnpm --dir frontend tauri build --debug --no-bundle
 node .github/scripts/ball-window.test.mjs
 ```
 
-脚本使用临时仓库与独立 WebView2 数据目录，通过仅本机可用的调试端口在后台操作隐藏的主窗口，不移动系统鼠标；测试结束时关闭测试进程。覆盖实时预览、松手保存、键盘、恢复默认、Esc 取消、重启持久化，并延迟一次预览请求验证连续提交和后续取消不会覆盖已排队的保存。结果和截图写入 `target/ball-window-results/`。
+脚本使用临时仓库与独立 WebView2 数据目录，通过仅本机可用的调试端口在后台操作隐藏的主窗口，不移动系统鼠标；测试结束时关闭测试进程。覆盖实时预览、松手保存、键盘、恢复默认、Esc 取消、关闭按钮提交键盘草稿、单页目录定位、空搜索结果、清空后滑块保留及重启持久化，并延迟一次预览请求验证连续提交和后续取消不会覆盖已排队的保存。结果和截图写入 `target/ball-window-results/`。
 
 ### Windows 拖入格式诊断
 
@@ -84,8 +84,8 @@ pnpm --dir frontend tauri build --debug --no-bundle
 node .github/scripts/panel-shortcut.test.mjs
 ```
 
-脚本使用临时仓库和独立 WebView2 目录，通过本机 CDP 在后台操作隐藏的主窗口，不接管前台或鼠标。覆盖录制、原组合再次录制、非法按键、Esc 保留对话框、按钮失焦取消、保存广播早于响应的竞态、保存时取消、停用、恢复默认和重启持久化；结果写入 `target/panel-shortcut-results/`。macOS 上只能用 `node --check .github/scripts/panel-shortcut.test.mjs` 检查语法，不能替代 Windows 实机验收。
+脚本使用临时仓库和独立 WebView2 目录，通过本机 CDP 在后台操作隐藏的主窗口，不接管前台或鼠标。脚本通过 `[data-section=panel]` 定位录制控件，覆盖录制、原组合再次录制、非法按键、Esc 保留对话框、按钮失焦取消、保存广播早于响应的竞态、保存时取消、停用、恢复默认和重启持久化；结果写入 `target/panel-shortcut-results/`。macOS 上只能用 `node --check .github/scripts/panel-shortcut.test.mjs` 检查语法，不能替代 Windows 实机验收。
 
-补充人工验收：从其他应用触发新组合、旧组合失效，模拟其他程序占用与释放后重试；检查非美式布局、中文输入状态、主窗口失焦、Tab 切换焦点、切换分组、页面重载、60 秒超时、深浅色及读屏播报。Windows 核对 VK 与布局的对应，macOS 核对 Option 死键；使用临时仓库，不修改系统设置。
+补充人工验收：从其他应用触发新组合、旧组合失效，模拟其他程序占用与释放后重试；检查非美式布局、中文输入状态、主窗口失焦、Tab 切换焦点、搜索筛掉表情面板分区、页面重载、60 秒超时、深浅色及读屏播报。Windows 核对 VK 与布局的对应，macOS 核对 Option 死键；使用临时仓库，不修改系统设置。
 
 Rust 的 `shortcut::tests` 覆盖双平台键位表、规范化、保留组合、可访问文案、VK 映射、注册/注销/持久化失败回滚、重试刷新错误和录制会话隔离；设置测试覆盖旧字段缺失、null 停用及非法值容错保留其他设置。

@@ -212,7 +212,7 @@ export function ShortcutRecorder({ active, onRecordingChange }: { active: boolea
             onClick={() => save(state.defaultShortcut, (label) => `已恢复默认的 ${label ?? state.defaultLabel}`, undefined, true)}>恢复默认</button>}
           {state?.shortcut && <button type="button" disabled={busy} className={link} onClick={() => save(null, undefined, undefined, true)}>停用</button>}
         </>}
-        <button ref={button} type="button" aria-label={buttonAriaLabel} aria-describedby={describedBy}
+        <button ref={button} type="button" title={buttonAriaLabel} aria-label={buttonAriaLabel} aria-describedby={describedBy}
           aria-busy={busy} disabled={!state} onClick={begin} onKeyDown={keyDown} onKeyUp={keyUp} onBlur={() => cancel()}
           className={`interactive inline-flex min-w-24 items-center justify-center rounded-control bg-muted px-3 py-1 font-semibold tabular-nums ${recording ? "outline-2 outline-offset-2 outline-accent" : "hover:opacity-82"}`}>
           <kbd className={`font-sans ${recording && !candidate?.label && !held ? "font-normal text-ink-secondary" : !recording && !state?.label ? "font-normal text-ink-secondary" : ""}`}>

@@ -1,3 +1,4 @@
+import { ProgressBar } from "../../components/ProgressBar";
 import { XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { ipc } from "../../lib/ipc";
@@ -22,7 +23,7 @@ export function ExportStatusContent({ inline = false }: { inline?: boolean }) {
     <div className="flex items-center gap-3">
       {status?.running ? <>
         <span role="status" className="shrink-0">正在导出 {status.progress.processed}/{status.progress.total}</span>
-        <progress aria-label="导出进度" max={Math.max(1, status.progress.total)} value={status.progress.total ? status.progress.processed : undefined} className="h-1 min-w-16 max-w-80 flex-1 accent-accent" />
+        <ProgressBar label="导出进度" max={Math.max(1, status.progress.total)} value={status.progress.total ? status.progress.processed : undefined} className="min-w-16 max-w-80 flex-1" />
         <button type="button" disabled={cancelling} className="shrink-0 underline underline-offset-4 disabled:opacity-50" onClick={() => { setCancelling(true); void ipc.cancelExport().catch(e => { setCancelling(false); exportError(String(e)); }); }}>{cancelling ? "正在取消…" : "取消"}</button>
       </> : <>
         <span role="status" className="min-w-0 flex-1">{report && <>

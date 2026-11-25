@@ -56,6 +56,7 @@
   /* Windows 版收小圆角，见下方 data-platform 覆盖 */
   --radius-card: 12px;
   --radius-control: 8px;
+  --radius-inset: 4px;
 
   --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -110,6 +111,7 @@
 :root[data-platform="windows"] {
   --radius-card: 8px;
   --radius-control: 4px;
+  --radius-inset: 2px;
 }
 
 /*
@@ -189,4 +191,10 @@
 .sync-download-arc { animation: sync-turn 1.5s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
   .sync-download-arc { animation: sync-pulse 1s ease-in-out infinite alternate; }
+}
+
+@keyframes progress-slide { from { translate: -100% 0; } to { translate: 250% 0; } }
+.progress-indeterminate { width: 40%; animation: progress-slide 1.5s var(--ease-standard) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .progress-indeterminate { width: 100%; translate: none; animation: sync-pulse 1s ease-in-out infinite alternate; }
 }

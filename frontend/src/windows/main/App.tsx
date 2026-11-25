@@ -85,8 +85,8 @@ export function App() {
 
   return (
     <div className={`flex h-full flex-col ${dragging ? "outline-2 -outline-offset-2 outline-accent" : ""}`}>
-      {preferences.open && <PreferencesDialog onClose={() => preferences.setOpen(false)} sync={sync.data} focusSync={preferences.focusSync}
-        update={update.status} onShowUpdate={update.showDialog} />}
+      {preferences.open && <PreferencesDialog onClose={() => preferences.setOpen(false)} sync={sync.data} syncReadError={sync.error ? String(sync.error) : undefined} focusSync={preferences.focusSync}
+        update={update.status} updateReadError={update.error ? String(update.error) : undefined} onShowUpdate={update.showDialog} />}
       {update.dialogOpen && <UpdateDialog status={update.status} onClose={update.closeDialog} />}
       <TitleBar busy={busy} onChoose={choose} sync={sync.data} onSync={(button) => openSync(button)} />
       {status && <div role="status" aria-atomic="true" className="max-h-24 shrink-0 overflow-y-auto whitespace-pre-line text-ink-secondary">
