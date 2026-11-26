@@ -10,6 +10,8 @@ src-tauri/gen/schemas/
 .codex/
 .copilot/
 .pi/
+.agents/
+.gemini/
 
 # Promo video workspace, renders, and caches
 .cache/
