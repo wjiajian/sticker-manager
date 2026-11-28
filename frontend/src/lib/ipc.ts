@@ -77,6 +77,8 @@ export interface ImportReport {
   cancelled: boolean;
 }
 
+export type ClipboardImport = { kind: "imported"; report: ImportReport } | { kind: "empty"; message: string };
+export type ExternalDropEvent = { type: "enter" | "leave" | "receiving" | "receivingDone" } | { type: "rejected" | "failed"; message: string };
 export interface ImportStatus { batch: number; running: boolean; progress: { processed: number; total: number }; report: ImportReport | null; error: string | null }
 export interface RemoteDevice { id: string; name: string; platform: string; lastSyncAt: number; received: Record<string, number> }
 export interface StickerSyncInfo { waitingUpload: boolean; deviceCount: number | null }
@@ -99,6 +101,7 @@ export const ipc = {
   hidePreview: () => invoke<void>("hide_preview"),
   previewSession: () => invoke<PreviewRequest | null>("preview_session"),
   previewReady: (requestId: number, cardHeight: number) => invoke<boolean>("preview_ready", { requestId, cardHeight }),
+  importClipboard: () => invoke<ClipboardImport>("import_clipboard"),
   importStatus: () => invoke<ImportStatus>("import_status"),
   cancelImport: () => invoke<void>("cancel_import"),
   setStickersCategory: (ids: string[], categoryId: string | null) => invoke<number>("set_stickers_category", { ids, categoryId }),

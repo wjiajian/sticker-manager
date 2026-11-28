@@ -66,6 +66,15 @@ pub fn ball_progress(app: &AppHandle) -> Option<String> {
 }
 
 pub async fn run(app: AppHandle, paths: Vec<PathBuf>, ball: bool) -> Result<ImportReport, String> {
+    run_with_report(app, paths, ball, |_| {}).await
+}
+
+pub async fn run_with_report(
+    app: AppHandle,
+    paths: Vec<PathBuf>,
+    ball: bool,
+    amend: impl FnOnce(&mut ImportReport) + Send + 'static,
+) -> Result<ImportReport, String> {
     let jobs = app.state::<crate::jobs::LibraryJobs>();
     let _job = jobs.begin(crate::jobs::Job::Import)?;
     let first = app.state::<ImportState>().begin(ball)?;
@@ -76,7 +85,7 @@ pub async fn run(app: AppHandle, paths: Vec<PathBuf>, ball: bool) -> Result<Impo
         let library = handle.state::<Mutex<Library>>();
         let mut progress_event = Instant::now() - Duration::from_secs(1);
         let mut changed_event = Instant::now();
-        sticker_core::import_paths_with_progress(
+        let mut report = sticker_core::import_paths_with_progress(
             &library,
             &paths,
             &|| state.cancelled.load(Ordering::Relaxed),
@@ -96,7 +105,11 @@ pub async fn run(app: AppHandle, paths: Vec<PathBuf>, ball: bool) -> Result<Impo
                 }
             },
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        // The callback owns temporary import files; keep them alive in this worker
+        // even when the invoking frontend goes away before the import finishes.
+        amend(&mut report);
+        Ok(report)
     })
     .await
     .map_err(|e| e.to_string())

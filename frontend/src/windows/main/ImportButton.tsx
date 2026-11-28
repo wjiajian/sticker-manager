@@ -1,21 +1,26 @@
-import { CaretDownIcon, FolderOpenIcon, PlusIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, ClipboardTextIcon, FolderOpenIcon, PlusIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { platform } from "../../lib/platform";
+import { pasteShortcutLabel } from "../../lib/pasteShortcut";
 import { Button } from "../../components/Button";
 
 interface ImportButtonProps {
   disabled: boolean;
+  onPaste: () => void;
   onChoose: (directory: boolean) => void;
 }
 
-export function ImportButton({ disabled, onChoose }: ImportButtonProps) {
+export function ImportButton({ disabled, onChoose, onPaste }: ImportButtonProps) {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
+  const paste = useRef<HTMLButtonElement>(null);
+  const initial = useRef<"first" | "last">("first");
   const folder = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    folder.current?.focus();
+    (initial.current === "last" ? paste : folder).current?.focus();
     const dismiss = (event: PointerEvent) => {
       if (!container.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -55,10 +60,11 @@ export function ImportButton({ disabled, onChoose }: ImportButtonProps) {
         aria-expanded={open}
         aria-controls={open ? "import-menu" : undefined}
         disabled={disabled}
-        onClick={() => setOpen(!open)}
+        onClick={() => { initial.current = "first"; setOpen(!open); }}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
+            initial.current = event.key === "ArrowUp" ? "last" : "first";
             setOpen(true);
           }
         }}
@@ -67,7 +73,11 @@ export function ImportButton({ disabled, onChoose }: ImportButtonProps) {
         <CaretDownIcon size={16} />
       </button>
       {open && (
-        <div id="import-menu" role="menu" aria-label="导入方式" className="absolute top-full right-0 z-10 mt-2 min-w-40 rounded-control border border-line bg-surface p-1">
+        <div id="import-menu" role="menu" aria-label="导入方式" onKeyDown={(event) => {
+          if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          (event.key === "Home" ? folder : event.key === "End" ? paste : document.activeElement === folder.current ? paste : folder).current?.focus();
+        }} className="absolute top-full right-0 z-10 mt-2 min-w-40 rounded-control border border-line bg-surface p-1">
           <button
             ref={folder}
             type="button"
@@ -80,13 +90,18 @@ export function ImportButton({ disabled, onChoose }: ImportButtonProps) {
               toggle.current?.focus();
               onChoose(true);
             }}
-            onKeyDown={(event) => {
-              if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) event.preventDefault();
-            }}
             className="interactive flex w-full items-center gap-2 rounded-control px-3 py-2 text-left hover:bg-hover active:scale-98 disabled:opacity-50"
           >
             <FolderOpenIcon size={16} />
             导入文件夹
+          </button>
+          <button ref={paste} type="button" role="menuitem" disabled={disabled}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => { setOpen(false); toggle.current?.focus(); onPaste(); }}
+            className="interactive flex w-full items-center gap-2 whitespace-nowrap rounded-control px-3 py-2 text-left hover:bg-hover active:scale-98 disabled:opacity-50">
+            <ClipboardTextIcon size={16} />
+            从剪贴板导入
+            <kbd className="ml-auto font-sans text-xs text-ink-secondary">{pasteShortcutLabel(platform)}</kbd>
           </button>
         </div>
       )}

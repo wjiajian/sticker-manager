@@ -1,5 +1,13 @@
 //! Windows 聊天软件可能交出虚拟文件或图片数据，而不是磁盘路径。
+use crate::{
+    clipboard::{ClipboardRead, html},
+    staging::{
+        self, ExternalDrop, MAX_BYTES, MAX_ITEMS, Origin, Staged, Staging, StagingRoot,
+        UNSUPPORTED_DROP,
+    },
+};
 use serde::Serialize;
+use std::path::Path;
 use std::{cell::Cell, ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
 use tauri::{Emitter, EventTarget, Manager};
 use windows::{
@@ -32,9 +40,34 @@ use windows::{
     core::{AgileReference, BOOL, HSTRING, Interface, Ref, implement},
 };
 
-const MAX_BYTES: usize = 100 * 1024 * 1024;
-const MAX_FILES: usize = 256;
-const UNSUPPORTED_DROP: &str = "拖入来源没有提供图片或文件，请先保存图片后导入";
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Drop,
+    Clipboard,
+}
+fn animated_formats() -> [u16; 3] {
+    [
+        registered("GIF"),
+        registered("image/gif"),
+        registered("image/webp"),
+    ]
+}
+fn static_formats() -> [u16; 6] {
+    [
+        registered("PNG"),
+        registered("image/png"),
+        registered("JFIF"),
+        registered("image/jpeg"),
+        17,
+        8,
+    ]
+}
+fn supported_formats() -> impl Iterator<Item = u16> {
+    [15, registered("FileGroupDescriptorW")]
+        .into_iter()
+        .chain(animated_formats())
+        .chain(static_formats())
+}
 
 fn registered(name: &str) -> u16 {
     // SAFETY: HSTRING 在调用期间持有有效的 UTF-16 字符串。
@@ -52,17 +85,10 @@ fn format(id: u16, index: i32, medium: u32) -> FORMATETC {
 }
 
 fn supports_drop(data: &IDataObject) -> bool {
-    [
-        15,
-        registered("FileGroupDescriptorW"),
-        registered("PNG"),
-        17,
-        8,
-    ]
-    .iter()
-    // 微信内部表情拖拽可能返回 S_FALSE；HRESULT::is_ok() 会把它也当成成功。
-    // QueryGetData 只有 S_OK 才表示请求的格式可提供。
-    .any(|id| unsafe { data.QueryGetData(&format(*id, -1, TYMED_HGLOBAL.0 as u32)) == S_OK })
+    supported_formats()
+        // 微信内部表情拖拽可能返回 S_FALSE；HRESULT::is_ok() 会把它也当成成功。
+        // QueryGetData 只有 S_OK 才表示请求的格式可提供。
+        .any(|id| unsafe { data.QueryGetData(&format(id, -1, TYMED_HGLOBAL.0 as u32)) == S_OK })
 }
 
 fn copy_effect(supported: bool, allowed: DROPEFFECT) -> DROPEFFECT {
@@ -83,38 +109,29 @@ impl Drop for Medium {
 
 fn get(data: &IDataObject, request: &FORMATETC) -> Result<Medium, String> {
     let result = unsafe { data.GetData(request) };
-    #[cfg(debug_assertions)]
-    if std::env::var_os("STICKER_DROP_DIAGNOSTICS").is_some() {
-        eprintln!(
-            "drop GetData format={} index={} medium={} result={:?}",
-            request.cfFormat,
-            request.lindex,
-            request.tymed,
-            result
-                .as_ref()
-                .map(|medium| medium.tymed)
-                .map_err(|e| e.code())
-        );
-    }
+    crate::diagnostics::drop_diag!(
+        "drop GetData format={} index={} medium={} result={:?}",
+        request.cfFormat,
+        request.lindex,
+        request.tymed,
+        result
+            .as_ref()
+            .map(|medium| medium.tymed)
+            .map_err(|e| e.code())
+    );
     result.map(Medium).map_err(|e| e.to_string())
 }
 
-fn diagnose_formats(data: &IDataObject, stage: &str) {
+pub fn diagnose_formats(data: &IDataObject, stage: &str) {
     #[cfg(debug_assertions)]
-    if std::env::var_os("STICKER_DROP_DIAGNOSTICS").is_some() {
+    if crate::diagnostics::enabled() {
         use windows::Win32::System::{
             Com::{CoTaskMemFree, DATADIR_GET},
             DataExchange::GetClipboardFormatNameW,
         };
         // 只记录格式和结果码，不读取文件名、路径或图片内容。
         unsafe {
-            for id in [
-                15,
-                registered("FileGroupDescriptorW"),
-                registered("PNG"),
-                17,
-                8,
-            ] {
+            for id in supported_formats().chain([registered("HTML Format")]) {
                 let request = format(id, -1, TYMED_HGLOBAL.0 as u32);
                 eprintln!(
                     "drop {stage} probe={id} query={:?}",
@@ -212,7 +229,7 @@ fn descriptors(bytes: &[u8]) -> Result<Vec<String>, String> {
     let count = bytes.get(..4).ok_or("虚拟文件列表不完整")?;
     let count = u32::from_le_bytes(count.try_into().unwrap()) as usize;
     let size = std::mem::size_of::<FILEDESCRIPTORW>();
-    if count == 0 || count > MAX_FILES || bytes.len() < 4 + count * size {
+    if count == 0 || count > MAX_ITEMS || bytes.len() < 4 + count * size {
         return Err("虚拟文件列表无效或超过 256 项".into());
     }
     (0..count)
@@ -237,7 +254,7 @@ fn descriptors(bytes: &[u8]) -> Result<Vec<String>, String> {
         .collect()
 }
 
-fn dib_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn dib_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
     if bytes.len() < 40 {
         return Err("位图数据不完整".into());
     }
@@ -270,6 +287,66 @@ fn dib_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
         .and_then(|n| palette.checked_mul(4).and_then(|p| n.checked_add(p)))
         .filter(|n| *n <= bytes.len())
         .ok_or("位图调色板无效")?;
+    let compression = read_u32(16);
+    if bits == 32 && matches!(compression, 0 | 3 | 6) {
+        let width = i32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        let height = i32::from_le_bytes(bytes[8..12].try_into().unwrap());
+        let w = usize::try_from(width).map_err(|_| "位图宽度无效")?;
+        let h = height.unsigned_abs() as usize;
+        let size = w
+            .checked_mul(h)
+            .and_then(|n| n.checked_mul(4))
+            .filter(|n| *n > 0 && *n <= MAX_BYTES)
+            .ok_or("位图尺寸无效")?;
+        let pixels = bytes
+            .get(offset..offset.checked_add(size).ok_or("位图尺寸无效")?)
+            .ok_or("位图像素数据不完整")?;
+        let masks = if compression == 0 {
+            [0xff0000, 0xff00, 0xff, 0]
+        } else {
+            let alpha = if header >= 108 || compression == 6 {
+                read_u32(52) as u32
+            } else {
+                0
+            };
+            [
+                read_u32(40) as u32,
+                read_u32(44) as u32,
+                read_u32(48) as u32,
+                alpha,
+            ]
+        };
+        if masks[..3].contains(&0)
+            || masks
+                .iter()
+                .enumerate()
+                .any(|(i, &mask)| masks[..i].iter().any(|other| mask & other != 0))
+        {
+            return Err("位图通道掩码无效".into());
+        }
+        let component = |pixel: u32, mask: u32| {
+            if mask == 0 {
+                return 255;
+            }
+            let shift = mask.trailing_zeros();
+            let max = mask >> shift;
+            ((((pixel & mask) >> shift) as u64 * 255 + u64::from(max) / 2) / u64::from(max)) as u8
+        };
+        let mut rgba = Vec::with_capacity(size);
+        for row in 0..h {
+            let y = if height < 0 { row } else { h - row - 1 };
+            for &pixel in pixels[y * w * 4..(y + 1) * w * 4].as_chunks::<4>().0 {
+                let pixel = u32::from_le_bytes(pixel);
+                rgba.extend(masks.map(|mask| component(pixel, mask)));
+            }
+        }
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).ok_or("位图尺寸无效")?;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut png, image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        return Ok(png.into_inner());
+    }
     let mut bmp = Vec::with_capacity(bytes.len() + 14);
     bmp.extend_from_slice(b"BM");
     bmp.extend_from_slice(&((bytes.len() + 14) as u32).to_le_bytes());
@@ -283,11 +360,6 @@ fn dib_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
         .write_to(&mut png, image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
     Ok(png.into_inner())
-}
-
-struct Received {
-    paths: Vec<PathBuf>,
-    _temporary: Option<tempfile::TempDir>,
 }
 
 struct ComApartment;
@@ -308,7 +380,8 @@ impl Drop for ComApartment {
 // AgileReference 持有对象并通过 COM 封送；绝不把 apartment-bound IDataObject 裸指针传给线程。
 fn receive_in_background(
     data: &IDataObject,
-    complete: impl FnOnce(Result<Received, String>) + Send + 'static,
+    root: PathBuf,
+    complete: impl FnOnce(Result<Staged, String>) + Send + 'static,
 ) -> Result<(), String> {
     let reference = AgileReference::new(data).map_err(|e| e.to_string())?;
     let asynchronous = data
@@ -342,7 +415,7 @@ fn receive_in_background(
                 let result = data_reference
                     .resolve()
                     .map_err(|e| e.to_string())
-                    .and_then(|data| receive(&data));
+                    .and_then(|data| receive_drop(&data, &root));
                 if let Some(operation) = operation {
                     unsafe {
                         operation
@@ -387,7 +460,14 @@ fn receive_in_background(
 }
 
 fn read_hdrop(data: &IDataObject, limit: Option<usize>) -> Result<Vec<PathBuf>, String> {
-    let medium = get(data, &format(15, -1, TYMED_HGLOBAL.0 as u32))?;
+    let request = format(15, -1, TYMED_HGLOBAL.0 as u32);
+    if unsafe { data.QueryGetData(&request) } != S_OK {
+        return Err(UNSUPPORTED_DROP.into());
+    }
+    let medium = get(data, &request)?;
+    if medium.0.tymed != TYMED_HGLOBAL.0 as u32 {
+        return Err("拖入文件介质无效".into());
+    }
     let drop = unsafe { HDROP(medium.0.u.hGlobal.0) };
     let count = unsafe { DragQueryFileW(drop, u32::MAX, None) };
     if count == 0 || limit.is_some_and(|max| count as usize > max) {
@@ -405,15 +485,54 @@ fn read_hdrop(data: &IDataObject, limit: Option<usize>) -> Result<Vec<PathBuf>, 
     Ok(paths)
 }
 
-fn receive(data: &IDataObject) -> Result<Received, String> {
-    diagnose_formats(data, "receive");
-    if unsafe { data.QueryGetData(&format(15, -1, TYMED_HGLOBAL.0 as u32)) == S_OK } {
-        return Ok(Received {
-            paths: read_hdrop(data, Some(MAX_FILES))?,
-            _temporary: None,
-        });
+fn is_network_path(path: &Path) -> bool {
+    if let Some(std::path::Component::Prefix(prefix)) = path.components().next() {
+        return matches!(
+            prefix.kind(),
+            std::path::Prefix::UNC(..) | std::path::Prefix::VerbatimUNC(..)
+        );
     }
-    let temporary = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let raw = path.to_string_lossy();
+    raw.starts_with("//")
+        || (raw.starts_with("\\\\") && !raw.starts_with("\\\\?\\") && !raw.starts_with("\\\\.\\"))
+}
+
+pub fn receive(data: &IDataObject, source: Source, root: &Path) -> Result<ClipboardRead, String> {
+    diagnose_formats(data, "receive");
+    let mut rejected_network = 0usize;
+    if unsafe { data.QueryGetData(&format(15, -1, TYMED_HGLOBAL.0 as u32)) == S_OK } {
+        let paths = read_hdrop(data, Some(MAX_ITEMS))?;
+        if source == Source::Drop {
+            return Ok(ClipboardRead::Staged(Staged::existing(paths)));
+        }
+        let mut local = Vec::with_capacity(paths.len());
+        for path in paths {
+            if is_network_path(&path) {
+                rejected_network += 1;
+            } else {
+                local.push(path);
+            }
+        }
+        if !local.is_empty() {
+            let mut staged = Staged::existing(local);
+            if rejected_network > 0 {
+                staged.failures.push(sticker_core::ImportFailure {
+                    path: "网络路径".into(),
+                    message: "不支持从剪贴板导入网络路径".into(),
+                    count: rejected_network,
+                });
+            }
+            return Ok(ClipboardRead::Staged(staged));
+        }
+    }
+    let mut staged = Staging::new(
+        root,
+        if source == Source::Drop {
+            Origin::Drop
+        } else {
+            Origin::Clipboard
+        },
+    )?;
     if let Ok(medium) = get(
         data,
         &format(
@@ -423,50 +542,93 @@ fn receive(data: &IDataObject) -> Result<Received, String> {
         ),
     ) {
         let names = descriptors(&bytes(&medium)?)?;
-        let mut paths = Vec::new();
-        let mut total = 0;
         for (index, name) in names.iter().enumerate() {
-            let medium = get(
+            let result = get(
                 data,
                 &format(
                     registered("FileContents"),
                     index as i32,
                     (TYMED_HGLOBAL.0 | TYMED_ISTREAM.0) as u32,
                 ),
-            )?;
-            let content = bytes(&medium)?;
-            total += content.len();
-            if total > MAX_BYTES {
-                return Err("拖入文件总量超过 100 MB".into());
+            )
+            .and_then(|medium| bytes(&medium))
+            .and_then(|content| staged.add_named(name, &content));
+            if let Err(error) = result {
+                staged.fail(name, error, 1);
             }
-            let directory = temporary.path().join(index.to_string());
-            std::fs::create_dir(&directory).map_err(|e| e.to_string())?;
-            let path = directory.join(name);
-            std::fs::write(&path, content).map_err(|e| e.to_string())?;
-            paths.push(path);
         }
-        return Ok(Received {
-            paths,
-            _temporary: Some(temporary),
-        });
+        return Ok(ClipboardRead::Staged(staged.finish()));
     }
-    for id in [registered("PNG"), 17, 8] {
+    let mut last_image_error: Option<String> = None;
+    for id in animated_formats() {
         if let Ok(medium) = get(data, &format(id, -1, TYMED_HGLOBAL.0 as u32)) {
-            let content = bytes(&medium)?;
-            let content = if id == 17 || id == 8 {
-                dib_png(&content)?
-            } else {
-                content
-            };
-            let path = temporary.path().join("收到的表情.png");
-            std::fs::write(&path, content).map_err(|e| e.to_string())?;
-            return Ok(Received {
-                paths: vec![path],
-                _temporary: Some(temporary),
-            });
+            match bytes(&medium).and_then(|content| staged.add_bytes(&content)) {
+                Ok(_) => return Ok(ClipboardRead::Staged(staged.finish())),
+                Err(error) => last_image_error = Some(error),
+            }
         }
     }
-    Err(UNSUPPORTED_DROP.into())
+    let mut remote_only = false;
+    if source == Source::Clipboard
+        && let Ok(medium) = get(
+            data,
+            &format(registered("HTML Format"), -1, TYMED_HGLOBAL.0 as u32),
+        )
+        && let Ok(content) = bytes(&medium)
+    {
+        let images = html::images(&String::from_utf8_lossy(&content), &mut staged);
+        remote_only = images.remote_only;
+        if images.added > 0 {
+            return Ok(ClipboardRead::Staged(staged.finish()));
+        }
+    }
+    for id in static_formats() {
+        if let Ok(medium) = get(data, &format(id, -1, TYMED_HGLOBAL.0 as u32)) {
+            let result = bytes(&medium)
+                .and_then(|content| {
+                    if id == 17 || id == 8 {
+                        dib_png(&content)
+                    } else {
+                        Ok(content)
+                    }
+                })
+                .and_then(|content| staged.add_bytes(&content));
+            match result {
+                Ok(_) => return Ok(ClipboardRead::Staged(staged.finish())),
+                Err(error) => last_image_error = Some(error),
+            }
+        }
+    }
+    if let Some(error) = last_image_error {
+        staged.fail("图片", error, 1);
+        return Ok(ClipboardRead::Staged(staged.finish()));
+    }
+    let finished = staged.finish();
+    if !finished.failures.is_empty() {
+        return Ok(ClipboardRead::Staged(finished));
+    }
+    if rejected_network > 0 {
+        let mut rejected = Staged::existing(vec![]);
+        rejected.failures.push(sticker_core::ImportFailure {
+            path: "网络路径".into(),
+            message: "不支持从剪贴板导入网络路径".into(),
+            count: rejected_network,
+        });
+        return Ok(ClipboardRead::Staged(rejected));
+    }
+    Ok(ClipboardRead::Empty { remote_only })
+}
+fn receive_drop(data: &IDataObject, root: &Path) -> Result<Staged, String> {
+    match receive(data, Source::Drop, root)? {
+        ClipboardRead::Staged(staged) if staged.paths.is_empty() => {
+            Err(staged.failures.first().map_or_else(
+                || UNSUPPORTED_DROP.into(),
+                |failure| failure.message.clone(),
+            ))
+        }
+        ClipboardRead::Staged(staged) => Ok(staged),
+        ClipboardRead::Empty { .. } => Err(UNSUPPORTED_DROP.into()),
+    }
 }
 
 fn create_drop_target_helper() -> Option<IDropTargetHelper> {
@@ -593,30 +755,9 @@ impl IDropTarget_Impl for Target_Impl {
             .ok_or_else(|| "拖入数据为空".into())
             .and_then(|data| {
                 let app = self.app.clone();
-                receive_in_background(data, move |received| {
-                    tauri::async_runtime::spawn(async move {
-                        let result = match &received {
-                            Ok(received) => {
-                                crate::imports::run(app.clone(), received.paths.clone(), true).await
-                            }
-                            Err(error) => Err(error.clone()),
-                        };
-                        match result {
-                            Ok(report) => {
-                                let _ = app.emit_to("ball", "external-drop-result", report);
-                            }
-                            Err(error) => {
-                                let handle = app.clone();
-                                let _ = app.run_on_main_thread(move || {
-                                    let _ = crate::ball::ball_message(
-                                        handle,
-                                        format!("导入失败：{error}"),
-                                    );
-                                });
-                            }
-                        }
-                        drop(received);
-                    });
+                let root = app.state::<StagingRoot>().0.clone();
+                receive_in_background(data, root, move |received| {
+                    tauri::async_runtime::spawn(staging::complete(app, received, true));
                 })
             });
         let final_effect = match result {
@@ -637,17 +778,41 @@ impl IDropTarget_Impl for Target_Impl {
     }
 }
 
-/// 主窗口与表情面板的原生 `IDropTarget`：转发 `IDropTargetHelper` 以渲染拖拽预览图，
-/// 并直接派发标准的 `tauri://drag-*` 事件。
+/// Preserve path events for category drops and panel; native data is imported on main only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    None,
+    Paths,
+    Native,
+}
+fn webview_mode(paths: bool, supported: bool, main: bool, copy: bool) -> Mode {
+    match crate::drop_policy::classify(paths, supported && main, false, copy) {
+        crate::drop_policy::DragDecision::Wry => Mode::Paths,
+        crate::drop_policy::DragDecision::Native => Mode::Native,
+        crate::drop_policy::DragDecision::Rejected(_) => Mode::None,
+    }
+}
 #[implement(IDropTarget)]
 struct WebviewDropTarget {
     app: tauri::AppHandle,
     label: String,
     root: HWND,
     helper: Option<IDropTargetHelper>,
-    accepted: Cell<bool>,
+    mode: Cell<Mode>,
 }
-
+impl WebviewDropTarget_Impl {
+    fn leave(&self) {
+        match self.mode.replace(Mode::None) {
+            Mode::Paths => {
+                let _ =
+                    self.app
+                        .emit_to(EventTarget::labeled(&self.label), "tauri://drag-leave", ());
+            }
+            Mode::Native => staging::emit(&self.app, ExternalDrop::Leave),
+            Mode::None => {}
+        }
+    }
+}
 #[allow(non_snake_case)]
 impl IDropTarget_Impl for WebviewDropTarget_Impl {
     fn DragEnter(
@@ -661,36 +826,48 @@ impl IDropTarget_Impl for WebviewDropTarget_Impl {
             .as_ref()
             .and_then(|data| read_hdrop(data, None).ok())
             .unwrap_or_default();
-        let chosen = unsafe { copy_effect(!paths.is_empty(), *effect) };
+        let supported = data.as_ref().is_some_and(supports_drop);
+        let mode = webview_mode(!paths.is_empty(), supported, self.label == "main", unsafe {
+            (*effect).0 & DROPEFFECT_COPY.0 != 0
+        });
+        self.mode.set(mode);
+        let chosen = unsafe { copy_effect(mode != Mode::None, *effect) };
         unsafe {
             *effect = chosen;
         }
-        self.accepted.set(chosen != DROPEFFECT_NONE);
         if let Some(helper) = &self.helper {
             let point = screen_point(pt);
             let _ = unsafe { helper.DragEnter(self.root, data.as_ref(), &point, chosen) };
         }
-        if chosen != DROPEFFECT_NONE {
-            let payload = DragDropPayload {
-                paths: Some(paths),
-                position: client_position(self.root, pt),
-            };
-            let _ = self.app.emit_to(
-                EventTarget::labeled(&self.label),
-                "tauri://drag-enter",
-                payload,
-            );
+        match mode {
+            Mode::Paths => {
+                let _ = self.app.emit_to(
+                    EventTarget::labeled(&self.label),
+                    "tauri://drag-enter",
+                    DragDropPayload {
+                        paths: Some(paths),
+                        position: client_position(self.root, pt),
+                    },
+                );
+            }
+            Mode::Native => staging::emit(&self.app, ExternalDrop::Enter),
+            Mode::None if self.label == "main" && !supported && paths.is_empty() => staging::emit(
+                &self.app,
+                ExternalDrop::Rejected {
+                    message: UNSUPPORTED_DROP.into(),
+                },
+            ),
+            Mode::None => {}
         }
         Ok(())
     }
-
     fn DragOver(
         &self,
         _: MODIFIERKEYS_FLAGS,
         pt: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        let chosen = unsafe { copy_effect(self.accepted.get(), *effect) };
+        let chosen = unsafe { copy_effect(self.mode.get() != Mode::None, *effect) };
         unsafe {
             *effect = chosen;
         }
@@ -698,32 +875,34 @@ impl IDropTarget_Impl for WebviewDropTarget_Impl {
             let point = screen_point(pt);
             let _ = unsafe { helper.DragOver(&point, chosen) };
         }
-        if chosen != DROPEFFECT_NONE {
-            let payload = DragDropPayload {
-                paths: None,
-                position: client_position(self.root, pt),
-            };
+        if self.mode.get() == Mode::Paths && chosen != DROPEFFECT_NONE {
             let _ = self.app.emit_to(
                 EventTarget::labeled(&self.label),
                 "tauri://drag-over",
-                payload,
+                DragDropPayload {
+                    paths: None,
+                    position: client_position(self.root, pt),
+                },
+            );
+        } else if self.mode.get() == Mode::Native {
+            staging::emit(
+                &self.app,
+                if chosen == DROPEFFECT_NONE {
+                    ExternalDrop::Leave
+                } else {
+                    ExternalDrop::Enter
+                },
             );
         }
         Ok(())
     }
-
     fn DragLeave(&self) -> windows::core::Result<()> {
         if let Some(helper) = &self.helper {
             let _ = unsafe { helper.DragLeave() };
         }
-        if self.accepted.replace(false) {
-            let _ = self
-                .app
-                .emit_to(EventTarget::labeled(&self.label), "tauri://drag-leave", ());
-        }
+        self.leave();
         Ok(())
     }
-
     fn Drop(
         &self,
         data: Ref<IDataObject>,
@@ -731,29 +910,64 @@ impl IDropTarget_Impl for WebviewDropTarget_Impl {
         pt: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        let paths = data
-            .as_ref()
-            .and_then(|data| read_hdrop(data, None).ok())
-            .unwrap_or_default();
-        let chosen = unsafe { copy_effect(!paths.is_empty(), *effect) };
+        let mode = self.mode.get();
+        let mut chosen = unsafe { copy_effect(mode != Mode::None, *effect) };
+        if chosen == DROPEFFECT_NONE {
+            self.leave();
+        } else if mode == Mode::Paths {
+            self.mode.set(Mode::None);
+            let paths = data
+                .as_ref()
+                .and_then(|data| read_hdrop(data, None).ok())
+                .unwrap_or_default();
+            if paths.is_empty() {
+                chosen = DROPEFFECT_NONE;
+                let _ =
+                    self.app
+                        .emit_to(EventTarget::labeled(&self.label), "tauri://drag-leave", ());
+            } else {
+                let _ = self.app.emit_to(
+                    EventTarget::labeled(&self.label),
+                    "tauri://drag-drop",
+                    DragDropPayload {
+                        paths: Some(paths),
+                        position: client_position(self.root, pt),
+                    },
+                );
+            }
+        } else if mode == Mode::Native {
+            fn finish_receiving(app: &tauri::AppHandle, done: &std::sync::atomic::AtomicBool) {
+                if !done.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                    staging::emit(app, ExternalDrop::ReceivingDone);
+                }
+            }
+            self.leave();
+            staging::emit(&self.app, ExternalDrop::Receiving);
+            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let result = data
+                .as_ref()
+                .ok_or_else(|| "拖入数据为空".to_string())
+                .and_then(|data| {
+                    let app = self.app.clone();
+                    let done = done.clone();
+                    let root = app.state::<StagingRoot>().0.clone();
+                    receive_in_background(data, root, move |received| {
+                        finish_receiving(&app, &done);
+                        tauri::async_runtime::spawn(staging::complete(app, received, false));
+                    })
+                });
+            if let Err(message) = result {
+                chosen = DROPEFFECT_NONE;
+                finish_receiving(&self.app, &done);
+                staging::emit(&self.app, ExternalDrop::Failed { message });
+            }
+        }
         unsafe {
             *effect = chosen;
         }
-        self.accepted.set(false);
         if let Some(helper) = &self.helper {
             let point = screen_point(pt);
             let _ = unsafe { helper.Drop(data.as_ref(), &point, chosen) };
-        }
-        if chosen != DROPEFFECT_NONE {
-            let payload = DragDropPayload {
-                paths: Some(paths),
-                position: client_position(self.root, pt),
-            };
-            let _ = self.app.emit_to(
-                EventTarget::labeled(&self.label),
-                "tauri://drag-drop",
-                payload,
-            );
         }
         Ok(())
     }
@@ -820,7 +1034,7 @@ pub fn install_webview(window: &tauri::WebviewWindow) -> Result<(), String> {
         label: window.label().to_string(),
         root,
         helper: create_drop_target_helper(),
-        accepted: Cell::new(false),
+        mode: Cell::new(Mode::None),
     }
     .into();
     register_on_window(window, target)
@@ -1009,13 +1223,7 @@ mod tests {
     #[test]
     fn supported_formats_require_an_explicit_copy_operation() {
         use windows::Win32::System::Ole::DROPEFFECT_MOVE;
-        for id in [
-            15,
-            registered("FileGroupDescriptorW"),
-            registered("PNG"),
-            17,
-            8,
-        ] {
+        for id in supported_formats() {
             let data: IDataObject = Sample {
                 formats: vec![(id, -1, vec![1], TYMED_HGLOBAL.0 as u32)],
                 ..Default::default()
@@ -1074,7 +1282,7 @@ mod tests {
         let wrong = format(registered("FileContents"), 0, TYMED_HGLOBAL.0 as u32);
         assert!(unsafe { data.QueryGetData(&wrong) }.is_err());
         assert!(get(&data, &wrong).is_err());
-        let received = receive(&data).unwrap();
+        let received = receive_drop(&data, &std::env::temp_dir()).unwrap();
         assert_eq!(std::fs::read(&received.paths[0]).unwrap(), original);
         let path = received.paths[0].clone();
         drop(received);
@@ -1111,7 +1319,7 @@ mod tests {
         }
         .into();
         let (send, receive) = std::sync::mpsc::channel();
-        receive_in_background(&data, move |result| {
+        receive_in_background(&data, std::env::temp_dir(), move |result| {
             send.send(result).unwrap();
         })
         .unwrap();
@@ -1141,7 +1349,7 @@ mod tests {
         }
         .into();
         let (send, receive) = std::sync::mpsc::channel();
-        receive_in_background(&data, move |result| {
+        receive_in_background(&data, std::env::temp_dir(), move |result| {
             send.send(result.err()).unwrap();
         })
         .unwrap();
@@ -1162,7 +1370,7 @@ mod tests {
             formats: vec![(
                 registered("PNG"),
                 -1,
-                b"png bytes".to_vec(),
+                b"\x89PNG\r\n\x1a\n".to_vec(),
                 TYMED_HGLOBAL.0 as u32,
             )],
             ..Default::default()
@@ -1170,7 +1378,7 @@ mod tests {
         .into();
         let caller = std::thread::current().id();
         let (send, receive) = std::sync::mpsc::channel();
-        receive_in_background(&data, move |result| {
+        receive_in_background(&data, std::env::temp_dir(), move |result| {
             send.send((std::thread::current().id(), result)).unwrap();
         })
         .unwrap();
@@ -1178,7 +1386,7 @@ mod tests {
         assert_ne!(caller, worker);
         assert_eq!(
             std::fs::read(&received.unwrap().paths[0]).unwrap(),
-            b"png bytes"
+            b"\x89PNG\r\n\x1a\n"
         );
     }
 
@@ -1198,7 +1406,7 @@ mod tests {
             ..Default::default()
         }
         .into();
-        let received = receive(&data).unwrap();
+        let received = receive_drop(&data, &std::env::temp_dir()).unwrap();
         assert_eq!(received.paths.as_slice(), std::slice::from_ref(&path));
         drop(received);
         assert_eq!(std::fs::read(path).unwrap(), b"original");
@@ -1235,7 +1443,7 @@ mod tests {
             ..Default::default()
         }
         .into();
-        let received = receive(&data).unwrap();
+        let received = receive_drop(&data, &std::env::temp_dir()).unwrap();
         assert_eq!(received.paths.len(), 1);
         let path = received.paths[0].clone();
         assert_eq!(path.file_name().unwrap(), "收到.gif");
@@ -1264,10 +1472,15 @@ mod tests {
             ..Default::default()
         }
         .into();
-        let received = receive(&data).unwrap();
+        let received = receive_drop(&data, &std::env::temp_dir()).unwrap();
         assert_eq!(std::fs::read(&received.paths[0]).unwrap(), original);
         let unsupported: IDataObject = Sample::default().into();
-        assert!(receive(&unsupported).err().unwrap().contains("没有提供"));
+        assert!(
+            receive_drop(&unsupported, &std::env::temp_dir())
+                .err()
+                .unwrap()
+                .contains("没有提供")
+        );
     }
 
     #[test]
@@ -1303,7 +1516,7 @@ mod tests {
                 ..Default::default()
             }
             .into();
-            let received = receive(&data).unwrap();
+            let received = receive_drop(&data, &std::env::temp_dir()).unwrap();
             let staged = received.paths[0].clone();
             let root = tempfile::tempdir().unwrap();
             let mut library = sticker_core::Library::open(root.path()).unwrap();
@@ -1354,7 +1567,7 @@ mod tests {
             ..Default::default()
         }
         .into();
-        let received = receive(&data).unwrap();
+        let received = receive_drop(&data, &std::env::temp_dir()).unwrap();
         let root = tempfile::tempdir().unwrap();
         let mut library = sticker_core::Library::open(root.path()).unwrap();
         let report = library.import_paths(&received.paths);
@@ -1379,6 +1592,82 @@ mod tests {
     }
 
     #[test]
+    fn main_webview_accepts_native_and_prioritizes_paths() {
+        assert_eq!(webview_mode(true, true, true, true), Mode::Paths);
+        assert_eq!(webview_mode(false, true, true, true), Mode::Native);
+        assert_eq!(webview_mode(false, true, false, true), Mode::None);
+        assert_eq!(webview_mode(true, true, true, false), Mode::None);
+    }
+    #[test]
+    fn dib32_top_down_and_v5_alpha() {
+        for (header, compression, alpha) in [(40usize, 0u32, 255), (124, 3, 128)] {
+            let mut dib = vec![0; header];
+            dib[0..4].copy_from_slice(&(header as u32).to_le_bytes());
+            dib[4..8].copy_from_slice(&1i32.to_le_bytes());
+            dib[8..12].copy_from_slice(&(-2i32).to_le_bytes());
+            dib[12..14].copy_from_slice(&1u16.to_le_bytes());
+            dib[14..16].copy_from_slice(&32u16.to_le_bytes());
+            dib[16..20].copy_from_slice(&compression.to_le_bytes());
+            if compression == 3 {
+                for (index, mask) in [0xff0000u32, 0xff00, 0xff, 0xff000000]
+                    .into_iter()
+                    .enumerate()
+                {
+                    dib[40 + index * 4..44 + index * 4].copy_from_slice(&mask.to_le_bytes());
+                }
+            }
+            dib.extend_from_slice(&[67, 45, 23, 128, 12, 34, 56, 128]);
+            let decoded = image::load_from_memory(&dib_png(&dib).unwrap())
+                .unwrap()
+                .to_rgba8();
+            assert_eq!(decoded.get_pixel(0, 0).0, [23, 45, 67, alpha]);
+            assert_eq!(decoded.get_pixel(0, 1).0, [56, 34, 12, alpha]);
+        }
+    }
+    #[test]
+    fn clipboard_prefers_raw_animation_and_html_is_not_drag_format() {
+        let png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let gif = b"GIF89a".to_vec();
+        let data: IDataObject = Sample {
+            formats: vec![
+                (registered("PNG"), -1, png, TYMED_HGLOBAL.0 as u32),
+                (
+                    registered("image/gif"),
+                    -1,
+                    gif.clone(),
+                    TYMED_HGLOBAL.0 as u32,
+                ),
+            ],
+            ..Default::default()
+        }
+        .into();
+        let root = tempfile::tempdir().unwrap();
+        let ClipboardRead::Staged(staged) = receive(&data, Source::Clipboard, root.path()).unwrap()
+        else {
+            panic!("expected image")
+        };
+        assert_eq!(std::fs::read(&staged.paths[0]).unwrap(), gif);
+        let data: IDataObject = Sample {
+            formats: vec![(
+                registered("HTML Format"),
+                -1,
+                b"<img src=data:image/gif;base64,R0lGODlh>".to_vec(),
+                TYMED_HGLOBAL.0 as u32,
+            )],
+            ..Default::default()
+        }
+        .into();
+        assert!(!supports_drop(&data));
+        assert!(matches!(
+            receive(&data, Source::Drop, root.path()).unwrap(),
+            ClipboardRead::Empty { .. }
+        ));
+        assert!(matches!(
+            receive(&data, Source::Clipboard, root.path()).unwrap(),
+            ClipboardRead::Staged(_)
+        ));
+    }
+    #[test]
     fn dib_round_trip_keeps_pixels_and_rejects_invalid_headers() {
         let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             2,
@@ -1395,5 +1684,51 @@ mod tests {
         malformed[..4].copy_from_slice(&40u32.to_le_bytes());
         malformed[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(dib_png(&malformed).is_err());
+    }
+
+    #[test]
+    fn clipboard_hdrop_rejects_unc_and_falls_back_to_image_bytes() {
+        use std::os::windows::ffi::OsStrExt;
+        let unc = std::ffi::OsStr::new(r"\\server\share\emoji.png");
+        let mut hdrop = 20u32.to_le_bytes().to_vec();
+        hdrop.extend_from_slice(&[0; 12]);
+        hdrop.extend_from_slice(&1u32.to_le_bytes());
+        for value in unc.encode_wide().chain([0, 0]) {
+            hdrop.extend_from_slice(&value.to_le_bytes());
+        }
+        let png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let data: IDataObject = Sample {
+            formats: vec![
+                (15, -1, hdrop.clone(), TYMED_HGLOBAL.0 as u32),
+                (registered("PNG"), -1, png.clone(), TYMED_HGLOBAL.0 as u32),
+            ],
+            ..Default::default()
+        }
+        .into();
+        let root = tempfile::tempdir().unwrap();
+        let ClipboardRead::Staged(staged) = receive(&data, Source::Clipboard, root.path()).unwrap()
+        else {
+            panic!("expected PNG fallback when clipboard HDROP only has UNC path")
+        };
+        assert_eq!(std::fs::read(&staged.paths[0]).unwrap(), png);
+
+        let unc_only: IDataObject = Sample {
+            formats: vec![(15, -1, hdrop, TYMED_HGLOBAL.0 as u32)],
+            ..Default::default()
+        }
+        .into();
+        let ClipboardRead::Staged(rejected) =
+            receive(&unc_only, Source::Clipboard, root.path()).unwrap()
+        else {
+            panic!("expected UNC refusal")
+        };
+        assert!(rejected.paths.is_empty());
+        assert_eq!(rejected.failures.len(), 1);
+        assert!(is_network_path(Path::new(r"\\server\share\emoji.png")));
+        assert!(is_network_path(Path::new(
+            r"\\?\UNC\server\share\emoji.png"
+        )));
+        assert!(!is_network_path(Path::new(r"\\?\C:\Users\demo\emoji.png")));
+        assert!(!is_network_path(Path::new(r"C:\Users\demo\emoji.png")));
     }
 }

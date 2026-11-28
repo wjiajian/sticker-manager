@@ -421,7 +421,7 @@ pub fn set_ball_drop(app: AppHandle, paths: Option<Vec<PathBuf>>) -> Result<(), 
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub fn external_drop(app: &AppHandle, active: bool) -> Result<(), String> {
     let settings = app.state::<SettingsState>().get();
     let state = app.state::<BallState>();
@@ -431,6 +431,12 @@ pub fn external_drop(app: &AppHandle, active: bool) -> Result<(), String> {
     runtime.idle_since = Instant::now();
     render(app, &mut runtime, &settings)?;
     Ok(())
+}
+pub fn notify(app: &AppHandle, message: String) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = ball_message(handle, message);
+    });
 }
 #[tauri::command]
 pub fn ball_message(app: AppHandle, message: String) -> Result<(), String> {
@@ -495,6 +501,12 @@ mod native {
                     .maximizable(false)
             })
             .build()?;
+        if let Some(window) = app.get_webview_window("ball")
+            && let Err(error) =
+                crate::macos_drop::install(&window, crate::macos_drop::Surface::Ball)
+        {
+            eprintln!("悬浮球拖放处理器安装失败：{error}");
+        }
         Ok(())
     }
     pub fn set_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
