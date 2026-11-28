@@ -335,8 +335,8 @@ pub(crate) fn dib_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
         let mut rgba = Vec::with_capacity(size);
         for row in 0..h {
             let y = if height < 0 { row } else { h - row - 1 };
-            for pixel in pixels[y * w * 4..(y + 1) * w * 4].chunks_exact(4) {
-                let pixel = u32::from_le_bytes(pixel.try_into().unwrap());
+            for &pixel in pixels[y * w * 4..(y + 1) * w * 4].as_chunks::<4>().0 {
+                let pixel = u32::from_le_bytes(pixel);
                 rgba.extend(masks.map(|mask| component(pixel, mask)));
             }
         }
