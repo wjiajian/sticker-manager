@@ -486,8 +486,15 @@ fn read_hdrop(data: &IDataObject, limit: Option<usize>) -> Result<Vec<PathBuf>, 
 }
 
 fn is_network_path(path: &Path) -> bool {
+    if let Some(std::path::Component::Prefix(prefix)) = path.components().next() {
+        return matches!(
+            prefix.kind(),
+            std::path::Prefix::UNC(..) | std::path::Prefix::VerbatimUNC(..)
+        );
+    }
     let raw = path.to_string_lossy();
-    raw.starts_with("\\\\") || raw.starts_with("//")
+    raw.starts_with("//")
+        || (raw.starts_with("\\\\") && !raw.starts_with("\\\\?\\") && !raw.starts_with("\\\\.\\"))
 }
 
 pub fn receive(data: &IDataObject, source: Source, root: &Path) -> Result<ClipboardRead, String> {
@@ -571,10 +578,8 @@ pub fn receive(data: &IDataObject, source: Source, root: &Path) -> Result<Clipbo
     {
         let images = html::images(&String::from_utf8_lossy(&content), &mut staged);
         remote_only = images.remote_only;
-        if !images.paths.is_empty() {
-            let mut staged = staged.finish();
-            staged.paths = images.paths;
-            return Ok(ClipboardRead::Staged(staged));
+        if images.added > 0 {
+            return Ok(ClipboardRead::Staged(staged.finish()));
         }
     }
     for id in static_formats() {
@@ -940,11 +945,13 @@ impl IDropTarget_Impl for WebviewDropTarget_Impl {
                     let app = self.app.clone();
                     let root = app.state::<StagingRoot>().0.clone();
                     receive_in_background(data, root, move |received| {
+                        staging::emit(&app, ExternalDrop::ReceivingDone);
                         tauri::async_runtime::spawn(staging::complete(app, received, false));
                     })
                 });
             if let Err(message) = result {
                 chosen = DROPEFFECT_NONE;
+                staging::emit(&self.app, ExternalDrop::ReceivingDone);
                 staging::emit(&self.app, ExternalDrop::Failed { message });
             }
         }
@@ -1710,5 +1717,11 @@ mod tests {
         };
         assert!(rejected.paths.is_empty());
         assert_eq!(rejected.failures.len(), 1);
+        assert!(is_network_path(Path::new(r"\\server\share\emoji.png")));
+        assert!(is_network_path(Path::new(
+            r"\\?\UNC\server\share\emoji.png"
+        )));
+        assert!(!is_network_path(Path::new(r"\\?\C:\Users\demo\emoji.png")));
+        assert!(!is_network_path(Path::new(r"C:\Users\demo\emoji.png")));
     }
 }

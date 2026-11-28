@@ -90,11 +90,11 @@ pub fn local_file(src: &str) -> Option<PathBuf> {
     Some(path)
 }
 pub struct Images {
-    pub paths: Vec<PathBuf>,
+    pub added: usize,
     pub remote_only: bool,
 }
 pub fn images(html: &str, staged: &mut Staging) -> Images {
-    let mut paths = Vec::new();
+    let mut added = 0usize;
     let mut remote = false;
     let mut seen = HashSet::new();
     for src in sources(html) {
@@ -119,21 +119,24 @@ pub fn images(html: &str, staged: &mut Staging) -> Images {
                 )
             {
                 match staged.add_bytes(&bytes) {
-                    Ok(path) => paths.push(path),
+                    Ok(_) => added += 1,
                     Err(error) => staged.fail("图片", error, 1),
                 }
             }
         } else if let Some(path) = local_file(&src) {
             if path.is_file() {
-                paths.push(path);
+                match staged.add_existing(path) {
+                    Ok(()) => added += 1,
+                    Err(error) => staged.fail("图片", error, 1),
+                }
             }
         } else if !src.to_ascii_lowercase().starts_with("data:") {
             remote = true;
         }
     }
     Images {
-        remote_only: remote && paths.is_empty(),
-        paths,
+        remote_only: remote && added == 0,
+        added,
     }
 }
 #[cfg(test)]
@@ -149,7 +152,7 @@ mod tests {
             "<IMG SRC='data:image/gif;base64,R0lGODlh'><img src=data:image/gif;base64,R0lGODlh><img src=\"https://example.com/x?a=1&amp;b=2\"><img src='file://server/share/a.png'>",
             &mut staging,
         );
-        assert_eq!(result.paths.len(), 1);
+        assert_eq!(result.added, 1);
         assert!(!result.remote_only);
         assert!(images("<img src=//example.com/a.png>", &mut staging).remote_only);
         assert!(local_file("file://server/share/a.png").is_none());
@@ -176,7 +179,7 @@ mod tests {
             b = &png[4..],
         );
         let result = images(&html, &mut staging);
-        assert_eq!(result.paths.len(), 3);
+        assert_eq!(result.added, 3);
         assert!(!result.remote_only);
         assert!(
             images(
@@ -202,8 +205,9 @@ mod tests {
         let dir_url = url::Url::from_directory_path(&subdir).unwrap();
         let html = format!("<img src=\"{localhost_url}\"><img src=\"{dir_url}\">");
         let result = images(&html, &mut staging);
-        assert_eq!(result.paths, [file]);
+        assert_eq!(result.added, 1);
         assert!(!result.remote_only);
+        assert_eq!(staging.finish().paths, [file]);
     }
 
     #[test]

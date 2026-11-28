@@ -26,7 +26,8 @@ export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
   const [dragging, setDragging] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [receiving, setReceiving] = useState(false);
+  const [receivingCount, setReceivingCount] = useState(0);
+  const receiving = receivingCount > 0;
   const [pasting, setPasting] = useState(false);
   const pasteInProgress = useRef(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -71,10 +72,10 @@ export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
       if (disposed) return;
       if (payload.type === "enter") { setDragging(true); setNotice(null); setDialogError(null); }
       else if (payload.type === "leave") setDragging(false);
-      else if (payload.type === "receiving") { setReceiving(true); setDragging(false); setNotice(null); setDialogError(null); }
-      else if (payload.type === "receivingDone") setReceiving(false);
+      else if (payload.type === "receiving") { setReceivingCount((count) => count + 1); setDragging(false); setNotice(null); setDialogError(null); }
+      else if (payload.type === "receivingDone") setReceivingCount((count) => Math.max(0, count - 1));
       else if (payload.type === "rejected") { setDragging(false); setNotice(payload.message); }
-      else if (payload.type === "failed") { setReceiving(false); setDragging(false); setDialogError(payload.message); }
+      else if (payload.type === "failed") { setDragging(false); setDialogError(payload.message); }
     });
     void listening.catch((reason: unknown) => { if (!disposed) setDropError(String(reason)); });
     return () => { disposed = true; void listening.then((cleanup) => cleanup(), () => {}); };

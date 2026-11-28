@@ -132,6 +132,11 @@ impl Staging {
         self.paths.push(path.to_owned());
         Ok(())
     }
+    pub fn add_existing(&mut self, path: PathBuf) -> Result<(), String> {
+        self.check(0)?;
+        self.paths.push(path);
+        Ok(())
+    }
     pub fn fail(&mut self, label: &str, message: impl Into<String>, count: usize) {
         self.failures.push(ImportFailure {
             path: label.into(),

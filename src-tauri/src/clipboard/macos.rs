@@ -269,6 +269,54 @@ pub fn stage_raw(staging: &mut Staging, raw: RawBatch) {
         }
     }
 }
+fn read_item_raw(
+    get: &dyn Fn(&NSString) -> Option<Retained<NSData>>,
+    utis: &[&str],
+    total: &mut usize,
+) -> Option<Result<Raw, &'static str>> {
+    let mut has_data = false;
+    let mut over_limit = false;
+    for &uti in utis {
+        if let Some(data) = get(&NSString::from_str(uti)) {
+            let len = data.length();
+            if len == 0 {
+                continue;
+            }
+            has_data = true;
+            if len > MAX_BYTES - *total {
+                over_limit = true;
+                continue;
+            }
+            let data = data.to_vec();
+            if staging::sniff(&data).is_some() || uti == "public.tiff" {
+                *total += len;
+                return Some(Ok(Raw {
+                    data,
+                    tiff: uti == "public.tiff",
+                }));
+            }
+        }
+    }
+    if has_data {
+        Some(Err(if over_limit {
+            "图片数据总量超过 100 MB"
+        } else {
+            "无法识别图片格式"
+        }))
+    } else {
+        None
+    }
+}
+fn stage_one(staging: &mut Staging, item: Raw) {
+    let result = if item.tiff && staging::sniff(&item.data).is_none() {
+        tiff_png(item.data)
+    } else {
+        Ok(item.data)
+    };
+    if let Err(error) = result.and_then(|data| staging.add_bytes(&data)) {
+        staging.fail("图片", error, 1);
+    }
+}
 fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String> {
     let scan = files(board);
     if !scan.readable.is_empty() {
@@ -277,35 +325,60 @@ fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String
         return Ok(ClipboardRead::Staged(staged));
     }
     let mut s = Staging::new(root, Origin::Clipboard)?;
-    // Choose the best representation per pasteboard item so copying multiple independent
-    // images (e.g. a GIF item and a PNG item) preserves animation without dropping other items.
-    let raw = read_raw(board, IMAGE_UTIS);
-    if raw.has_animation() {
-        stage_raw(&mut s, raw);
-        return Ok(ClipboardRead::Staged(s.finish()));
-    }
     let mut remote_only = false;
-    if let Some(value) = board.stringForType(&NSString::from_str("public.html")) {
-        let images = html::images(&value.to_string(), &mut s);
-        remote_only = images.remote_only;
-        if !images.paths.is_empty() {
-            let mut staged = s.finish();
-            staged.paths = images.paths;
-            return Ok(ClipboardRead::Staged(staged));
+    let mut total = 0usize;
+    let mut process_entry =
+        |get_data: &dyn Fn(&NSString) -> Option<Retained<NSData>>,
+         get_html: &dyn Fn() -> Option<Retained<NSString>>| {
+            // Per-item priority: animated bytes -> local/data HTML images -> static image bytes.
+            match read_item_raw(get_data, &IMAGE_UTIS[..3], &mut total) {
+                Some(Ok(raw)) => {
+                    stage_one(&mut s, raw);
+                    return;
+                }
+                Some(Err(msg)) => s.fail("图片", msg, 1),
+                None => {}
+            }
+            if let Some(value) = get_html() {
+                let images = html::images(&value.to_string(), &mut s);
+                if images.remote_only {
+                    remote_only = true;
+                }
+                if images.added > 0 {
+                    return;
+                }
+            }
+            match read_item_raw(get_data, &IMAGE_UTIS[3..], &mut total) {
+                Some(Ok(raw)) => stage_one(&mut s, raw),
+                Some(Err(msg)) => s.fail("图片", msg, 1),
+                None => {}
+            }
+        };
+    if let Some(items) = board.pasteboardItems() {
+        for item in items.iter().take(MAX_ITEMS) {
+            process_entry(&|uti| item.dataForType(uti), &|| {
+                item.stringForType(&NSString::from_str("public.html"))
+            });
         }
+        if items.len() > MAX_ITEMS {
+            s.fail("图片", "图片超过 256 项", items.len() - MAX_ITEMS);
+        }
+    } else {
+        process_entry(&|uti| board.dataForType(uti), &|| {
+            board.stringForType(&NSString::from_str("public.html"))
+        });
     }
-    if !raw.is_empty() {
-        stage_raw(&mut s, raw);
-        return Ok(ClipboardRead::Staged(s.finish()));
-    }
-    if !scan.failures.is_empty() {
-        let mut staged = Staged::existing(vec![]);
-        staged.failures = scan.failures;
+    let staged = s.finish();
+    if !staged.paths.is_empty() {
         return Ok(ClipboardRead::Staged(staged));
     }
-    if raw.has_failures() {
-        stage_raw(&mut s, raw);
-        return Ok(ClipboardRead::Staged(s.finish()));
+    if !scan.failures.is_empty() {
+        let mut missing = Staged::existing(vec![]);
+        missing.failures = scan.failures;
+        return Ok(ClipboardRead::Staged(missing));
+    }
+    if !staged.failures.is_empty() {
+        return Ok(ClipboardRead::Staged(staged));
     }
     Ok(ClipboardRead::Empty { remote_only })
 }
@@ -478,18 +551,41 @@ mod tests {
         );
         drop(board);
 
-        // Tier 3: HTML data:GIF beats Tier 4 static PNG item.
-        let html_item = NSPasteboardItem::new();
-        assert!(html_item.setString_forType(
+        // Single item with HTML data:GIF + static PNG picks HTML GIF; a second independent PNG
+        // item on the same pasteboard is also preserved rather than dropped.
+        let html_png_item = image("public.png", b"\x89PNG\r\n\x1a\n");
+        assert!(html_png_item.setString_forType(
             &NSString::from_str("<img src=\"data:image/gif;base64,R0lGODlh\">"),
             &NSString::from_str("public.html")
         ));
-        let board = board_items(vec![html_item, image("public.png", b"\x89PNG\r\n\x1a\n")]);
+        let board = board_items(vec![
+            html_png_item,
+            image("public.png", b"\x89PNG\r\n\x1a\n"),
+        ]);
         let ClipboardRead::Staged(staged) = read_board(&board.0, root.path()).unwrap() else {
-            panic!("expected HTML GIF over static PNG")
+            panic!("expected HTML GIF and independent PNG")
         };
-        assert_eq!(staged.paths.len(), 1);
+        assert_eq!(staged.paths.len(), 2);
         assert_eq!(std::fs::read(&staged.paths[0]).unwrap(), b"GIF89a");
+        assert_eq!(
+            std::fs::read(&staged.paths[1]).unwrap(),
+            b"\x89PNG\r\n\x1a\n"
+        );
+        drop(board);
+
+        // Decodable HTML base64 with unrecognized image bytes surfaces the staging failure
+        // rather than reporting an empty clipboard.
+        let bad_html_item = NSPasteboardItem::new();
+        assert!(bad_html_item.setString_forType(
+            &NSString::from_str("<img src=\"data:image/png;base64,bm90LWEtcG5n\">"),
+            &NSString::from_str("public.html")
+        ));
+        let board = board_items(vec![bad_html_item]);
+        let ClipboardRead::Staged(staged) = read_board(&board.0, root.path()).unwrap() else {
+            panic!("expected staging failure to be surfaced")
+        };
+        assert!(staged.paths.is_empty());
+        assert_eq!(staged.failures.len(), 1);
         drop(board);
 
         // Tier 4: TIFF only converts to PNG with alpha preserved.
