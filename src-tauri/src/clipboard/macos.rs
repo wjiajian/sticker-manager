@@ -331,12 +331,14 @@ fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String
         |get_data: &dyn Fn(&NSString) -> Option<Retained<NSData>>,
          get_html: &dyn Fn() -> Option<Retained<NSString>>| {
             // Per-item priority: animated bytes -> local/data HTML images -> static image bytes.
+            // Defer candidate representation errors until every fallback on this item fails.
+            let mut item_error: Option<&'static str> = None;
             match read_item_raw(get_data, &IMAGE_UTIS[..3], &mut total) {
                 Some(Ok(raw)) => {
                     stage_one(&mut s, raw);
                     return;
                 }
-                Some(Err(msg)) => s.fail("图片", msg, 1),
+                Some(Err(msg)) => item_error = Some(msg),
                 None => {}
             }
             if let Some(value) = get_html() {
@@ -351,7 +353,11 @@ fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String
             match read_item_raw(get_data, &IMAGE_UTIS[3..], &mut total) {
                 Some(Ok(raw)) => stage_one(&mut s, raw),
                 Some(Err(msg)) => s.fail("图片", msg, 1),
-                None => {}
+                None => {
+                    if let Some(msg) = item_error {
+                        s.fail("图片", msg, 1);
+                    }
+                }
             }
         };
     if let Some(items) = board.pasteboardItems() {
@@ -368,16 +374,14 @@ fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String
             board.stringForType(&NSString::from_str("public.html"))
         });
     }
-    let staged = s.finish();
+    let mut staged = s.finish();
     if !staged.paths.is_empty() {
         return Ok(ClipboardRead::Staged(staged));
     }
-    if !scan.failures.is_empty() {
-        let mut missing = Staged::existing(vec![]);
-        missing.failures = scan.failures;
-        return Ok(ClipboardRead::Staged(missing));
-    }
-    if !staged.failures.is_empty() {
+    if !scan.failures.is_empty() || !staged.failures.is_empty() {
+        let mut combined = scan.failures;
+        combined.append(&mut staged.failures);
+        staged.failures = combined;
         return Ok(ClipboardRead::Staged(staged));
     }
     Ok(ClipboardRead::Empty { remote_only })
@@ -574,7 +578,7 @@ mod tests {
         drop(board);
 
         // Decodable HTML base64 with unrecognized image bytes surfaces the staging failure
-        // rather than reporting an empty clipboard.
+        // rather than reporting an empty clipboard, and merges with missing file failures.
         let bad_html_item = NSPasteboardItem::new();
         assert!(bad_html_item.setString_forType(
             &NSString::from_str("<img src=\"data:image/png;base64,bm90LWEtcG5n\">"),
@@ -586,6 +590,38 @@ mod tests {
         };
         assert!(staged.paths.is_empty());
         assert_eq!(staged.failures.len(), 1);
+        drop(board);
+
+        let missing = root.path().join("gone.png");
+        let bad_html_item2 = NSPasteboardItem::new();
+        assert!(bad_html_item2.setString_forType(
+            &NSString::from_str("<img src=\"data:image/png;base64,bm90LWEtcG5n\">"),
+            &NSString::from_str("public.html")
+        ));
+        let board = board_items(vec![file(&missing), bad_html_item2]);
+        let ClipboardRead::Staged(staged) = read_board(&board.0, root.path()).unwrap() else {
+            panic!("expected merged missing file and HTML failures")
+        };
+        assert!(staged.paths.is_empty());
+        assert_eq!(staged.failures.len(), 2);
+        drop(board);
+
+        // Corrupt GIF representation + valid PNG on the same item falls back cleanly with 0 failures.
+        let corrupt_gif_valid_png = image("com.compuserve.gif", b"not-a-gif");
+        assert!(corrupt_gif_valid_png.setData_forType(
+            &NSData::from_vec(b"\x89PNG\r\n\x1a\n".to_vec()),
+            &NSString::from_str("public.png")
+        ));
+        let board = board_items(vec![corrupt_gif_valid_png]);
+        let ClipboardRead::Staged(staged) = read_board(&board.0, root.path()).unwrap() else {
+            panic!("expected clean PNG fallback")
+        };
+        assert_eq!(staged.paths.len(), 1);
+        assert!(staged.failures.is_empty());
+        assert_eq!(
+            std::fs::read(&staged.paths[0]).unwrap(),
+            b"\x89PNG\r\n\x1a\n"
+        );
         drop(board);
 
         // Tier 4: TIFF only converts to PNG with alpha preserved.

@@ -938,20 +938,27 @@ impl IDropTarget_Impl for WebviewDropTarget_Impl {
         } else if mode == Mode::Native {
             self.leave();
             staging::emit(&self.app, ExternalDrop::Receiving);
+            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let finish_receiving = |app: &AppHandle, done: &std::sync::atomic::AtomicBool| {
+                if !done.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                    staging::emit(app, ExternalDrop::ReceivingDone);
+                }
+            };
             let result = data
                 .as_ref()
                 .ok_or_else(|| "拖入数据为空".to_string())
                 .and_then(|data| {
                     let app = self.app.clone();
+                    let done = done.clone();
                     let root = app.state::<StagingRoot>().0.clone();
                     receive_in_background(data, root, move |received| {
-                        staging::emit(&app, ExternalDrop::ReceivingDone);
+                        finish_receiving(&app, &done);
                         tauri::async_runtime::spawn(staging::complete(app, received, false));
                     })
                 });
             if let Err(message) = result {
                 chosen = DROPEFFECT_NONE;
-                staging::emit(&self.app, ExternalDrop::ReceivingDone);
+                finish_receiving(&self.app, &done);
                 staging::emit(&self.app, ExternalDrop::Failed { message });
             }
         }
