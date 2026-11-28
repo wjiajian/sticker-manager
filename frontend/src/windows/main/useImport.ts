@@ -17,7 +17,7 @@ export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
     let seenEvent = false;
     const listening = listen<ImportStatus>("import-status-changed", ({ payload }) => {
       seenEvent = true;
-      if (!disposed) { setStatus(payload); if (payload.running && payload.progress.processed === 0) { reset(); setNotice(null); setReceiving(false); setDialogError(null); } }
+      if (!disposed) { setStatus(payload); if (payload.running && payload.progress.processed === 0) { reset(); setNotice(null); setDialogError(null); } }
     });
     void listening.then(() => ipc.importStatus()).then((value) => { if (!disposed && !seenEvent) setStatus(value); }).catch((reason: unknown) => { if (!disposed) setDialogError(String(reason)); });
     return () => { disposed = true; void listening.then((cleanup) => cleanup(), () => {}); };
@@ -72,6 +72,7 @@ export function useImport(claimDragDrop: (event: DragDropEvent) => boolean) {
       if (payload.type === "enter") { setDragging(true); setNotice(null); setDialogError(null); }
       else if (payload.type === "leave") setDragging(false);
       else if (payload.type === "receiving") { setReceiving(true); setDragging(false); setNotice(null); setDialogError(null); }
+      else if (payload.type === "receivingDone") setReceiving(false);
       else if (payload.type === "rejected") { setDragging(false); setNotice(payload.message); }
       else if (payload.type === "failed") { setReceiving(false); setDragging(false); setDialogError(payload.message); }
     });

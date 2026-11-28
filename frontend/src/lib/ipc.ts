@@ -78,7 +78,7 @@ export interface ImportReport {
 }
 
 export type ClipboardImport = { kind: "imported"; report: ImportReport } | { kind: "empty"; message: string };
-export type ExternalDropEvent = { type: "enter" | "leave" | "receiving" } | { type: "rejected" | "failed"; message: string };
+export type ExternalDropEvent = { type: "enter" | "leave" | "receiving" | "receivingDone" } | { type: "rejected" | "failed"; message: string };
 export interface ImportStatus { batch: number; running: boolean; progress: { processed: number; total: number }; report: ImportReport | null; error: string | null }
 export interface RemoteDevice { id: string; name: string; platform: string; lastSyncAt: number; received: Record<string, number> }
 export interface StickerSyncInfo { waitingUpload: boolean; deviceCount: number | null }

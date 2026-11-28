@@ -19,7 +19,7 @@ PNG、JPG、WebP（包括动图）、GIF、APNG。不支持视频。
 
 ## 从剪贴板导入
 
-可以导入复制的本地图片文件、原始 GIF/WebP、PNG/JPEG 及系统位图（macOS TIFF、Windows DIB，转为 PNG）。实际格式取决于复制来源：Chrome 复制动图时可能只提供 PNG，此时只能导入静态图。HTML 只接受内嵌 base64 图片或本地文件地址，不联网下载远程图片，也不支持剪贴板文件承诺或 WebArchive。
+可以导入复制的本地图片文件、原始 GIF/WebP、PNG/JPEG 及系统位图（macOS TIFF、Windows DIB，转为 PNG）。实际格式取决于复制来源：Chrome 复制动图时可能只提供 PNG，此时只能导入静态图。HTML 只接受内嵌 base64 图片或本地文件地址，不联网下载远程图片。macOS 剪贴板不接收文件承诺或 WebArchive；Windows 剪贴板可接收来源提供的虚拟文件。
 
 主窗口输入框仍可正常粘贴文字；点击系统「编辑 › 粘贴」不会触发导入。若聊天软件只提供内部拖拽或网络图片地址，请复制图片本身，或者先另存为再导入。
 

@@ -57,7 +57,7 @@ static INSTALL: OnceLock<Result<(), String>> = OnceLock::new();
 type Info = ProtocolObject<dyn NSDraggingInfo>;
 type OpImp = unsafe extern "C-unwind" fn(&AnyObject, Sel, &Info) -> NSDragOperation;
 type BoolImp = unsafe extern "C-unwind" fn(&AnyObject, Sel, &Info) -> Bool;
-type VoidImp = unsafe extern "C-unwind" fn(&AnyObject, Sel, &Info);
+type VoidImp = unsafe extern "C-unwind" fn(&AnyObject, Sel, *const Info);
 fn key(view: &AnyObject) -> usize {
     view as *const _ as usize
 }
@@ -97,8 +97,12 @@ unsafe fn original_bool(index: usize, view: &AnyObject, cmd: Sel, info: &Info) -
         std::mem::transmute::<Imp, BoolImp>(imp)(view, cmd, info)
     })
 }
-unsafe fn original_void(index: usize, view: &AnyObject, cmd: Sel, info: &Info) {
-    if let Some(imp) = original(index) {
+unsafe fn original_void(index: usize, view: &AnyObject, cmd: Sel, info: *const Info) {
+    // AppKit allows nil sender in draggingExited:/concludeDragOperation:, while Wry's
+    // implementation takes a non-null reference. Never forward nil to Wry.
+    if !info.is_null()
+        && let Some(imp) = original(index)
+    {
         unsafe { std::mem::transmute::<Imp, VoidImp>(imp)(view, cmd, info) };
     }
 }
@@ -130,15 +134,16 @@ fn entered(view: &AnyObject, info: &Info) -> Option<NSDragOperation> {
     } else {
         mask & NSDragOperation::Generic
     };
-    let scan = macos::files(&board);
     let image = board
         .availableTypeFromArray(&macos::types(IMAGE_UTIS))
         .is_some();
     let promise = board
         .availableTypeFromArray(&NSFilePromiseReceiver::readableDraggedTypes())
         .is_some();
-    // Prefer native image/promise over a TCC-unreadable container file URL (e.g. macOS WeChat),
-    // while still forwarding unreadable-only file drags to Wry so the permission error surfaces.
+    // Only probe file readability when native image/promise fallback is actually available;
+    // when neither is present, any existing regular file/dir URL still routes to Wry without
+    // opening files on the main thread during hover.
+    let scan = macos::probe_files(&board, image || promise);
     let files = !scan.readable.is_empty() || (scan.unreadable && !image && !promise);
     let decision = drop_policy::classify(files, image, promise, !op.is_empty());
     drop_diag!("drag decision={decision:?} sequence={seq}");
@@ -203,7 +208,7 @@ unsafe extern "C-unwind" fn on_update(view: &AnyObject, cmd: Sel, info: &Info) -
     .flatten()
     .unwrap_or_else(|| unsafe { original_op(1, view, cmd, info) })
 }
-unsafe extern "C-unwind" fn on_exit(view: &AnyObject, cmd: Sel, info: &Info) {
+unsafe extern "C-unwind" fn on_exit(view: &AnyObject, cmd: Sel, info: *const Info) {
     if guarded(|| {
         let Some((app, surface, session)) = state(view) else {
             return false;
@@ -212,7 +217,7 @@ unsafe extern "C-unwind" fn on_exit(view: &AnyObject, cmd: Sel, info: &Info) {
         if matches!(session, Session::Native(..)) {
             hover(&app, surface, false);
         }
-        !matches!(session, Session::Wry(_) | Session::Idle)
+        info.is_null() || !matches!(session, Session::Wry(_) | Session::Idle)
     }) != Some(true)
     {
         unsafe { original_void(2, view, cmd, info) };
@@ -244,16 +249,50 @@ unsafe extern "C-unwind" fn on_perform(view: &AnyObject, cmd: Sel, info: &Info) 
     .flatten()
     .unwrap_or_else(|| unsafe { original_bool(4, view, cmd, info) })
 }
-unsafe extern "C-unwind" fn on_conclude(view: &AnyObject, cmd: Sel, info: &Info) {
+unsafe extern "C-unwind" fn on_conclude(view: &AnyObject, cmd: Sel, info: *const Info) {
     if guarded(|| {
         let Some((_, _, session)) = state(view) else {
             return false;
         };
         set(view, Session::Idle);
-        matches!(session, Session::Native(..) | Session::Rejected(_))
+        info.is_null() || matches!(session, Session::Native(..) | Session::Rejected(_))
     }) != Some(true)
     {
         unsafe { original_void(5, view, cmd, info) };
+    }
+}
+struct PromiseTracker {
+    expected: Vec<usize>,
+    received: Vec<usize>,
+}
+impl PromiseTracker {
+    fn new(receivers: usize) -> Self {
+        Self {
+            expected: vec![1; receivers],
+            received: vec![0; receivers],
+        }
+    }
+    fn record(&mut self, slot: usize, reported_total: usize) -> bool {
+        if let Some(expected) = self.expected.get_mut(slot) {
+            *expected = (*expected).max(reported_total.max(1));
+        }
+        if let Some(received) = self.received.get_mut(slot) {
+            *received += 1;
+        }
+        self.is_complete()
+    }
+    fn is_complete(&self) -> bool {
+        self.expected
+            .iter()
+            .zip(&self.received)
+            .all(|(expected, received)| received >= expected)
+    }
+    fn pending(&self) -> usize {
+        self.expected
+            .iter()
+            .zip(&self.received)
+            .map(|(expected, received)| expected.saturating_sub(*received))
+            .sum()
     }
 }
 fn receive(app: AppHandle, surface: Surface, board: &objc2_app_kit::NSPasteboard) {
@@ -282,11 +321,12 @@ fn receive(app: AppHandle, surface: Surface, board: &objc2_app_kit::NSPasteboard
             } else {
                 staging::emit(&app, ExternalDrop::Receiving);
             }
-            let (send, recv) = std::sync::mpsc::channel::<Result<PathBuf, String>>();
+            let (send, recv) =
+                std::sync::mpsc::channel::<(usize, usize, Result<PathBuf, String>)>();
             let finished = Arc::new(AtomicBool::new(false));
             let queue = NSOperationQueue::new();
             queue.setMaxConcurrentOperationCount(2);
-            let mut expected = 0;
+            let mut active = 0usize;
             if receivers.len() > staging::MAX_ITEMS {
                 staging.fail(
                     "承诺文件",
@@ -294,83 +334,101 @@ fn receive(app: AppHandle, surface: Surface, board: &objc2_app_kit::NSPasteboard
                     receivers.len() - staging::MAX_ITEMS,
                 );
             }
-            for (index, receiver) in receivers.iter().take(staging::MAX_ITEMS).enumerate() {
-                // AppKit may return nil for -[NSFilePromiseReceiver fileNames] before receiving
-                // completes, which panics in objc2-app-kit's non-null wrapper.
-                let file_names: Option<objc2::rc::Retained<NSArray<objc2_foundation::NSString>>> =
-                    unsafe { objc2::msg_send![receiver, fileNames] };
-                let count = file_names.map_or(1, |names| names.len().max(1));
-                if expected + count > staging::MAX_ITEMS {
-                    staging.fail("承诺文件", "图片超过 256 项", count);
-                    continue;
-                }
-                let dir = staging.path().join("promised").join(index.to_string());
-                if let Err(error) = std::fs::create_dir_all(&dir) {
-                    staging.fail("承诺文件", error.to_string(), count);
-                    continue;
-                }
-                let Some(path) = dir.to_str() else {
-                    staging.fail("承诺文件", "暂存路径无效", count);
-                    continue;
-                };
-                let destination =
-                    NSURL::fileURLWithPath(&objc2_foundation::NSString::from_str(path));
-                let send = send.clone();
-                let callback_finished = finished.clone();
-                let block = block2::RcBlock::new(
-                    move |url: std::ptr::NonNull<NSURL>, error: *mut NSError| {
-                        if callback_finished.load(Ordering::Acquire) {
-                            return;
-                        }
-                        let result = guarded(|| {
-                            if let Some(error) = unsafe { error.as_ref() } {
-                                drop_diag!(
-                                    "promise error domain={} code={}",
-                                    error.domain(),
-                                    error.code()
-                                );
-                                return Err("无法接收承诺文件".into());
-                            }
-                            unsafe { url.as_ref() }
-                                .path()
-                                .map(|p| PathBuf::from(p.to_string()))
-                                .ok_or_else(|| "承诺文件路径无效".into())
+            // AppKit requires all NSFilePromiseReceivers from one drag to share one destination.
+            let destination_dir = staging.path().join("promised");
+            let destination = std::fs::create_dir_all(&destination_dir)
+                .map_err(|e| e.to_string())
+                .and_then(|()| {
+                    destination_dir
+                        .to_str()
+                        .map(|p| NSURL::fileURLWithPath(&objc2_foundation::NSString::from_str(p)))
+                        .ok_or_else(|| "暂存路径无效".into())
+                });
+            match destination {
+                Ok(destination) => {
+                    for receiver in receivers.iter().take(staging::MAX_ITEMS) {
+                        let slot = active;
+                        let send = send.clone();
+                        let callback_finished = finished.clone();
+                        let receiver_for_block = receiver.clone();
+                        let block = block2::RcBlock::new(
+                            move |url: std::ptr::NonNull<NSURL>, error: *mut NSError| {
+                                if callback_finished.load(Ordering::Acquire) {
+                                    return;
+                                }
+                                let reported_total = guarded(|| {
+                                    let names: Option<
+                                        objc2::rc::Retained<NSArray<objc2_foundation::NSString>>,
+                                    > = unsafe { objc2::msg_send![&receiver_for_block, fileNames] };
+                                    names.map_or(1, |n| n.len().max(1))
+                                })
+                                .unwrap_or(1);
+                                let result = guarded(|| {
+                                    if let Some(error) = unsafe { error.as_ref() } {
+                                        drop_diag!(
+                                            "promise error domain={} code={}",
+                                            error.domain(),
+                                            error.code()
+                                        );
+                                        return Err("无法接收承诺文件".into());
+                                    }
+                                    unsafe { url.as_ref() }
+                                        .path()
+                                        .map(|p| PathBuf::from(p.to_string()))
+                                        .ok_or_else(|| "承诺文件路径无效".into())
+                                })
+                                .unwrap_or_else(|| Err("无法接收承诺文件".into()));
+                                let _ = send.send((slot, reported_total, result));
+                            },
+                        );
+                        if guarded(|| unsafe {
+                            receiver
+                                .receivePromisedFilesAtDestination_options_operationQueue_reader(
+                                    &destination,
+                                    &NSDictionary::new(),
+                                    &queue,
+                                    &block,
+                                )
                         })
-                        .unwrap_or_else(|| Err("无法接收承诺文件".into()));
-                        let _ = send.send(result);
-                    },
-                );
-                if guarded(|| unsafe {
-                    receiver.receivePromisedFilesAtDestination_options_operationQueue_reader(
-                        &destination,
-                        &NSDictionary::new(),
-                        &queue,
-                        &block,
-                    )
-                })
-                .is_some()
-                {
-                    expected += count;
-                } else {
-                    staging.fail("承诺文件", "无法接收承诺文件", count);
+                        .is_some()
+                        {
+                            active += 1;
+                        } else {
+                            staging.fail("承诺文件", "无法接收承诺文件", 1);
+                        }
+                    }
+                }
+                Err(error) => {
+                    staging.fail("承诺文件", error, receivers.len().min(staging::MAX_ITEMS));
                 }
             }
             drop(send);
             tauri::async_runtime::spawn(async move {
                 let staged = tauri::async_runtime::spawn_blocking(move || {
-                    let mut accepted = 0;
+                    let mut tracker = PromiseTracker::new(active);
+                    let mut accepted = 0usize;
                     let start = Instant::now();
-                    for index in 0..expected {
+                    while !tracker.is_complete() {
                         match recv
                             .recv_timeout(Duration::from_secs(30).saturating_sub(start.elapsed()))
                         {
-                            Ok(Ok(path)) => match staging.adopt(&path) {
-                                Ok(()) => accepted += 1,
-                                Err(e) => staging.fail("承诺文件", e, 1),
-                            },
-                            Ok(Err(e)) => staging.fail("承诺文件", e, 1),
+                            Ok((slot, reported_total, Ok(path))) => {
+                                match staging.adopt(&path) {
+                                    Ok(()) => accepted += 1,
+                                    Err(e) => staging.fail("承诺文件", e, 1),
+                                }
+                                tracker.record(slot, reported_total);
+                            }
+                            Ok((slot, reported_total, Err(e))) => {
+                                staging.fail("承诺文件", e, 1);
+                                tracker.record(slot, reported_total);
+                            }
                             Err(_) => {
-                                staging.fail("承诺文件", "接收拖入的图片超时", expected - index);
+                                staging.fail(
+                                    "承诺文件",
+                                    "接收拖入的图片超时",
+                                    tracker.pending().max(1),
+                                );
                                 break;
                             }
                         }
@@ -384,6 +442,9 @@ fn receive(app: AppHandle, surface: Surface, board: &objc2_app_kit::NSPasteboard
                 })
                 .await
                 .map_err(|e| e.to_string());
+                if !ball {
+                    staging::emit(&app, ExternalDrop::ReceivingDone);
+                }
                 staging::complete(app, staged, ball).await;
             });
             return;
@@ -582,5 +643,26 @@ mod tests {
     #[test]
     fn missing_wry_webview_superclass_returns_none() {
         assert!(find_wry_webview(NSObject::class()).is_none());
+    }
+
+    #[test]
+    fn promise_tracker_waits_for_multi_file_receiver_and_multi_receiver_batch() {
+        // Single legacy receiver delivering 3 files
+        let mut single = PromiseTracker::new(1);
+        assert!(!single.is_complete());
+        assert!(!single.record(0, 3));
+        assert_eq!(single.pending(), 2);
+        assert!(!single.record(0, 3));
+        assert_eq!(single.pending(), 1);
+        assert!(single.record(0, 3));
+        assert_eq!(single.pending(), 0);
+
+        // Multiple receivers delivering 1 file each in arbitrary order
+        let mut multi = PromiseTracker::new(3);
+        assert!(!multi.record(2, 1));
+        assert!(!multi.record(0, 1));
+        assert_eq!(multi.pending(), 1);
+        assert!(multi.record(1, 1));
+        assert_eq!(multi.pending(), 0);
     }
 }

@@ -485,13 +485,38 @@ fn read_hdrop(data: &IDataObject, limit: Option<usize>) -> Result<Vec<PathBuf>, 
     Ok(paths)
 }
 
+fn is_network_path(path: &Path) -> bool {
+    let raw = path.to_string_lossy();
+    raw.starts_with("\\\\") || raw.starts_with("//")
+}
+
 pub fn receive(data: &IDataObject, source: Source, root: &Path) -> Result<ClipboardRead, String> {
     diagnose_formats(data, "receive");
+    let mut rejected_network = 0usize;
     if unsafe { data.QueryGetData(&format(15, -1, TYMED_HGLOBAL.0 as u32)) == S_OK } {
-        return Ok(ClipboardRead::Staged(Staged::existing(read_hdrop(
-            data,
-            Some(MAX_ITEMS),
-        )?)));
+        let paths = read_hdrop(data, Some(MAX_ITEMS))?;
+        if source == Source::Drop {
+            return Ok(ClipboardRead::Staged(Staged::existing(paths)));
+        }
+        let mut local = Vec::with_capacity(paths.len());
+        for path in paths {
+            if is_network_path(&path) {
+                rejected_network += 1;
+            } else {
+                local.push(path);
+            }
+        }
+        if !local.is_empty() {
+            let mut staged = Staged::existing(local);
+            if rejected_network > 0 {
+                staged.failures.push(sticker_core::ImportFailure {
+                    path: "网络路径".into(),
+                    message: "不支持从剪贴板导入网络路径".into(),
+                    count: rejected_network,
+                });
+            }
+            return Ok(ClipboardRead::Staged(staged));
+        }
     }
     let mut staged = Staging::new(
         root,
@@ -527,12 +552,13 @@ pub fn receive(data: &IDataObject, source: Source, root: &Path) -> Result<Clipbo
         }
         return Ok(ClipboardRead::Staged(staged.finish()));
     }
+    let mut last_image_error: Option<String> = None;
     for id in animated_formats() {
-        if let Ok(medium) = get(data, &format(id, -1, TYMED_HGLOBAL.0 as u32))
-            && let Ok(content) = bytes(&medium)
-            && staged.add_bytes(&content).is_ok()
-        {
-            return Ok(ClipboardRead::Staged(staged.finish()));
+        if let Ok(medium) = get(data, &format(id, -1, TYMED_HGLOBAL.0 as u32)) {
+            match bytes(&medium).and_then(|content| staged.add_bytes(&content)) {
+                Ok(_) => return Ok(ClipboardRead::Staged(staged.finish())),
+                Err(error) => last_image_error = Some(error),
+            }
         }
     }
     let mut remote_only = false;
@@ -552,20 +578,38 @@ pub fn receive(data: &IDataObject, source: Source, root: &Path) -> Result<Clipbo
         }
     }
     for id in static_formats() {
-        if let Ok(medium) = get(data, &format(id, -1, TYMED_HGLOBAL.0 as u32))
-            && let Ok(content) = bytes(&medium)
-        {
-            let content = if id == 17 || id == 8 {
-                dib_png(&content)
-            } else {
-                Ok(content)
-            };
-            if let Ok(content) = content
-                && staged.add_bytes(&content).is_ok()
-            {
-                return Ok(ClipboardRead::Staged(staged.finish()));
+        if let Ok(medium) = get(data, &format(id, -1, TYMED_HGLOBAL.0 as u32)) {
+            let result = bytes(&medium)
+                .and_then(|content| {
+                    if id == 17 || id == 8 {
+                        dib_png(&content)
+                    } else {
+                        Ok(content)
+                    }
+                })
+                .and_then(|content| staged.add_bytes(&content));
+            match result {
+                Ok(_) => return Ok(ClipboardRead::Staged(staged.finish())),
+                Err(error) => last_image_error = Some(error),
             }
         }
+    }
+    if let Some(error) = last_image_error {
+        staged.fail("图片", error, 1);
+        return Ok(ClipboardRead::Staged(staged.finish()));
+    }
+    let finished = staged.finish();
+    if !finished.failures.is_empty() {
+        return Ok(ClipboardRead::Staged(finished));
+    }
+    if rejected_network > 0 {
+        let mut rejected = Staged::existing(vec![]);
+        rejected.failures.push(sticker_core::ImportFailure {
+            path: "网络路径".into(),
+            message: "不支持从剪贴板导入网络路径".into(),
+            count: rejected_network,
+        });
+        return Ok(ClipboardRead::Staged(rejected));
     }
     Ok(ClipboardRead::Empty { remote_only })
 }
@@ -1626,5 +1670,45 @@ mod tests {
         malformed[..4].copy_from_slice(&40u32.to_le_bytes());
         malformed[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(dib_png(&malformed).is_err());
+    }
+
+    #[test]
+    fn clipboard_hdrop_rejects_unc_and_falls_back_to_image_bytes() {
+        use std::os::windows::ffi::OsStrExt;
+        let unc = std::ffi::OsStr::new(r"\\server\share\emoji.png");
+        let mut hdrop = 20u32.to_le_bytes().to_vec();
+        hdrop.extend_from_slice(&[0; 12]);
+        hdrop.extend_from_slice(&1u32.to_le_bytes());
+        for value in unc.encode_wide().chain([0, 0]) {
+            hdrop.extend_from_slice(&value.to_le_bytes());
+        }
+        let png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let data: IDataObject = Sample {
+            formats: vec![
+                (15, -1, hdrop.clone(), TYMED_HGLOBAL.0 as u32),
+                (registered("PNG"), -1, png.clone(), TYMED_HGLOBAL.0 as u32),
+            ],
+            ..Default::default()
+        }
+        .into();
+        let root = tempfile::tempdir().unwrap();
+        let ClipboardRead::Staged(staged) = receive(&data, Source::Clipboard, root.path()).unwrap()
+        else {
+            panic!("expected PNG fallback when clipboard HDROP only has UNC path")
+        };
+        assert_eq!(std::fs::read(&staged.paths[0]).unwrap(), png);
+
+        let unc_only: IDataObject = Sample {
+            formats: vec![(15, -1, hdrop, TYMED_HGLOBAL.0 as u32)],
+            ..Default::default()
+        }
+        .into();
+        let ClipboardRead::Staged(rejected) =
+            receive(&unc_only, Source::Clipboard, root.path()).unwrap()
+        else {
+            panic!("expected UNC refusal")
+        };
+        assert!(rejected.paths.is_empty());
+        assert_eq!(rejected.failures.len(), 1);
     }
 }

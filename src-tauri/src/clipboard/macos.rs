@@ -41,7 +41,7 @@ enum FileAccess {
     Unreadable,
     Missing,
 }
-fn access(path: &Path) -> FileAccess {
+fn access(path: &Path, check_readability: bool) -> FileAccess {
     let meta = match std::fs::metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -49,6 +49,13 @@ fn access(path: &Path) -> FileAccess {
         }
         Err(_) => return FileAccess::Missing,
     };
+    if !(meta.is_file() || meta.is_dir()) {
+        // Never open non-regular files (FIFOs, sockets, devices).
+        return FileAccess::Missing;
+    }
+    if !check_readability {
+        return FileAccess::Readable;
+    }
     let probe = if meta.is_dir() {
         std::fs::read_dir(path).map(|_| ())
     } else {
@@ -61,15 +68,26 @@ fn access(path: &Path) -> FileAccess {
     }
 }
 pub fn files(board: &NSPasteboard) -> FileScan {
+    scan_files(board, true)
+}
+pub fn probe_files(board: &NSPasteboard, check_readability: bool) -> FileScan {
+    scan_files(board, check_readability)
+}
+fn scan_files(board: &NSPasteboard, check_readability: bool) -> FileScan {
     let mut readable = vec![];
     let mut unreadable = false;
     let mut failures = vec![];
     let mut seen = std::collections::HashSet::new();
+    let mut overflow = 0usize;
     let mut add = |path: PathBuf| {
-        if seen.len() >= MAX_ITEMS || !seen.insert(path.clone()) {
+        if !seen.insert(path.clone()) {
             return;
         }
-        match access(&path) {
+        if seen.len() > MAX_ITEMS {
+            overflow += 1;
+            return;
+        }
+        match access(&path, check_readability) {
             FileAccess::Readable => readable.push(path),
             FileAccess::Unreadable => {
                 unreadable = true;
@@ -95,7 +113,7 @@ pub fn files(board: &NSPasteboard) -> FileScan {
     );
     let classes = NSArray::from_slice(&[NSURL::class()]);
     if let Some(items) = unsafe { board.readObjectsForClasses_options(&classes, Some(&options)) } {
-        for item in items.iter().take(MAX_ITEMS) {
+        for item in items.iter() {
             if let Some(url) = item.downcast_ref::<NSURL>()
                 && url.isFileURL()
                 && url
@@ -109,7 +127,7 @@ pub fn files(board: &NSPasteboard) -> FileScan {
     }
     // A missing file URL may not be materialized by readObjectsForClasses.
     if let Some(items) = board.pasteboardItems() {
-        for item in items.iter().take(MAX_ITEMS) {
+        for item in items.iter() {
             if let Some(value) = item.stringForType(&NSString::from_str("public.file-url"))
                 && let Some(path) = html::local_file(&value.to_string())
                 && !path.to_string_lossy().starts_with("/.file/id=")
@@ -117,6 +135,13 @@ pub fn files(board: &NSPasteboard) -> FileScan {
                 add(path);
             }
         }
+    }
+    if overflow > 0 {
+        failures.push(ImportFailure {
+            path: "文件".into(),
+            message: "图片超过 256 项".into(),
+            count: overflow,
+        });
     }
     FileScan {
         readable,
@@ -252,9 +277,11 @@ fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String
         return Ok(ClipboardRead::Staged(staged));
     }
     let mut s = Staging::new(root, Origin::Clipboard)?;
-    let animated = read_raw(board, &IMAGE_UTIS[..3]);
-    if !animated.is_empty() {
-        stage_raw(&mut s, animated);
+    // Choose the best representation per pasteboard item so copying multiple independent
+    // images (e.g. a GIF item and a PNG item) preserves animation without dropping other items.
+    let raw = read_raw(board, IMAGE_UTIS);
+    if raw.has_animation() {
+        stage_raw(&mut s, raw);
         return Ok(ClipboardRead::Staged(s.finish()));
     }
     let mut remote_only = false;
@@ -267,7 +294,6 @@ fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String
             return Ok(ClipboardRead::Staged(staged));
         }
     }
-    let raw = read_raw(board, &IMAGE_UTIS[3..]);
     if !raw.is_empty() {
         stage_raw(&mut s, raw);
         return Ok(ClipboardRead::Staged(s.finish()));
@@ -277,8 +303,7 @@ fn read_board(board: &NSPasteboard, root: &Path) -> Result<ClipboardRead, String
         staged.failures = scan.failures;
         return Ok(ClipboardRead::Staged(staged));
     }
-    if raw.has_failures() || animated.has_failures() {
-        stage_raw(&mut s, animated);
+    if raw.has_failures() {
         stage_raw(&mut s, raw);
         return Ok(ClipboardRead::Staged(s.finish()));
     }
@@ -437,15 +462,20 @@ mod tests {
         assert_eq!(std::fs::read(&staged.paths[0]).unwrap(), b"GIF89a");
         drop(board);
 
+        // Two independent items (GIF + PNG): preserve both items with per-item best representation.
         let board = board_items(vec![
             image("com.compuserve.gif", b"GIF89a"),
             image("public.png", b"\x89PNG\r\n\x1a\n"),
         ]);
         let ClipboardRead::Staged(staged) = read_board(&board.0, root.path()).unwrap() else {
-            panic!("expected animated tier")
+            panic!("expected both independent images")
         };
-        assert_eq!(staged.paths.len(), 1);
+        assert_eq!(staged.paths.len(), 2);
         assert_eq!(std::fs::read(&staged.paths[0]).unwrap(), b"GIF89a");
+        assert_eq!(
+            std::fs::read(&staged.paths[1]).unwrap(),
+            b"\x89PNG\r\n\x1a\n"
+        );
         drop(board);
 
         // Tier 3: HTML data:GIF beats Tier 4 static PNG item.

@@ -117,9 +117,11 @@ pub fn images(html: &str, staged: &mut Staging) -> Images {
                         .filter(|b| !b.is_ascii_whitespace())
                         .collect::<Vec<_>>(),
                 )
-                && let Ok(path) = staged.add_bytes(&bytes)
             {
-                paths.push(path);
+                match staged.add_bytes(&bytes) {
+                    Ok(path) => paths.push(path),
+                    Err(error) => staged.fail("图片", error, 1),
+                }
             }
         } else if let Some(path) = local_file(&src) {
             if path.is_file() {

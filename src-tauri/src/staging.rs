@@ -113,20 +113,20 @@ impl Staging {
     #[cfg(target_os = "macos")]
     pub fn adopt(&mut self, path: &Path) -> Result<(), String> {
         let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-        if metadata.file_type().is_symlink()
-            || !(metadata.is_file() || metadata.is_dir())
-            || !path
-                .canonicalize()
-                .map_err(|e| e.to_string())?
-                .starts_with(self.dir.path().canonicalize().map_err(|e| e.to_string())?)
+        if metadata.file_type().is_symlink() {
+            return Err("接收的文件不在暂存目录内".into());
+        }
+        if !metadata.is_file() {
+            return Err("暂不支持接收文件夹承诺".into());
+        }
+        if !path
+            .canonicalize()
+            .map_err(|e| e.to_string())?
+            .starts_with(self.dir.path().canonicalize().map_err(|e| e.to_string())?)
         {
             return Err("接收的文件不在暂存目录内".into());
         }
-        let len = if metadata.is_file() {
-            usize::try_from(metadata.len()).unwrap_or(usize::MAX)
-        } else {
-            0
-        };
+        let len = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
         self.check(len)?;
         self.bytes += len;
         self.paths.push(path.to_owned());
@@ -226,6 +226,7 @@ pub enum ExternalDrop {
     Enter,
     Leave,
     Receiving,
+    ReceivingDone,
     Rejected { message: String },
     Failed { message: String },
 }
@@ -318,6 +319,9 @@ mod tests {
         let link = s.path().join("link.gif");
         std::os::unix::fs::symlink(&external, &link).unwrap();
         assert!(s.adopt(&link).is_err());
+        let subdir = s.path().join("nested");
+        fs::create_dir(&subdir).unwrap();
+        assert!(s.adopt(&subdir).is_err());
         let local = s.path().join("local.gif");
         fs::write(&local, b"GIF89a").unwrap();
         s.adopt(&local).unwrap();
