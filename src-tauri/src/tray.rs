@@ -72,9 +72,18 @@ pub fn create(app: &tauri::App) -> tauri::Result<()> {
             &quit,
         ],
     )?;
+    let paste = MenuItem::with_id(
+        handle,
+        "entry-import-clipboard",
+        "从剪贴板导入",
+        true,
+        None::<&str>,
+    )?;
     let ball_menu = Menu::with_items(
         handle,
         &[
+            &paste,
+            &PredefinedMenuItem::separator(handle)?,
             &main,
             &preferences,
             &hide,
@@ -152,6 +161,10 @@ fn dispatch(app: &AppHandle, id: &str) {
     }
     let result = app.run_on_main_thread(move || {
         let result = match id.as_str() {
+            "entry-import-clipboard" => {
+                crate::clipboard::import_from_ball_menu(&handle);
+                Ok(())
+            }
             "entry-panel" => panel::toggle(&handle),
             "entry-main" => panel::show_main_window(handle.clone()),
             "entry-preferences" => open_preferences(&handle),

@@ -1,4 +1,6 @@
 import { ImagesIcon } from "@phosphor-icons/react";
+import { platform } from "../../lib/platform";
+import { pasteShortcutLabel } from "../../lib/pasteShortcut";
 import { Button } from "../../components/Button";
 import type { LibraryView, SyncStatus } from "../../lib/ipc";
 import { progressLabel, restoringLibrary, syncLabel } from "./useSyncStatus";
@@ -17,6 +19,7 @@ export function EmptyLibrary({ view, label, all, sync, busy, onChoose, onSyncSet
     <div className="flex flex-col gap-2">
       <h2 className="text-lg font-semibold">还没有表情</h2>
       <p className="text-sm text-ink-secondary">把图片、文件夹或 .zip 拖进窗口，也可以从这里选择。</p>
+      <p className="text-sm text-ink-secondary">也可以按 {pasteShortcutLabel(platform)} 从剪贴板导入。</p>
     </div>
     <div className="flex flex-wrap justify-center gap-2">
       <Button variant="accent" disabled={busy} onClick={() => onChoose(false)} className="disabled:opacity-50">导入表情…</Button>

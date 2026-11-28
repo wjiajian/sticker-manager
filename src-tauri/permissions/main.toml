@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "main-commands"
-description = "主窗口的仓库移动、表情导出与管理命令、呼出快捷键设置和检查更新。"
+description = "主窗口的仓库移动、表情导入、导出与管理命令、呼出快捷键设置和检查更新。"
 commands.allow = [
   "set_sync_paused", "set_pause_on_metered", "sticker_sync_info", "take_sync_details_request", "import_status", "cancel_import", "set_stickers_category", "create_category_and_set_stickers",
   "sync_status", "sync_now", "inspect_sync_folder", "join_sync_folder", "stop_sync", "set_device_name",
@@ -10,7 +10,7 @@ commands.allow = [
   "library_overview", "list_stickers", "search_stickers", "sticker", "categories",
   "delete_sticker", "restore_sticker", "delete_stickers", "restore_stickers", "purge_sticker", "purge_deleted_stickers", "create_category", "rename_category",
   "set_category_color", "delete_category", "move_category", "set_sticker_category", "set_sticker_name",
-  "set_sticker_caption", "import_stickers", "copy_sticker", "prepare_sticker_drag", "start_sticker_drag",
+  "set_sticker_caption", "import_stickers", "import_clipboard", "copy_sticker", "prepare_sticker_drag", "start_sticker_drag",
   "record_sticker_usage", "toggle_sticker_favorite", "set_stickers_favorite", "reveal_sticker",
   "panel_shortcut_state", "check_panel_shortcut", "set_panel_shortcut", "begin_panel_shortcut_recording", "end_panel_shortcut_recording",
   "update_status", "check_update", "install_update", "ignore_update", "set_auto_check_updates", "take_update_request",

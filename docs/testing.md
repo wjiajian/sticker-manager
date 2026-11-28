@@ -72,6 +72,14 @@ node .github/scripts/ball-window.test.mjs
 
 脚本使用临时仓库与独立 WebView2 数据目录，通过仅本机可用的调试端口在后台操作隐藏的主窗口，不移动系统鼠标；测试结束时关闭测试进程。覆盖实时预览、松手保存、键盘、恢复默认、Esc 取消、关闭按钮提交键盘草稿、单页目录定位、空搜索结果、清空后滑块保留及重启持久化，并延迟一次预览请求验证连续提交和后续取消不会覆盖已排队的保存。结果和截图写入 `target/ball-window-results/`。
 
+### macOS 拖入与双平台剪贴板诊断
+
+Debug 测试实例设置 `STICKER_DROP_DIAGNOSTICS=1`，使用绝对路径的临时 `STICKER_LIBRARY_DIR`。原生拖入日志仅记录类型、分流结果和 Promise 错误 domain/code；不记录路径、文件名、图片字节或错误详细描述。Release 忽略诊断开关。
+
+自动检查：`cargo test -p sticker-manager staging::tests`、`cargo test -p sticker-manager clipboard::`、`cargo test -p sticker-manager drop_policy::tests` 和 `pnpm --dir frontend test`。单测不改写真实剪贴板。真实来源及主窗口、悬浮球的拖入、复制导入验收见 [聊天软件图片来源](chat-app-sources.md)。
+
+升级 Tauri/Wry 必须复核 `macos_drop.rs` 的 WryWebView 类名、方法签名、注册类型、有效文件路径事件及未登记窗口行为（见 [ADR 0006](adr/0006-native-drop-and-clipboard-import.md)）。
+
 ### Windows 拖入格式诊断
 
 Debug 构建可设置 `STICKER_DROP_DIAGNOSTICS=1`，在标准错误输出中记录 OLE 格式名称、编号、介质和 HRESULT；不记录文件名、路径或图片内容。仍须将 `STICKER_LIBRARY_DIR` 设为临时目录。Release 构建忽略这个诊断开关。

@@ -10,7 +10,7 @@ import { progressLabel, syncLabel, syncTooltip } from "./useSyncStatus";
 import { WindowControls } from "./WindowControls";
 import appIcon from "../../../../src-tauri/icons/app-icon.svg";
 
-export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onChoose: (directory: boolean) => void; sync?: SyncStatus; onSync: (button: HTMLButtonElement) => void }) {
+export function TitleBar({ busy, onChoose, onPaste, sync, onSync }: { busy: boolean; onPaste: () => void; onChoose: (directory: boolean) => void; sync?: SyncStatus; onSync: (button: HTMLButtonElement) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const searchText = useUiStore((s) => s.searchText);
   const setSearchText = useUiStore((s) => s.setSearchText);
@@ -82,7 +82,7 @@ export function TitleBar({ busy, onChoose, sync, onSync }: { busy: boolean; onCh
           <SyncIcon status={sync} />
           <span className="max-w-48 truncate">{progressLabel(sync) ?? syncLabel(sync)}</span>
         </Button>
-        <ImportButton disabled={busy} onChoose={onChoose} />
+        <ImportButton disabled={busy} onChoose={onChoose} onPaste={onPaste} />
       </div>
       {platform === "windows" && <WindowControls />}
     </header>

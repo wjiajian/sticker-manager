@@ -13,7 +13,9 @@ mod clipboard;
 mod commands;
 mod credentials;
 mod desktop;
+mod diagnostics;
 mod drag_icon;
+mod drop_policy;
 mod export;
 mod exports;
 mod geometry;
@@ -22,6 +24,8 @@ mod imports;
 mod jobs;
 mod location;
 #[cfg(target_os = "macos")]
+mod macos_drop;
+#[cfg(target_os = "macos")]
 mod menu;
 mod metered;
 mod panel;
@@ -29,6 +33,7 @@ mod portable;
 mod preview;
 mod settings;
 mod shortcut;
+mod staging;
 mod startup;
 mod sync;
 mod tray;
@@ -101,6 +106,17 @@ pub fn run() {
             eprintln!("启动时本地日志维护：{:?}", maintenance.elapsed());
             app.manage(Mutex::new(library));
             app.manage(imports::ImportState::default());
+            let staging = std::env::temp_dir()
+                .join(&app.config().identifier)
+                .join("staging");
+            app.manage(staging::StagingRoot(staging.clone()));
+            tauri::async_runtime::spawn_blocking(move || {
+                staging::sweep(
+                    &staging,
+                    std::time::SystemTime::now(),
+                    Duration::from_secs(86400),
+                )
+            });
             app.manage(updater::UpdateState::new(
                 app.package_info().version.to_string(),
             ));
@@ -165,6 +181,7 @@ pub fn run() {
             commands::set_sticker_name,
             commands::set_sticker_caption,
             commands::import_stickers,
+            clipboard::import_clipboard,
             commands::import_status,
             commands::cancel_import,
             commands::set_stickers_category,
@@ -413,8 +430,10 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     if let Err(error) = windows_drop::install_webview(&window) {
         eprintln!("主窗口拖放处理器安装失败：{error}");
     }
-    #[cfg(not(target_os = "windows"))]
-    let _ = window;
+    #[cfg(target_os = "macos")]
+    if let Err(error) = macos_drop::install(&window, macos_drop::Surface::Main) {
+        eprintln!("主窗口拖放处理器安装失败：{error}");
+    }
 
     Ok(())
 }
