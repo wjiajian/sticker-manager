@@ -936,14 +936,14 @@ impl IDropTarget_Impl for WebviewDropTarget_Impl {
                 );
             }
         } else if mode == Mode::Native {
-            self.leave();
-            staging::emit(&self.app, ExternalDrop::Receiving);
-            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let finish_receiving = |app: &AppHandle, done: &std::sync::atomic::AtomicBool| {
+            fn finish_receiving(app: &tauri::AppHandle, done: &std::sync::atomic::AtomicBool) {
                 if !done.swap(true, std::sync::atomic::Ordering::AcqRel) {
                     staging::emit(app, ExternalDrop::ReceivingDone);
                 }
-            };
+            }
+            self.leave();
+            staging::emit(&self.app, ExternalDrop::Receiving);
+            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let result = data
                 .as_ref()
                 .ok_or_else(|| "拖入数据为空".to_string())
